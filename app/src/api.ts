@@ -19,6 +19,8 @@ export type Contact = {
   request: boolean;
   /** Messages from them not read yet. */
   unread: number;
+  /** A ratchet session runs both ways, so messages have forward secrecy. */
+  secure: boolean;
 };
 
 export type Message = {
@@ -152,7 +154,7 @@ function previewApi(): Api {
   let profile: Profile | null = null;
   let settings: Settings = { readReceipts: true };
   let nextId = 10;
-  const contact = (id: number, name: string, fingerprint: string, request = false): Contact => ({
+  const contact = (id: number, name: string, fingerprint: string, request = false, secure = false): Contact => ({
     id,
     name,
     fingerprint,
@@ -160,9 +162,10 @@ function previewApi(): Api {
     lastAt: null,
     request,
     unread: 0,
+    secure,
   });
   const contacts: Contact[] = [
-    contact(1, "Deniz", "7jgi 54zm 2zkd yent vzen s3pg lq"),
+    contact(1, "Deniz", "7jgi 54zm 2zkd yent vzen s3pg lq", false, true),
     contact(2, "Ayşe", "gp6m vxkt dnvv lqmw ewpx qfox be"),
     contact(3, "Mehmet", "fwtj 6jv4 jq4d zgfb o2vz bv72 kq", true),
   ];

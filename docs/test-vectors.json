@@ -74,5 +74,26 @@
     "k_ack": "4553e5597f1aec8e7393600487dc3dd1c29ac0cc3e9f850ff30fd5e0bcfe198e",
     "k_enc": "d3539ad8eea39402784ed926a15edcdc96f298cd3c4dc9c07f5db9de6639a9d5",
     "k_tag": "867c58274fffa4e9589f9f8612ba15c80265a0adfad09563f59dbc02afd8ecfb"
+  },
+  "ratchet": {
+    "description": "Alice's first ratchet message starts the session; Bob's reply is the first on his own chain.",
+    "first": {
+      "bundle": "00086ab5300000e257d36c0d5e1e2d8661b1ca5ae3ea89898989898989898989898989898989898989898989898920971e2131398671eb3af3e0fbcb8dfd012195846c14b2320319cacbfda0b520b2f7b12a3c548b9405f48f83d1a7f5c96f8f162ec1dd3a46eea4547ef59b37ade21a943ee359ed49aca408b18d124c548979ab24da",
+      "created_at": 1790000000,
+      "expires_at": 1790259200,
+      "hop_limit": 8,
+      "nonce": "898989898989898989898989898989898989898989898989",
+      "ratchet_secret": "8888888888888888888888888888888888888888888888888888888888888888",
+      "text": "Oturumu ben başlatıyorum."
+    },
+    "reply": {
+      "bundle": "00086ab530005898ac9c597cd6919343157d1a919b919a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a4cb73bb1caa916cb4273bb3cb2ec29ef35b897f08d10dae36d918cf490117463a55a0c5a114f545bba161fe79200e31629361364dc8abb21112b04148aeaf3547f5d19a30a7c74f0a725cf01165e9cc819142d9738942197",
+      "created_at": 1790000060,
+      "expires_at": 1790259200,
+      "hop_limit": 8,
+      "nonce": "9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a",
+      "ratchet_secret": "9999999999999999999999999999999999999999999999999999999999999999",
+      "text": "Aldım, şimdi ben yazıyorum."
+    }
   }
 }

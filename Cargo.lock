@@ -2318,6 +2318,7 @@ dependencies = [
 name = "kervan-proto"
 version = "0.0.1"
 dependencies = [
+ "chacha20 0.9.1",
  "chacha20poly1305",
  "data-encoding",
  "ed25519-dalek",

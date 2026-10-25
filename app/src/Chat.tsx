@@ -65,6 +65,14 @@ export function Chat({ contact, messages, onSend, onAccept, onDecline }: Props) 
         <span className="fingerprint" title={t.compareFingerprint}>
           {contact.fingerprint}
         </span>
+        {!contact.request && (
+          <span
+            className={contact.secure ? "secrecy on" : "secrecy"}
+            title={contact.secure ? t.secureHint : t.securePendingHint}
+          >
+            {contact.secure ? t.secure : t.securePending}
+          </span>
+        )}
       </header>
 
       <ol className="messages" ref={list}>

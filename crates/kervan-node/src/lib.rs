@@ -46,6 +46,8 @@ pub struct ContactView {
     pub request: bool,
     /// Messages from them we have not read.
     pub unread: usize,
+    /// Whether a ratchet session runs both ways (§5.6): forward secrecy.
+    pub secure: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -113,7 +115,7 @@ pub enum Event {
         contact_id: i64,
         message_ids: Vec<i64>,
     },
-    /// A contact changed their name.
+    /// A contact changed their name, or forward secrecy started with them.
     #[serde(rename_all = "camelCase")]
     ContactChanged { contact: ContactView },
     /// Someone who has our card wrote to us for the first time.
@@ -354,6 +356,8 @@ impl Shared {
             self.lan.broadcast(&frame.to_bytes(), except);
         }
         self.internet.post_handled(&handled);
+        let own = self.engine().take_own();
+        self.send_own(&own);
         if handled
             .events
             .iter()

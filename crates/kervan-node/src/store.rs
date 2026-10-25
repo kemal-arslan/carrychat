@@ -4,6 +4,7 @@ use std::path::Path;
 
 use kervan_proto::bundle::{Bundle, BundleId, Tombstone};
 use kervan_proto::identity::ContactCard;
+use kervan_proto::ratchet::SkippedKey;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::{MessageView, Result};
@@ -59,7 +60,22 @@ const MIGRATIONS: &[&str] = &[
      CREATE TABLE blocked (dh_key BLOB PRIMARY KEY);",
     // Read receipts: when we read an incoming message, or they read ours.
     "ALTER TABLE messages ADD COLUMN read_at INTEGER;",
+    // Ratchet sessions (§5.6) and the keys of messages that have not arrived.
+    "CREATE TABLE sessions (contact_id INTEGER PRIMARY KEY, state BLOB NOT NULL);
+     CREATE TABLE skipped_keys (
+         contact_id INTEGER NOT NULL,
+         ratchet BLOB NOT NULL,
+         n INTEGER NOT NULL,
+         key BLOB NOT NULL,
+         stored_at INTEGER NOT NULL,
+         PRIMARY KEY (contact_id, ratchet, n)
+     );",
 ];
+
+/// Skipped keys kept per contact, at most; the oldest go first.
+const MAX_SKIPPED_KEYS: usize = 2000;
+/// How long a skipped key is kept: a bundle's longest life and a day.
+const SKIPPED_KEY_LIFETIME: u32 = 8 * 86_400;
 
 pub struct StoredContact {
     pub id: i64,
@@ -85,6 +101,8 @@ impl Store {
 
     fn init(conn: Connection) -> Result<Self> {
         conn.pragma_update(None, "foreign_keys", "ON")?;
+        // Deleted keys must not linger in free pages (§5.6).
+        conn.pragma_update(None, "secure_delete", "ON")?;
         conn.execute_batch(SCHEMA)?;
         let applied: usize = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         for (index, migration) in MIGRATIONS.iter().enumerate().skip(applied) {
@@ -169,8 +187,79 @@ impl Store {
         Ok(())
     }
 
-    /// Deletes a contact with its messages.
+    pub fn session(&self, contact_id: i64) -> Result<Option<Vec<u8>>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT state FROM sessions WHERE contact_id = ?",
+                [contact_id],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    pub fn save_session(&self, contact_id: i64, state: &[u8]) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO sessions (contact_id, state) VALUES (?, ?)
+             ON CONFLICT (contact_id) DO UPDATE SET state = excluded.state",
+            params![contact_id, state],
+        )?;
+        Ok(())
+    }
+
+    pub fn skipped_key(
+        &self,
+        contact_id: i64,
+        ratchet: &[u8; 32],
+        n: u16,
+    ) -> Result<Option<[u8; 32]>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT key FROM skipped_keys WHERE contact_id = ? AND ratchet = ? AND n = ?",
+                params![contact_id, ratchet, n],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    pub fn delete_skipped_key(&self, contact_id: i64, ratchet: &[u8; 32], n: u16) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM skipped_keys WHERE contact_id = ? AND ratchet = ? AND n = ?",
+            params![contact_id, ratchet, n],
+        )?;
+        Ok(())
+    }
+
+    pub fn store_skipped_keys(&self, contact_id: i64, keys: &[SkippedKey], now: u32) -> Result<()> {
+        if keys.is_empty() {
+            return Ok(());
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        for key in keys {
+            tx.execute(
+                "INSERT OR REPLACE INTO skipped_keys (contact_id, ratchet, n, key, stored_at)
+                 VALUES (?, ?, ?, ?, ?)",
+                params![contact_id, key.ratchet, key.n, key.key, now],
+            )?;
+        }
+        tx.execute(
+            "DELETE FROM skipped_keys WHERE contact_id = ?1 AND rowid NOT IN (
+                 SELECT rowid FROM skipped_keys WHERE contact_id = ?1
+                 ORDER BY stored_at DESC, n DESC LIMIT ?2
+             )",
+            params![contact_id, MAX_SKIPPED_KEYS],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Deletes a contact with its messages and session.
     pub fn delete_contact(&self, id: i64) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM skipped_keys WHERE contact_id = ?", [id])?;
+        self.conn
+            .execute("DELETE FROM sessions WHERE contact_id = ?", [id])?;
         self.conn
             .execute("DELETE FROM messages WHERE contact_id = ?", [id])?;
         self.conn
@@ -469,6 +558,10 @@ impl Store {
             .execute("DELETE FROM bundles WHERE expires_at <= ?", [now])?;
         self.conn
             .execute("DELETE FROM tombstones WHERE keep_until <= ?", [now])?;
+        self.conn.execute(
+            "DELETE FROM skipped_keys WHERE stored_at <= ?",
+            [now.saturating_sub(SKIPPED_KEY_LIFETIME)],
+        )?;
         Ok(())
     }
 
@@ -546,5 +639,38 @@ mod tests {
         // Opening again applies nothing twice.
         Store::open(&path).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn skipped_keys_are_capped_expire_and_go_with_the_contact() {
+        let store = Store::open_in_memory().unwrap();
+        let card = Identity::generate("Deniz").unwrap().card();
+        let id = store.insert_contact(&card, 1, false).unwrap();
+        let ratchet = [7; 32];
+        let keys: Vec<SkippedKey> = (0..=MAX_SKIPPED_KEYS as u16)
+            .map(|n| SkippedKey {
+                ratchet,
+                n,
+                key: [n as u8; 32],
+            })
+            .collect();
+        store.store_skipped_keys(id, &keys, 100).unwrap();
+        // One over the cap: the oldest goes.
+        assert_eq!(store.skipped_key(id, &ratchet, 0).unwrap(), None);
+        assert_eq!(store.skipped_key(id, &ratchet, 5).unwrap(), Some([5; 32]));
+        store.delete_skipped_key(id, &ratchet, 5).unwrap();
+        assert_eq!(store.skipped_key(id, &ratchet, 5).unwrap(), None);
+
+        store.prune(100 + SKIPPED_KEY_LIFETIME - 1).unwrap();
+        assert!(store.skipped_key(id, &ratchet, 6).unwrap().is_some());
+        store.prune(100 + SKIPPED_KEY_LIFETIME).unwrap();
+        assert_eq!(store.skipped_key(id, &ratchet, 6).unwrap(), None);
+
+        store.store_skipped_keys(id, &keys[..1], 200).unwrap();
+        store.save_session(id, &[1, 2, 3]).unwrap();
+        assert_eq!(store.session(id).unwrap(), Some(vec![1, 2, 3]));
+        store.delete_contact(id).unwrap();
+        assert_eq!(store.session(id).unwrap(), None);
+        assert_eq!(store.skipped_key(id, &ratchet, 0).unwrap(), None);
     }
 }

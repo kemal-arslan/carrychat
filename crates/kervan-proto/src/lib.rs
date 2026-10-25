@@ -11,6 +11,7 @@ pub mod frame;
 pub mod identity;
 pub mod intro;
 pub mod pair;
+pub mod ratchet;
 
 pub use error::{Error, Result};
 

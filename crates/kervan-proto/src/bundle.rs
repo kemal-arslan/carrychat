@@ -23,6 +23,7 @@ const BUNDLE_ID_LABEL: &[u8] = b"kervan/v0/ack";
 const KIND_TEXT: u8 = 0x01;
 const KIND_READ: u8 = 0x03;
 const KIND_CARD: u8 = 0x04;
+const KIND_SESSION: u8 = 0x05;
 /// Bundle ids in one read receipt, at most.
 pub const MAX_READ_IDS: usize = 64;
 
@@ -101,6 +102,8 @@ pub enum Kind {
     Read,
     /// The sender's contact card, after they changed their name.
     Card,
+    /// Starts a ratchet session; carries nothing to show (§5.6).
+    Session,
     /// A kind this version does not know. The body is kept but not shown.
     Unknown(u8),
 }
@@ -111,6 +114,7 @@ impl Kind {
             Kind::Text => KIND_TEXT,
             Kind::Read => KIND_READ,
             Kind::Card => KIND_CARD,
+            Kind::Session => KIND_SESSION,
             Kind::Unknown(byte) => byte,
         }
     }
@@ -120,6 +124,7 @@ impl Kind {
             KIND_TEXT => Kind::Text,
             KIND_READ => Kind::Read,
             KIND_CARD => Kind::Card,
+            KIND_SESSION => Kind::Session,
             other => Kind::Unknown(other),
         }
     }
@@ -169,7 +174,16 @@ impl Message {
         }
     }
 
-    fn to_bytes(&self) -> Vec<u8> {
+    /// Starts a ratchet session (§5.6).
+    pub fn session(created_at: u32) -> Self {
+        Self {
+            kind: Kind::Session,
+            created_at,
+            body: Vec::new(),
+        }
+    }
+
+    pub(crate) fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(MESSAGE_HEADER_LEN + self.body.len());
         bytes.push(self.kind.to_byte());
         bytes.extend_from_slice(&self.created_at.to_be_bytes());
@@ -177,7 +191,7 @@ impl Message {
         bytes
     }
 
-    fn from_bytes(bytes: &[u8]) -> Result<Self> {
+    pub(crate) fn from_bytes(bytes: &[u8]) -> Result<Self> {
         if bytes.len() < MESSAGE_HEADER_LEN {
             return Err(Error::Truncated);
         }
@@ -251,9 +265,18 @@ pub fn open(keys: &PairKeys, me: &PublicKey, bundle: &Bundle) -> Result<Message>
         )
         .map_err(|_| Error::Decrypt)?;
     let message = Message::from_bytes(&plaintext)?;
+    check_opened(keys, me, bundle, &message)?;
+    Ok(message)
+}
 
-    // The header is authenticated, but a faulty sender could still have
-    // written fields that disagree with the content.
+/// The header is authenticated, but a faulty sender could still have written
+/// fields that disagree with the content.
+pub(crate) fn check_opened(
+    keys: &PairKeys,
+    me: &PublicKey,
+    bundle: &Bundle,
+    message: &Message,
+) -> Result<()> {
     if keys.recipient_tag(me, day_of(message.created_at)) != bundle.tag {
         return Err(Error::Invalid("recipient tag"));
     }
@@ -261,7 +284,7 @@ pub fn open(keys: &PairKeys, me: &PublicKey, bundle: &Bundle) -> Result<Message>
     if BundleId::from_ack_secret(&keys.ack_secret(&bundle.nonce)) != bundle.id {
         return Err(Error::Invalid("bundle id"));
     }
-    Ok(message)
+    Ok(())
 }
 
 /// Proof that a bundle was delivered (§6).

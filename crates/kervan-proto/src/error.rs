@@ -14,6 +14,8 @@ pub enum Error {
     Decrypt,
     #[error("peer key is not contributory")]
     WeakKey,
+    #[error("no ratchet session to send with yet")]
+    NoSession,
 }
 
 pub type Result<T> = core::result::Result<T, Error>;

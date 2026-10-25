@@ -134,7 +134,13 @@ async fn run(cli: Cli) -> AnyResult {
         }
         Command::Contacts => {
             for contact in node.contacts()? {
-                let request = if contact.request { "  (request)" } else { "" };
+                let request = if contact.request {
+                    "  (request)"
+                } else if contact.secure {
+                    "  (forward secrecy)"
+                } else {
+                    ""
+                };
                 println!(
                     "{:>3}  {:<32}  {}{request}",
                     contact.id, contact.name, contact.fingerprint

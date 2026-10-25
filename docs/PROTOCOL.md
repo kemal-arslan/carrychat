@@ -58,9 +58,11 @@ prk      = HKDF-Extract(salt = "kervan/v0/pair", ikm = shared)
 K_enc    = HKDF-Expand(prk, "enc" || P1 || P2, 32)
 K_tag    = HKDF-Expand(prk, "tag" || P1 || P2, 32)
 K_ack    = HKDF-Expand(prk, "ack" || P1 || P2, 32)
+K_root   = HKDF-Expand(prk, "root" || P1 || P2, 32)
+K_hdr    = HKDF-Expand(prk, "hdr" || P1 || P2, 32)
 ```
 
-Both contacts derive the same three keys. Nobody else can.
+Both contacts derive the same keys. Nobody else can. `K_root` and `K_hdr` are used by ratchet sessions (§5.6).
 
 ### 4.1 Recipient tag
 
@@ -117,6 +119,7 @@ The hop limit is left out of the associated data so relays can decrement it. Eve
 | `0x02` introduction | Only inside introductions (§5.5) |
 | `0x03` read | Up to 64 bundle ids (8 bytes each) of the recipient's bundles that the sender has read. Optional: a user may turn read receipts off. |
 | `0x04` card | The sender's contact card (§3.1), after a name change. The receiver accepts it only if both keys equal those of the card it has. |
+| `0x05` session | Empty. Starts a ratchet session (§5.6) and is not shown. |
 
 All other values are reserved. A receiver that opens a bundle of an unknown kind ignores the body but still emits a tombstone, so the bundle stops circulating.
 
@@ -129,7 +132,7 @@ All other values are reserved. A receiver that opens a bundle of an unknown kind
 
 ### 5.4 Size budget
 
-Overhead is 46 (header) + 5 (plaintext header) + 16 (Poly1305 tag) = **67 bytes**. In one 233-byte Meshtastic packet with its 1-byte frame type (§7), the body can be up to **165 bytes**: 165 ASCII characters, fewer for text with letters such as ç, ğ, ı, ö, ş and ü, which take two bytes each in UTF-8.
+Overhead is 46 (header) + 5 (plaintext header) + 16 (Poly1305 tag) = **67 bytes**. In one 233-byte Meshtastic packet with its 1-byte frame type (§7), the body can be up to **165 bytes**: 165 ASCII characters, fewer for text with letters such as ç, ğ, ı, ö, ş and ü, which take two bytes each in UTF-8. A ratchet message (§5.6) adds its 37-byte header: 104 bytes of overhead and a body of up to 128 bytes.
 
 ### 5.5 Introductions
 
@@ -158,6 +161,35 @@ ciphertext = e_pk || XChaCha20-Poly1305-Encrypt(K_enc, nonce, plaintext, aad)
 **Sending.** A node sends introductions to a contact until it knows the contact has its card: a tombstone for one of its bundles to that contact came back, or a bundle from that contact arrived. From then on it sends pair bundles.
 
 A short introduction takes two Meshtastic packets: its overhead is 164 bytes plus the card, which is 130 bytes plus the sender's name.
+
+### 5.6 Ratchet sessions
+
+Pair bundles sealed with `K_enc` (§5.1) have no forward secrecy: whoever later obtains a device's X25519 secret can open every recorded one. A ratchet session fixes that with the Double Ratchet (Signal), adapted to a network where bundles arrive days late, out of order, twice, or over several paths.
+
+**Roles.** Of two contacts, the one whose X25519 public key sorts first is the *initiator*, the other the *responder*. Only the initiator starts a session, so the two can never start two sessions at once. Both begin from the same state: root key `K_root`, own ratchet key pair = own X25519 key pair, peer ratchet key = the peer's X25519 key for the initiator and none for the responder, no chains.
+
+**Functions.**
+
+```
+KDF_RK(rk, dh) = HKDF-SHA256(salt = rk, ikm = dh, info = "kervan/v1/ratchet", 64)  → (rk', ck)
+KDF_CK(ck)     = (HMAC(ck, 0x02), HMAC(ck, 0x01))                                  → (ck', mk)
+```
+
+**Sending.** If the sender has no sending chain and is the initiator, it starts the session: a fresh ratchet key pair `DHs`, then `(RK, CKs) = KDF_RK(RK, X25519(DHs, DHr))`. Then `(CKs, mk) = KDF_CK(CKs)`, and the bundle is sealed as follows; `Ns` counts messages on the current sending chain and `PN` is the length of the previous one.
+
+```
+header     = 0x01 || DHs_public (32) || u16(PN) || u16(Ns)               37 bytes
+header_ct  = header XOR XChaCha20(K_hdr, nonce)[0..37]                    keystream from block 0
+ciphertext = header_ct || XChaCha20-Poly1305-Encrypt(mk, nonce, plaintext, aad || header_ct)
+```
+
+`aad` is the one of §5.1; the outer bundle, its tag, bundle id and tombstone are exactly as in §5. The header has no tag of its own: changing it changes the message key, and the AEAD fails. Encrypting the header keeps ratchet keys, which would otherwise link a conversation's bundles, from anyone without the pair keys. A responder with no sending chain yet seals with `K_enc` as in §5.1.
+
+**Receiving.** A receiver decrypts the first 37 bytes with the keystream; if the first byte is `0x01`, it opens the bundle as a ratchet message, otherwise as in §5.1. For a ratchet message it uses a stored skipped key for `(DHs_public, Ns)` if it has one. Otherwise, if `DHs_public` differs from its peer ratchet key, it stores the keys of the rest of the current receiving chain up to `PN` as skipped keys, then takes a DH ratchet step: `PN = Ns`, `Ns = Nr = 0`, `DHr = DHs_public`, `(RK, CKr) = KDF_RK(RK, X25519(own, DHr))`, a fresh own ratchet key pair, `(RK, CKs) = KDF_RK(RK, X25519(own, DHr))`. It then stores skipped keys up to `Ns` (at most 1000 ahead) and derives the message key. Every change is kept only if the AEAD succeeds.
+
+**Starting.** When the initiator opens a `K_enc` bundle from its contact and has no sending chain, it replies with a session message (kind `0x05`), so the responder can switch to ratchet messages.
+
+**Hygiene.** Message keys are deleted once used. Skipped keys are deleted once used and after 8 days. The store overwrites deleted data (SQLite `secure_delete`). A chain allows 65535 messages; a sender that reaches that without hearing back falls back to `K_enc`.
 
 ## 6. Tombstone
 
@@ -269,7 +301,7 @@ Implemented in `crates/kervan-node/src/file.rs`, with the extension `.kervan`. A
 **v0 does not provide:**
 
 - **Hidden introductions.** An introduction cannot be linked to its sender or recipient, but its size sets it apart from most pair bundles.
-- **Forward secrecy.** Pair keys come from long-term keys, and introductions are sealed to the recipient's long-term key. Whoever obtains a device's X25519 secret can decrypt all past and future traffic with every contact of that device that they have recorded, and can impersonate any of those contacts to it. A ratchet over live links is planned.
+- **Forward secrecy for every bundle.** Ratchet messages (§5.6) have it: a key taken from a device later opens neither the recorded messages it already received nor, once a reply has gone each way, the ones after. Introductions, session-less `K_enc` bundles and bundles from before version 1 do not, and whoever obtains a device's X25519 secret can impersonate any of its contacts to it. Forward secrecy protects recorded traffic, not the history kept on the device.
 - **Radio metadata privacy.** A LoRa transmission reveals the transmitting Meshtastic node and, to direction-finding equipment, its location. Bundle sizes and timing are visible, because v0 does not pad.
 - **Replay protection on the network.** A recorded bundle can be injected again until it expires. Receivers drop duplicates, but replays still spend airtime.
 - **Fragment integrity at relays.** Relays cannot authenticate fragments, so a forged fragment spoils reassembly of that bundle until the timeout.
@@ -292,7 +324,7 @@ Implemented in `crates/kervan-node/src/file.rs`, with the extension `.kervan`. A
 | Protocol version | `0` |
 | Longest name | 32 bytes |
 | Longest bundle | 4096 bytes |
-| Bundle overhead | 67 bytes |
+| Bundle overhead | 67 bytes, 104 with a ratchet header |
 | Introduction overhead | 164 bytes plus the card |
 | Default lifetime | 259200 s (3 days) |
 | Longest lifetime | 604800 s (7 days) |

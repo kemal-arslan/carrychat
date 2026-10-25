@@ -12,7 +12,9 @@ use kervan_proto::frame::{frames_for, Frame, MESHTASTIC_MTU};
 use kervan_proto::identity::Identity;
 use kervan_proto::intro::{mailbox_tag, seal_introduction_with};
 use kervan_proto::pair::PairKeys;
+use kervan_proto::ratchet::{Role, Session};
 use kervan_proto::{day_of, DAY_SECS};
+use rand_core::{CryptoRng, RngCore};
 use serde_json::{json, Value};
 
 const CREATED_AT: u32 = 1_790_000_000;
@@ -68,6 +70,7 @@ pub fn vectors() -> Value {
         "day": day_of(CREATED_AT),
         "messages": messages,
         "introduction": introduction(&alice, &bob),
+        "ratchet": ratchet(&alice, &bob),
     })
 }
 
@@ -122,5 +125,108 @@ fn introduction(alice: &Identity, bob: &Identity) -> Value {
         "bundle": HEXLOWER.encode(&bundle.to_bytes()),
         "meshtastic_frames": frames,
         "mailbox_tag": HEXLOWER.encode(&mailbox_tag(&bob.dh_public(), day_of(CREATED_AT))),
+    })
+}
+
+/// Hands out the same 32 bytes every time: the ratchet keys of the vectors.
+struct Fixed([u8; 32]);
+
+impl RngCore for Fixed {
+    fn next_u32(&mut self) -> u32 {
+        u32::from_le_bytes(self.0[..4].try_into().unwrap())
+    }
+    fn next_u64(&mut self) -> u64 {
+        u64::from_le_bytes(self.0[..8].try_into().unwrap())
+    }
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        dest.copy_from_slice(&self.0[..dest.len()]);
+    }
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand_core::Error> {
+        self.fill_bytes(dest);
+        Ok(())
+    }
+}
+
+impl CryptoRng for Fixed {}
+
+/// Alice, the initiator, starts a session; Bob answers on his first chain (§5.6).
+fn ratchet(alice: &Identity, bob: &Identity) -> Value {
+    let alice_keys = PairKeys::derive(alice, &bob.dh_public()).unwrap();
+    let bob_keys = PairKeys::derive(bob, &alice.dh_public()).unwrap();
+    let mut alice_session = Session::new(alice, &bob.dh_public(), &alice_keys);
+    let mut bob_session = Session::new(bob, &alice.dh_public(), &bob_keys);
+    assert_eq!(alice_session.role(), Role::Initiator);
+    let expires_at = CREATED_AT + 3 * DAY_SECS;
+
+    let (alice_ratchet, first_nonce) = ([0x88; 32], [0x89; 24]);
+    let first_text = "Oturumu ben başlatıyorum.";
+    let first = alice_session
+        .seal_with_nonce(
+            &alice_keys,
+            &bob.dh_public(),
+            &Message::text(first_text, CREATED_AT),
+            expires_at,
+            8,
+            first_nonce,
+            &mut Fixed(alice_ratchet),
+        )
+        .unwrap();
+
+    let bob_ratchet = [0x99; 32];
+    let opened = bob_session
+        .open(
+            &bob_keys,
+            &bob.dh_public(),
+            &first,
+            |_, _| None,
+            &mut Fixed(bob_ratchet),
+        )
+        .unwrap();
+    assert_eq!(opened.message.body, first_text.as_bytes());
+    bob_session = opened.session;
+
+    let (second_nonce, second_text) = ([0x9a; 24], "Aldım, şimdi ben yazıyorum.");
+    let second = bob_session
+        .seal_with_nonce(
+            &bob_keys,
+            &alice.dh_public(),
+            &Message::text(second_text, CREATED_AT + 60),
+            expires_at,
+            8,
+            second_nonce,
+            &mut Fixed([0; 32]),
+        )
+        .unwrap();
+    let back = alice_session
+        .open(
+            &alice_keys,
+            &alice.dh_public(),
+            &second,
+            |_, _| None,
+            &mut Fixed([0x77; 32]),
+        )
+        .unwrap();
+    assert_eq!(back.message.body, second_text.as_bytes());
+
+    json!({
+        "description": "Alice's first ratchet message starts the session; Bob's reply is the first on his own chain.",
+        "first": {
+            "text": first_text,
+            "created_at": CREATED_AT,
+            "expires_at": expires_at,
+            "hop_limit": 8,
+            "ratchet_secret": HEXLOWER.encode(&alice_ratchet),
+            "nonce": HEXLOWER.encode(&first_nonce),
+            "bundle": HEXLOWER.encode(&first.to_bytes()),
+        },
+        "reply": {
+            "text": second_text,
+            "created_at": CREATED_AT + 60,
+            "expires_at": expires_at,
+            "hop_limit": 8,
+            "ratchet_secret": HEXLOWER.encode(&bob_ratchet),
+            "nonce": HEXLOWER.encode(&second_nonce),
+            "bundle": HEXLOWER.encode(&second.to_bytes()),
+        },
     })
 }

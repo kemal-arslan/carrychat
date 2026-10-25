@@ -36,6 +36,12 @@ const en = {
   connected: (address: string) => `Connected to ${address}.`,
 
   compareFingerprint: "Compare this with what they see under My card",
+  secure: "Forward secrecy",
+  secureHint:
+    "Keys change as you write back and forth. A key taken from a device later opens none of the messages before it.",
+  securePending: "Forward secrecy starts with a reply",
+  securePendingHint:
+    "Until you have both written once, messages here use your pair key. A key taken from a device later could open them.",
   chatEmpty: (name: string) =>
     `Nothing here yet. What you write waits on this computer until a path to ${name} appears: another Kervan computer on the network, the internet, or a file someone carries.`,
   waitingForPath: "Waiting for a path",
@@ -148,6 +154,12 @@ const tr: Strings = {
   connected: (address) => `${address} adresine bağlanıldı.`,
 
   compareFingerprint: "Bunu onun Kartım ekranındakiyle karşılaştır",
+  secure: "İleri gizlilik",
+  secureHint:
+    "Karşılıklı yazdıkça anahtarlar değişir. Sonradan bir cihazdan alınan anahtar, önceki mesajların hiçbirini açmaz.",
+  securePending: "İleri gizlilik ilk cevapla başlar",
+  securePendingHint:
+    "İkiniz de birer kez yazana kadar mesajlar ortak anahtarınızla şifrelenir. Sonradan bir cihazdan alınan anahtar bunları açabilir.",
   chatEmpty: (name) =>
     `Henüz bir şey yok. Yazdıkların ${name} kişisine bir yol bulunana kadar bu bilgisayarda bekler: ağdaki başka bir Kervan bilgisayarı, internet ya da birinin taşıdığı bir dosya.`,
   waitingForPath: "Yol bekleniyor",

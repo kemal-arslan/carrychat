@@ -27,6 +27,8 @@ pub struct PairKeys {
     enc: [u8; 32],
     tag: [u8; 32],
     ack: [u8; 32],
+    root: [u8; 32],
+    hdr: [u8; 32],
 }
 
 impl PairKeys {
@@ -58,6 +60,8 @@ impl PairKeys {
             enc: expand(b"enc"),
             tag: expand(b"tag"),
             ack: expand(b"ack"),
+            root: expand(b"root"),
+            hdr: expand(b"hdr"),
         })
     }
 
@@ -76,6 +80,14 @@ impl PairKeys {
 
     pub(crate) fn enc_key(&self) -> &[u8; 32] {
         &self.enc
+    }
+
+    pub(crate) fn root_key(&self) -> &[u8; 32] {
+        &self.root
+    }
+
+    pub(crate) fn header_key(&self) -> &[u8; 32] {
+        &self.hdr
     }
 
     /// `K_enc`, `K_tag` and `K_ack`, for test vectors and debugging.

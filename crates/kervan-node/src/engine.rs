@@ -11,7 +11,9 @@ use kervan_proto::frame::{Frame, Reassembler};
 use kervan_proto::identity::{ContactCard, Identity};
 use kervan_proto::intro::{mailbox_tag, open_introduction, seal_introduction};
 use kervan_proto::pair::{PairKeys, RecipientTag, TAG_WINDOW_FUTURE_DAYS, TAG_WINDOW_PAST_DAYS};
+use kervan_proto::ratchet::{Opened, Role, Session};
 use kervan_proto::{day_of, DAY_SECS};
+use rand_core::OsRng;
 
 use crate::store::Store;
 use crate::{ContactView, Error, Event, MessageView, Profile, Result, Settings};
@@ -61,6 +63,7 @@ struct Contact {
     request: bool,
     /// Has our card, so we can send pair bundles instead of introductions.
     introduced: bool,
+    session: Session,
 }
 
 pub struct Engine {
@@ -71,6 +74,8 @@ pub struct Engine {
     tags: HashMap<RecipientTag, usize>,
     tags_day: Option<u32>,
     reassembler: Reassembler,
+    /// Own bundles made while handling frames, such as session starts.
+    own_out: Vec<(Frame, RecipientTag)>,
 }
 
 impl Engine {
@@ -106,12 +111,17 @@ impl Engine {
         let mut contacts = Vec::new();
         for stored in store.contacts()? {
             let keys = PairKeys::derive(&identity, stored.card.dh_key())?;
+            let session = match store.session(stored.id)? {
+                Some(state) => Session::from_bytes(&state)?,
+                None => Session::new(&identity, stored.card.dh_key(), &keys),
+            };
             contacts.push(Contact {
                 id: stored.id,
                 card: stored.card,
                 keys,
                 request: stored.request,
                 introduced: stored.introduced,
+                session,
             });
         }
         Ok(Self {
@@ -121,6 +131,7 @@ impl Engine {
             tags: HashMap::new(),
             tags_day: None,
             reassembler: Reassembler::default(),
+            own_out: Vec::new(),
         })
     }
 
@@ -151,12 +162,14 @@ impl Engine {
             existing.request = false;
         } else {
             let keys = PairKeys::derive(&self.identity, card.dh_key())?;
+            let session = Session::new(&self.identity, card.dh_key(), &keys);
             self.contacts.push(Contact {
                 id,
                 card,
                 keys,
                 request: false,
                 introduced: false,
+                session,
             });
         }
         self.tags_day = None;
@@ -209,20 +222,15 @@ impl Engine {
         if text.is_empty() {
             return Err(Error::Invalid("message is empty"));
         }
-        let contact = &self.contacts[self.contact_index(contact_id)?];
+        let index = self.contact_index(contact_id)?;
+        let contact = &self.contacts[index];
         if contact.request {
             return Err(Error::Invalid("accept the request before you reply"));
         }
         let expires_at = now + DEFAULT_TTL_SECS;
         // Until the contact has our card, every message carries it (§5.5).
         let bundle = if contact.introduced {
-            seal(
-                &contact.keys,
-                contact.card.dh_key(),
-                &Message::text(text, now),
-                expires_at,
-                DEFAULT_HOP_LIMIT,
-            )?
+            self.seal_pair(index, &Message::text(text, now), now)?
         } else {
             seal_introduction(
                 &self.identity,
@@ -415,13 +423,7 @@ impl Engine {
         }
         let mut receipts = Vec::new();
         for chunk in ids.chunks(MAX_READ_IDS) {
-            let bundle = seal(
-                &contact.keys,
-                contact.card.dh_key(),
-                &Message::read(chunk, now),
-                now + DEFAULT_TTL_SECS,
-                DEFAULT_HOP_LIMIT,
-            )?;
+            let bundle = self.seal_pair(index, &Message::read(chunk, now), now)?;
             self.store.insert_bundle(&bundle, true, now)?;
             receipts.extend(forwarded(&bundle).map(|frame| (frame, bundle.tag)));
         }
@@ -444,18 +446,11 @@ impl Engine {
         self.store.set_meta("name", name.as_bytes())?;
         let card = self.identity.card();
         let mut updates = Vec::new();
-        for contact in self
-            .contacts
-            .iter()
-            .filter(|contact| !contact.request && contact.introduced)
-        {
-            let bundle = seal(
-                &contact.keys,
-                contact.card.dh_key(),
-                &Message::card(&card, now),
-                now + DEFAULT_TTL_SECS,
-                DEFAULT_HOP_LIMIT,
-            )?;
+        let targets: Vec<usize> = (0..self.contacts.len())
+            .filter(|&index| !self.contacts[index].request && self.contacts[index].introduced)
+            .collect();
+        for index in targets {
+            let bundle = self.seal_pair(index, &Message::card(&card, now), now)?;
             self.store.insert_bundle(&bundle, true, now)?;
             updates.extend(forwarded(&bundle).map(|frame| (frame, bundle.tag)));
         }
@@ -507,11 +502,8 @@ impl Engine {
     /// Opens a bundle for us and records it. Returns `None` if it does not
     /// open, in which case it is carried like anybody else's (§5.3).
     fn deliver(&mut self, index: usize, bundle: &Bundle, now: u32) -> Result<Option<Handled>> {
-        let Ok(message) = open(
-            &self.contacts[index].keys,
-            &self.identity.dh_public(),
-            bundle,
-        ) else {
+        let was_secure = self.contacts[index].session.is_established();
+        let Some((message, with_pair_key)) = self.open_pair(index, bundle, now)? else {
             return Ok(None);
         };
         self.mark_introduced(index)?;
@@ -561,7 +553,28 @@ impl Engine {
                     }
                 }
             }
-            Kind::Unknown(_) => {}
+            Kind::Session | Kind::Unknown(_) => {}
+        }
+        if self.contacts[index].session.is_established() != was_secure
+            && !events
+                .iter()
+                .any(|event| matches!(event, Event::ContactChanged { .. }))
+        {
+            events.push(Event::ContactChanged {
+                contact: self.contact_view(contact_id)?,
+            });
+        }
+        // A contact that writes with the pair key waits for us to start (§5.6).
+        let contact = &self.contacts[index];
+        if with_pair_key
+            && !contact.request
+            && contact.session.role() == Role::Initiator
+            && !contact.session.started()
+        {
+            let start = self.seal_pair(index, &Message::session(now), now)?;
+            self.store.insert_bundle(&start, true, now)?;
+            self.own_out
+                .extend(forwarded(&start).map(|frame| (frame, start.tag)));
         }
         Ok(Some(Handled {
             outcome: Outcome::Received,
@@ -571,6 +584,82 @@ impl Engine {
             }],
             events,
         }))
+    }
+
+    /// Seals a message to a contact: in their ratchet session when there is
+    /// one, otherwise with the pair key (§5.6).
+    fn seal_pair(&mut self, index: usize, message: &Message, now: u32) -> Result<Bundle> {
+        let contact = &self.contacts[index];
+        let expires_at = now + DEFAULT_TTL_SECS;
+        let mut session = contact.session.clone();
+        match session.seal(
+            &contact.keys,
+            contact.card.dh_key(),
+            message,
+            expires_at,
+            DEFAULT_HOP_LIMIT,
+            &mut OsRng,
+        ) {
+            Ok(bundle) => {
+                self.store.save_session(contact.id, &session.to_bytes())?;
+                self.contacts[index].session = session;
+                Ok(bundle)
+            }
+            Err(kervan_proto::Error::NoSession) => Ok(seal(
+                &contact.keys,
+                contact.card.dh_key(),
+                message,
+                expires_at,
+                DEFAULT_HOP_LIMIT,
+            )?),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// Opens a contact's pair bundle: as a ratchet message, else with the pair
+    /// key. Also says whether it took the pair key.
+    fn open_pair(
+        &mut self,
+        index: usize,
+        bundle: &Bundle,
+        now: u32,
+    ) -> Result<Option<(Message, bool)>> {
+        let me = self.identity.dh_public();
+        let contact = &self.contacts[index];
+        let id = contact.id;
+        let store = &self.store;
+        let ratchet = contact.session.open(
+            &contact.keys,
+            &me,
+            bundle,
+            |ratchet, n| store.skipped_key(id, ratchet, n).ok().flatten(),
+            &mut OsRng,
+        );
+        match ratchet {
+            Ok(Opened {
+                message,
+                session,
+                skipped,
+                used,
+            }) => {
+                self.store.save_session(id, &session.to_bytes())?;
+                if let Some((ratchet, n)) = used {
+                    self.store.delete_skipped_key(id, &ratchet, n)?;
+                }
+                self.store.store_skipped_keys(id, &skipped, now)?;
+                self.contacts[index].session = session;
+                Ok(Some((message, false)))
+            }
+            Err(_) => Ok(open(&contact.keys, &me, bundle)
+                .ok()
+                .map(|message| (message, true))),
+        }
+    }
+
+    /// Own bundles made while handling frames, such as session starts, for
+    /// the node to send on every link.
+    pub fn take_own(&mut self) -> Vec<(Frame, RecipientTag)> {
+        std::mem::take(&mut self.own_out)
     }
 
     /// Opens a bundle as an introduction to us (§5.5). The sender becomes a
@@ -604,12 +693,14 @@ impl Engine {
             None => {
                 let id = self.store.insert_contact(&intro.card, now, true)?;
                 let keys = PairKeys::derive(&self.identity, sender)?;
+                let session = Session::new(&self.identity, sender, &keys);
                 self.contacts.push(Contact {
                     id,
                     card: intro.card.clone(),
                     keys,
                     request: true,
                     introduced: false,
+                    session,
                 });
                 self.tags_day = None;
                 self.contacts.len() - 1
@@ -770,6 +861,7 @@ impl Engine {
             last_at: last.map(|(_, at)| at),
             request: contact.request,
             unread: self.store.unread_count(contact_id)?,
+            secure: contact.session.is_established(),
         })
     }
 }
