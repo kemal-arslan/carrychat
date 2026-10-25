@@ -278,14 +278,12 @@ fn read_receipts_reach_the_sender_unless_turned_off() {
     assert!(bob.messages(alice_id).unwrap()[0].read);
     assert!(bob.mark_read(alice_id, NOW + 6).unwrap().is_empty());
 
+    // The receipt may also start forward secrecy at Alice's end (§5.6).
     let at_alice = alice.handle(receipts[0].0.clone(), NOW + 6).unwrap();
-    assert_eq!(
-        at_alice.events,
-        vec![Event::MessagesRead {
-            contact_id: bob_id,
-            message_ids: vec![sent.id]
-        }]
-    );
+    assert!(at_alice.events.contains(&Event::MessagesRead {
+        contact_id: bob_id,
+        message_ids: vec![sent.id]
+    }));
     assert!(alice.messages(bob_id).unwrap()[0].read);
 
     bob.set_read_receipts(false).unwrap();
