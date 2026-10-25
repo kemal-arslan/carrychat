@@ -327,6 +327,41 @@ impl Store {
         self.bundles_where("expires_at > ?1 AND hop_limit > 0", now)
     }
 
+    /// Own bundles still waiting for a receipt.
+    pub fn own_bundles(&self, now: u32) -> Result<Vec<Bundle>> {
+        self.bundles_where("expires_at > ?1 AND own = 1", now)
+    }
+
+    /// The contact and creation time of one of our own messages.
+    pub fn outgoing_message(&self, bundle_id: BundleId) -> Result<Option<(i64, u32)>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT contact_id, created_at FROM messages WHERE bundle_id = ? AND outgoing = 1",
+                [bundle_id.0],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?)
+    }
+
+    /// Tombstones of the most recent bundles delivered to us.
+    pub fn received_tombstones(&self, limit: usize) -> Result<Vec<Tombstone>> {
+        let mut statement = self.conn.prepare(
+            "SELECT t.id, t.ack_secret FROM tombstones t
+             JOIN messages m ON m.bundle_id = t.id AND m.outgoing = 0
+             ORDER BY m.received_at DESC LIMIT ?",
+        )?;
+        let rows = statement.query_map([limit], |row| {
+            let id: [u8; 8] = row.get(0)?;
+            let ack_secret: [u8; 16] = row.get(1)?;
+            Ok(Tombstone {
+                id: BundleId(id),
+                ack_secret,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn carried_bundles(&self, now: u32) -> Result<Vec<Bundle>> {
         self.bundles_where("expires_at > ?1 AND own = 0", now)
     }

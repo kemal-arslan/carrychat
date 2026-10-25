@@ -9,7 +9,7 @@ use kervan_proto::bundle::{
 };
 use kervan_proto::frame::{Frame, Reassembler};
 use kervan_proto::identity::{ContactCard, Identity};
-use kervan_proto::intro::{open_introduction, seal_introduction};
+use kervan_proto::intro::{mailbox_tag, open_introduction, seal_introduction};
 use kervan_proto::pair::{PairKeys, RecipientTag, TAG_WINDOW_FUTURE_DAYS, TAG_WINDOW_PAST_DAYS};
 use kervan_proto::{day_of, DAY_SECS};
 
@@ -243,14 +243,20 @@ impl Engine {
     }
 
     pub fn handle(&mut self, frame: Frame, now: u32) -> Result<Handled> {
+        self.handle_with(frame, now, true)
+    }
+
+    /// Handles a frame. With `carry` false, bundles that are not for us are
+    /// dropped instead of carried, for links where anyone can inject frames.
+    pub fn handle_with(&mut self, frame: Frame, now: u32, carry: bool) -> Result<Handled> {
         match frame {
-            Frame::Bundle(bundle) => self.handle_bundle(bundle, now),
+            Frame::Bundle(bundle) => self.handle_bundle(bundle, now, carry),
             Frame::Tombstone {
                 hop_limit,
                 tombstone,
             } => self.handle_tombstone(hop_limit, tombstone, now),
             Frame::Fragment(fragment) => match self.reassembler.push(fragment, now) {
-                Ok(Some(bundle)) => self.handle_bundle(bundle, now),
+                Ok(Some(bundle)) => self.handle_bundle(bundle, now, carry),
                 Ok(None) => Ok(Handled::quiet(Outcome::Fragment)),
                 Err(_) => Ok(Handled::quiet(Outcome::Dropped)),
             },
@@ -315,6 +321,80 @@ impl Engine {
         Ok(frames)
     }
 
+    /// What to ask internet relays for (§9.3): the tags of bundles to us from
+    /// every contact and our mailbox tags over the tag window, and the ids of
+    /// our own bundles still waiting for a receipt.
+    pub fn subscription(&mut self, now: u32) -> Result<(Vec<RecipientTag>, Vec<BundleId>)> {
+        self.refresh_tags(now);
+        let me = self.identity.dh_public();
+        let mut tags: Vec<RecipientTag> = self.tags.keys().copied().collect();
+        tags.extend(tag_window(now).map(|day| mailbox_tag(&me, day)));
+        let waiting = self
+            .store
+            .own_bundles(now)?
+            .iter()
+            .map(|bundle| bundle.id)
+            .collect();
+        Ok((tags, waiting))
+    }
+
+    /// Own bundles waiting for a receipt, ready to post, with their tags.
+    pub fn outbox(&self, now: u32) -> Result<Vec<(Frame, RecipientTag)>> {
+        let mut outbox = Vec::new();
+        for bundle in self.store.own_bundles(now)? {
+            let tag = self.publish_tag(&bundle)?;
+            outbox.extend(forwarded(&bundle).map(|frame| (frame, tag)));
+        }
+        Ok(outbox)
+    }
+
+    /// The tag a bundle is posted under where a tag is needed to find it
+    /// (§9.3): its own for pair bundles, the recipient's mailbox tag for our
+    /// introductions.
+    pub fn publish_tag(&self, bundle: &Bundle) -> Result<RecipientTag> {
+        let Some((contact_id, created_at)) = self.store.outgoing_message(bundle.id)? else {
+            return Ok(bundle.tag);
+        };
+        let Ok(index) = self.contact_index(contact_id) else {
+            return Ok(bundle.tag);
+        };
+        let contact = &self.contacts[index];
+        let day = day_of(created_at);
+        let recipient = contact.card.dh_key();
+        if contact.keys.recipient_tag(recipient, day) == bundle.tag {
+            Ok(bundle.tag)
+        } else {
+            Ok(mailbox_tag(recipient, day))
+        }
+    }
+
+    /// Tombstones of the latest bundles delivered to us, to post again.
+    pub fn received_tombstones(&self) -> Result<Vec<Frame>> {
+        Ok(self
+            .store
+            .received_tombstones(500)?
+            .into_iter()
+            .map(|tombstone| Frame::Tombstone {
+                hop_limit: DEFAULT_HOP_LIMIT,
+                tombstone,
+            })
+            .collect())
+    }
+
+    /// The secret that one-time Nostr keys are derived from (§9.3), created
+    /// on first use.
+    pub fn nostr_secret(&self) -> Result<[u8; 32]> {
+        if let Some(secret) = self.store.meta("nostr_secret")? {
+            return secret
+                .try_into()
+                .map_err(|_| Error::Invalid("stored Nostr secret is corrupt"));
+        }
+        let mut secret = [0; 32];
+        rand_core::RngCore::fill_bytes(&mut rand_core::OsRng, &mut secret);
+        self.store.set_meta("nostr_secret", &secret)?;
+        Ok(secret)
+    }
+
     /// Own messages still waiting for delivery, and bundles carried for others.
     pub fn counts(&self) -> Result<(usize, usize)> {
         self.store.bundle_counts()
@@ -324,7 +404,7 @@ impl Engine {
         self.store.prune(now)
     }
 
-    fn handle_bundle(&mut self, bundle: Bundle, now: u32) -> Result<Handled> {
+    fn handle_bundle(&mut self, bundle: Bundle, now: u32, carry: bool) -> Result<Handled> {
         if bundle.is_expired(now) || bundle.expires_at > now.saturating_add(MAX_FUTURE_EXPIRY_SECS)
         {
             return Ok(Handled::quiet(Outcome::Dropped));
@@ -339,6 +419,9 @@ impl Engine {
         }
         if let Some(handled) = self.introduce(&bundle, now)? {
             return Ok(handled);
+        }
+        if !carry {
+            return Ok(Handled::quiet(Outcome::Dropped));
         }
         self.store.insert_bundle(&bundle, false, now)?;
         Ok(Handled {
@@ -545,21 +628,25 @@ impl Engine {
     }
 
     fn contact_for_tag(&mut self, tag: &RecipientTag, now: u32) -> Option<usize> {
-        let today = day_of(now);
-        if self.tags_day != Some(today) {
-            let me = self.identity.dh_public();
-            self.tags.clear();
-            for (index, contact) in self.contacts.iter().enumerate() {
-                for day in
-                    today.saturating_sub(TAG_WINDOW_PAST_DAYS)..=today + TAG_WINDOW_FUTURE_DAYS
-                {
-                    self.tags
-                        .insert(contact.keys.recipient_tag(&me, day), index);
-                }
-            }
-            self.tags_day = Some(today);
-        }
+        self.refresh_tags(now);
         self.tags.get(tag).copied()
+    }
+
+    /// Rebuilds the tags of bundles for us when the day or the contacts change.
+    fn refresh_tags(&mut self, now: u32) {
+        let today = day_of(now);
+        if self.tags_day == Some(today) {
+            return;
+        }
+        let me = self.identity.dh_public();
+        self.tags.clear();
+        for (index, contact) in self.contacts.iter().enumerate() {
+            for day in tag_window(now) {
+                self.tags
+                    .insert(contact.keys.recipient_tag(&me, day), index);
+            }
+        }
+        self.tags_day = Some(today);
     }
 
     fn contact_index(&self, contact_id: i64) -> Result<usize> {
@@ -581,6 +668,12 @@ impl Engine {
             request: contact.request,
         })
     }
+}
+
+/// The days whose tags a receiver recognises (§4.1).
+fn tag_window(now: u32) -> std::ops::RangeInclusive<u32> {
+    let today = day_of(now);
+    today.saturating_sub(TAG_WINDOW_PAST_DAYS)..=today + TAG_WINDOW_FUTURE_DAYS
 }
 
 /// The bundle as this node passes it on, with one hop used (§8).

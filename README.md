@@ -6,7 +6,7 @@ Kervan is a store-and-forward messenger. Each message is sealed into a bundle of
 
 [![CI](https://github.com/kemal-arslan/kervan/actions/workflows/ci.yml/badge.svg)](https://github.com/kemal-arslan/kervan/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/kemalarslan)
 
-> **Status: early.** Kervan works today over the local network and by file, from a desktop app or the command line. LoRa radio and internet links come next. Nothing is packaged yet. See the [roadmap](#roadmap).
+> **Status: early.** Kervan works today over the local network, the internet (Nostr relays) and by file, from a desktop app or the command line. The LoRa radio link comes next. Nothing is packaged yet. See the [roadmap](#roadmap).
 
 ## How it works
 
@@ -39,7 +39,7 @@ npm install
 npm run tauri dev
 ```
 
-Create your identity and give your card (**My card**) to the people you want to hear from, or add theirs with **Add contact**. Only one side needs the other's card: the first message introduces the sender, and the recipient accepts the request. Kervan computers on the same network find each other by themselves. If your network blocks that, use **Connect…** with the other computer's address. **Export file…** writes everything waiting to be delivered to a `.kervan` file that someone can carry to another Kervan computer and import there.
+Create your identity and give your card (**My card**) to the people you want to hear from, or add theirs with **Add contact**. Only one side needs the other's card: the first message introduces the sender, and the recipient accepts the request. Kervan computers on the same network find each other by themselves, and while there is internet, messages also go through public Nostr relays, so computers on different networks reach each other. If your network blocks that, use **Connect…** with the other computer's address. **Export file…** writes everything waiting to be delivered to a `.kervan` file that someone can carry to another Kervan computer and import there.
 
 `npm run dev` opens the interface in a browser with sample data, without building the app.
 
@@ -52,7 +52,7 @@ kervan card                                  # give this to your contacts
 kervan add kervan:…                          # or add theirs: one side is enough
 kervan accept Deniz                          # accept someone who wrote to you first
 kervan send Deniz "İyiyim, Kadıköy'deyim."
-kervan run                                   # deliver, receive and relay on the local network
+kervan run                                   # deliver, receive and relay (local network and internet)
 kervan export messages.kervan                # or carry everything on a USB stick
 ```
 
@@ -63,7 +63,7 @@ kervan export messages.kervan                # or carry everything on a USB stic
 1. **Protocol v0, reference implementation, test vectors** (done)
 2. **Local network link, message store, desktop app, command line, USB export and import** (done)
 3. LoRa link through a Meshtastic radio over USB
-4. Internet link over Nostr, and gateways that let offline islands reach it
+4. **Internet link over Nostr** (done). Computers with internet also pass on what they carry for computers without it. Fetching for those computers is still open.
 5. Bluetooth link, mobile apps, HF radio
 
 ## Build

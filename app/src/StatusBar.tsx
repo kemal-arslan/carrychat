@@ -27,6 +27,13 @@ export function StatusBar({ status, preview, onNetworkHelp, onConnect, onImport,
     failed: "Local network: not working",
   }[link];
 
+  const internet = !status?.internetOn ? "off" : status.internetRelays > 0 ? "up" : "waiting";
+  const internetLabel = {
+    off: "Internet: off",
+    waiting: "Internet: connecting",
+    up: `Internet: ${plural(status?.internetRelays ?? 0, "relay", "relays")}`,
+  }[internet];
+
   return (
     <footer className="status">
       <span className={`link ${link}`} title={status?.lanProblem?.detail}>
@@ -37,6 +44,10 @@ export function StatusBar({ status, preview, onNetworkHelp, onConnect, onImport,
             {link === "blocked" ? "Fix…" : "Details…"}
           </button>
         )}
+      </span>
+      <span className={`link ${internet}`} title={status?.internetRefusal ?? undefined}>
+        <span className="dot" aria-hidden />
+        {internetLabel}
       </span>
       {status && (
         <>

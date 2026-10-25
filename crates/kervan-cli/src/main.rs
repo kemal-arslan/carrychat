@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use kervan_node::{ContactView, Event, LanConfig, LanProblem, Node};
+use kervan_node::{ContactView, Event, InternetConfig, LanConfig, LanProblem, Node};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 #[derive(Parser)]
@@ -60,6 +60,12 @@ enum Command {
         /// Turn off multicast discovery.
         #[arg(long)]
         no_discovery: bool,
+        /// Stay off the internet: no Nostr relays.
+        #[arg(long)]
+        no_internet: bool,
+        /// Nostr relay to use instead of the defaults. Repeat for more.
+        #[arg(long = "relay")]
+        relays: Vec<String>,
         /// Send every line typed on standard input to this contact.
         #[arg(long)]
         chat: Option<String>,
@@ -164,10 +170,26 @@ async fn run(cli: Cli) -> AnyResult {
             connect,
             port,
             no_discovery,
+            no_internet,
+            relays,
             chat,
         } => {
             let chat = chat.map(|name| find_contact(&node, &name)).transpose()?;
-            run_node(node, connect, port, no_discovery, chat).await?;
+            let mut lan = LanConfig {
+                listen_port: port,
+                ..LanConfig::default()
+            };
+            if no_discovery {
+                lan.discovery = None;
+            }
+            let internet = (!no_internet).then(|| {
+                if relays.is_empty() {
+                    InternetConfig::default()
+                } else {
+                    InternetConfig { relays }
+                }
+            });
+            run_node(node, lan, internet, connect, chat).await?;
         }
     }
     Ok(())
@@ -175,20 +197,17 @@ async fn run(cli: Cli) -> AnyResult {
 
 async fn run_node(
     node: Node,
+    lan: LanConfig,
+    internet: Option<InternetConfig>,
     connect: Vec<SocketAddr>,
-    port: u16,
-    no_discovery: bool,
     chat: Option<ContactView>,
 ) -> AnyResult {
-    let mut config = LanConfig {
-        listen_port: port,
-        ..LanConfig::default()
-    };
-    if no_discovery {
-        config.discovery = None;
-    }
     let mut events = node.subscribe();
-    let port = node.start(config).await?;
+    let port = node.start(lan).await?;
+    if let Some(internet) = internet {
+        println!("Connecting to {} relay(s).", internet.relays.len());
+        node.start_internet(internet)?;
+    }
     println!(
         "{} is listening on port {port}. Ctrl-C stops.",
         node.profile().name
@@ -217,6 +236,7 @@ async fn run_node(
                     println!("✓ delivered to {}", names(contact_id));
                 }
                 Ok(Event::PeersChanged { count }) => println!("· {count} node(s) nearby"),
+                Ok(Event::InternetChanged { relays }) => println!("· {relays} internet relay(s) connected"),
                 Ok(Event::ContactRequest { contact }) => {
                     println!("? {} ({}) wants to message you.", contact.name, contact.fingerprint);
                     println!("  Accept with `kervan accept {}`, or `kervan decline {}`.", contact.id, contact.id);

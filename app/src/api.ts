@@ -34,6 +34,10 @@ export type Status = {
   lanPeers: number;
   lanPort: number | null;
   lanProblem: LanProblem | null;
+  internetOn: boolean;
+  internetRelays: number;
+  /** The last reason a relay gave for refusing an event. */
+  internetRefusal: string | null;
   outbox: number;
   carried: number;
 };
@@ -50,7 +54,8 @@ export type NodeEvent =
   | { type: "messageDelivered"; contactId: number; messageId: number }
   | { type: "peersChanged"; count: number }
   | { type: "contactRequest"; contact: Contact }
-  | { type: "localNetworkChanged"; problem: LanProblem | null };
+  | { type: "localNetworkChanged"; problem: LanProblem | null }
+  | { type: "internetChanged"; relays: number };
 
 export interface Api {
   /** Whether this is the browser preview with sample data. */
@@ -192,6 +197,9 @@ function previewApi(): Api {
         lanPeers: lanProblem ? 0 : 1,
         lanPort: 49333,
         lanProblem,
+        internetOn: true,
+        internetRelays: 3,
+        internetRefusal: null,
         outbox: messages.filter((m) => m.outgoing && !m.delivered).length,
         carried: 3,
       };

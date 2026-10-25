@@ -1,0 +1,414 @@
+//! The internet link (§9.3): bundles and tombstones travel as Nostr events
+//! through public relays. Every relay gets its own connection, which
+//! reconnects on its own; what one connection receives is handled like a
+//! frame from any other link.
+
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::time::Duration;
+
+use data_encoding::{BASE64URL_NOPAD, HEXLOWER};
+use futures_util::{SinkExt, StreamExt};
+use hmac::{Hmac, Mac};
+use k256::schnorr::SigningKey;
+use kervan_proto::bundle::MAX_TTL_SECS;
+use kervan_proto::frame::Frame;
+use kervan_proto::pair::RecipientTag;
+use kervan_proto::DAY_SECS;
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use tokio::sync::{broadcast, watch};
+use tokio_tungstenite::tungstenite::Message;
+
+use crate::engine::{Handled, Outcome};
+use crate::{now, Error, Event, Result, Shared};
+
+/// The Nostr event kind of Kervan frames. Provisional, not registered.
+pub const KIND: u32 = 4733;
+pub const DEFAULT_RELAYS: &[&str] = &[
+    "wss://relay.damus.io",
+    "wss://nos.lol",
+    "wss://relay.primal.net",
+];
+
+const SUBSCRIPTION_ID: &str = "kervan";
+/// How far back a subscription asks for events: the longest bundle lifetime
+/// and a day.
+const LOOKBACK_SECS: u32 = MAX_TTL_SECS + DAY_SECS;
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const RENEW_INTERVAL: Duration = Duration::from_secs(600);
+const PING_INTERVAL: Duration = Duration::from_secs(30);
+const FIRST_RETRY: Duration = Duration::from_secs(2);
+const MAX_RETRY: Duration = Duration::from_secs(60);
+
+#[derive(Clone, Debug)]
+pub struct InternetConfig {
+    pub relays: Vec<String>,
+}
+
+impl Default for InternetConfig {
+    fn default() -> Self {
+        Self {
+            relays: DEFAULT_RELAYS
+                .iter()
+                .map(|relay| relay.to_string())
+                .collect(),
+        }
+    }
+}
+
+pub(crate) struct Internet {
+    /// Messages for every connected relay.
+    outgoing: broadcast::Sender<String>,
+    /// Bumped when the subscription should be renewed.
+    renew: watch::Sender<u64>,
+    connected: AtomicUsize,
+    secret: OnceLock<[u8; 32]>,
+    /// The last reason a relay gave for refusing an event.
+    refusal: Mutex<Option<String>>,
+}
+
+impl Internet {
+    pub(crate) fn new() -> Self {
+        Self {
+            outgoing: broadcast::channel(1024).0,
+            renew: watch::channel(0).0,
+            connected: AtomicUsize::new(0),
+            secret: OnceLock::new(),
+            refusal: Mutex::default(),
+        }
+    }
+
+    pub(crate) fn connected(&self) -> usize {
+        self.connected.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn refusal(&self) -> Option<String> {
+        self.refusal
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    pub(crate) fn renew_subscription(&self) {
+        self.renew.send_modify(|count| *count += 1);
+    }
+
+    /// Posts a bundle frame under `tag` to every connected relay.
+    pub(crate) fn post_bundle(&self, frame: &Frame, tag: &RecipientTag) {
+        let (Some(secret), Frame::Bundle(bundle)) = (self.secret.get(), frame) else {
+            return;
+        };
+        let event = signed_event(
+            secret,
+            bundle.expires_at.saturating_sub(MAX_TTL_SECS),
+            vec![vec!["x".to_owned(), HEXLOWER.encode(tag)]],
+            BASE64URL_NOPAD.encode(&frame.to_bytes()),
+        );
+        let _ = self.outgoing.send(json!(["EVENT", event]).to_string());
+    }
+
+    pub(crate) fn post_tombstone(&self, frame: &Frame) {
+        let (Some(secret), Frame::Tombstone { tombstone, .. }) = (self.secret.get(), frame) else {
+            return;
+        };
+        let event = signed_event(
+            secret,
+            now(),
+            vec![vec!["b".to_owned(), HEXLOWER.encode(&tombstone.id.0)]],
+            BASE64URL_NOPAD.encode(&frame.to_bytes()),
+        );
+        let _ = self.outgoing.send(json!(["EVENT", event]).to_string());
+    }
+
+    /// Posts what a handled frame should put on the internet: the tombstone
+    /// of a bundle delivered to us, and, as a gateway, a bundle we started
+    /// carrying from another link.
+    pub(crate) fn post_handled(&self, handled: &Handled) {
+        for frame in &handled.relay {
+            match (handled.outcome, frame) {
+                (Outcome::Received, Frame::Tombstone { .. }) => self.post_tombstone(frame),
+                (Outcome::Carried, Frame::Bundle(bundle)) => self.post_bundle(frame, &bundle.tag),
+                _ => {}
+            }
+        }
+    }
+}
+
+pub(crate) fn start(shared: &Arc<Shared>, config: InternetConfig) -> Result<()> {
+    let secret = shared.engine().nostr_secret()?;
+    if shared.internet.secret.set(secret).is_err() {
+        return Err(Error::Invalid("the internet link is already running"));
+    }
+    for relay in config.relays {
+        tokio::spawn(relay_loop(Arc::downgrade(shared), relay));
+    }
+    Ok(())
+}
+
+/// A Nostr event (NIP-01) signed with a one-time key derived from `secret`
+/// and the content, so the same content always gives the same event.
+pub fn signed_event(
+    secret: &[u8; 32],
+    created_at: u32,
+    tags: Vec<Vec<String>>,
+    content: String,
+) -> Value {
+    let mut seed: [u8; 32] = {
+        let mut mac =
+            <Hmac<Sha256> as Mac>::new_from_slice(secret).expect("HMAC accepts any key length");
+        mac.update(content.as_bytes());
+        mac.finalize().into_bytes().into()
+    };
+    let key = loop {
+        match SigningKey::from_bytes(&seed) {
+            Ok(key) => break key,
+            // Not a valid scalar, with odds of about 2^-128: hash again.
+            Err(_) => seed = Sha256::digest(seed).into(),
+        }
+    };
+    let pubkey = HEXLOWER.encode(&key.verifying_key().to_bytes());
+    let serialized = json!([0, pubkey, created_at, KIND, tags, content]).to_string();
+    let id: [u8; 32] = Sha256::digest(serialized.as_bytes()).into();
+    let signature = key
+        .sign_raw(&id, &[0; 32])
+        .expect("signing a 32-byte digest works");
+    json!({
+        "id": HEXLOWER.encode(&id),
+        "pubkey": pubkey,
+        "created_at": created_at,
+        "kind": KIND,
+        "tags": tags,
+        "content": content,
+        "sig": HEXLOWER.encode(&signature.to_bytes()),
+    })
+}
+
+async fn relay_loop(shared: Weak<Shared>, url: String) {
+    let mut retry = FIRST_RETRY;
+    loop {
+        let Some((mut outgoing, mut renew)) = shared.upgrade().map(|shared| {
+            (
+                shared.internet.outgoing.subscribe(),
+                shared.internet.renew.subscribe(),
+            )
+        }) else {
+            return;
+        };
+        let connected = tokio::time::timeout(
+            CONNECT_TIMEOUT,
+            tokio_tungstenite::connect_async(url.as_str()),
+        )
+        .await;
+        if let Ok(Ok((socket, _))) = connected {
+            retry = FIRST_RETRY;
+            run_relay(&shared, socket, &mut outgoing, &mut renew).await;
+        }
+        tokio::time::sleep(retry).await;
+        retry = (retry * 2).min(MAX_RETRY);
+    }
+}
+
+async fn run_relay<S>(
+    shared: &Weak<Shared>,
+    socket: S,
+    outgoing: &mut broadcast::Receiver<String>,
+    renew: &mut watch::Receiver<u64>,
+) where
+    S: futures_util::Sink<Message>
+        + futures_util::Stream<Item = tokio_tungstenite::tungstenite::Result<Message>>
+        + Unpin,
+{
+    let (mut sink, mut stream) = socket.split();
+    let Some(greeting) = with(shared, |shared| {
+        shared.internet.connected.fetch_add(1, Ordering::Relaxed);
+        shared.emit(Event::InternetChanged {
+            relays: shared.internet.connected(),
+        });
+        greeting(shared)
+    }) else {
+        return;
+    };
+
+    let mut alive = true;
+    for message in greeting {
+        if sink.send(Message::text(message)).await.is_err() {
+            alive = false;
+            break;
+        }
+    }
+    let mut ping = tokio::time::interval(PING_INTERVAL);
+    let mut renewal = tokio::time::interval(RENEW_INTERVAL);
+    // Both intervals fire at once; the greeting already covered that moment.
+    ping.tick().await;
+    renewal.tick().await;
+    while alive {
+        let send = tokio::select! {
+            incoming = stream.next() => match incoming {
+                Some(Ok(Message::Text(text))) => {
+                    with(shared, |shared| receive(shared, &text));
+                    None
+                }
+                Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                Some(Ok(_)) => None,
+            },
+            message = outgoing.recv() => match message {
+                Ok(message) => Some(Message::text(message)),
+                Err(broadcast::error::RecvError::Lagged(_)) => None,
+                Err(broadcast::error::RecvError::Closed) => break,
+            },
+            changed = renew.changed() => match changed {
+                Ok(()) => with(shared, subscription).flatten().map(Message::text),
+                Err(_) => break,
+            },
+            _ = renewal.tick() => with(shared, subscription).flatten().map(Message::text),
+            _ = ping.tick() => Some(Message::Ping(Default::default())),
+        };
+        if let Some(message) = send {
+            alive = sink.send(message).await.is_ok();
+        }
+    }
+
+    with(shared, |shared| {
+        shared.internet.connected.fetch_sub(1, Ordering::Relaxed);
+        shared.emit(Event::InternetChanged {
+            relays: shared.internet.connected(),
+        });
+    });
+}
+
+/// What a node sends a relay it just reached: its subscription, its own
+/// bundles still waiting for a receipt, and recent receipts it gave.
+fn greeting(shared: &Shared) -> Vec<String> {
+    let mut messages: Vec<String> = subscription(shared).into_iter().collect();
+    let engine = shared.engine();
+    let secret = shared.internet.secret.get().copied();
+    let Some(secret) = secret else {
+        return messages;
+    };
+    for (frame, tag) in engine.outbox(now()).unwrap_or_default() {
+        if let Frame::Bundle(bundle) = &frame {
+            let event = signed_event(
+                &secret,
+                bundle.expires_at.saturating_sub(MAX_TTL_SECS),
+                vec![vec!["x".to_owned(), HEXLOWER.encode(&tag)]],
+                BASE64URL_NOPAD.encode(&frame.to_bytes()),
+            );
+            messages.push(json!(["EVENT", event]).to_string());
+        }
+    }
+    for frame in engine.received_tombstones().unwrap_or_default() {
+        if let Frame::Tombstone { tombstone, .. } = &frame {
+            let event = signed_event(
+                &secret,
+                now(),
+                vec![vec!["b".to_owned(), HEXLOWER.encode(&tombstone.id.0)]],
+                BASE64URL_NOPAD.encode(&frame.to_bytes()),
+            );
+            messages.push(json!(["EVENT", event]).to_string());
+        }
+    }
+    messages
+}
+
+fn subscription(shared: &Shared) -> Option<String> {
+    let (tags, waiting) = shared.engine().subscription(now()).ok()?;
+    let since = now().saturating_sub(LOOKBACK_SECS);
+    let tags: Vec<String> = tags.iter().map(|tag| HEXLOWER.encode(tag)).collect();
+    let mut message = vec![
+        json!("REQ"),
+        json!(SUBSCRIPTION_ID),
+        json!({"kinds": [KIND], "#x": tags, "since": since}),
+    ];
+    if !waiting.is_empty() {
+        let ids: Vec<String> = waiting.iter().map(|id| HEXLOWER.encode(&id.0)).collect();
+        message.push(json!({"kinds": [KIND], "#b": ids, "since": since}));
+    }
+    Some(Value::Array(message).to_string())
+}
+
+/// Handles one message from a relay.
+fn receive(shared: &Shared, text: &str) {
+    let Ok(Value::Array(parts)) = serde_json::from_str::<Value>(text) else {
+        return;
+    };
+    match parts.first().and_then(Value::as_str) {
+        Some("EVENT") => {
+            let Some(event) = parts.get(2) else {
+                return;
+            };
+            if event["kind"].as_u64() != Some(KIND.into()) {
+                return;
+            }
+            let Some(frame) = event["content"]
+                .as_str()
+                .and_then(|content| BASE64URL_NOPAD.decode(content.as_bytes()).ok())
+                .and_then(|bytes| Frame::from_bytes(&bytes).ok())
+            else {
+                return;
+            };
+            // Anyone can post to a relay: take only what is for us (§9.3).
+            let handled = shared.engine().handle_with(frame, now(), false);
+            if let Ok(handled) = handled {
+                shared.dispatch(handled, None);
+            }
+        }
+        Some("OK") => {
+            let accepted = parts.get(2).and_then(Value::as_bool).unwrap_or(true);
+            let reason = parts.get(3).and_then(Value::as_str).unwrap_or_default();
+            let mut refusal = shared
+                .internet
+                .refusal
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            *refusal = (!accepted).then(|| reason.to_owned());
+        }
+        _ => {}
+    }
+}
+
+fn with<T>(shared: &Weak<Shared>, f: impl FnOnce(&Shared) -> T) -> Option<T> {
+    shared.upgrade().map(|shared| f(&shared))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use k256::schnorr::{Signature, VerifyingKey};
+
+    #[test]
+    fn events_are_valid_nip01_and_repeatable() {
+        let secret = [7; 32];
+        let tags = vec![vec!["x".to_owned(), "00112233aabbccdd".to_owned()]];
+        let event = signed_event(&secret, 1_790_000_000, tags.clone(), "AQID".to_owned());
+        assert_eq!(
+            event,
+            signed_event(&secret, 1_790_000_000, tags, "AQID".to_owned())
+        );
+
+        let serialized = format!(
+            r#"[0,"{}",1790000000,4733,[["x","00112233aabbccdd"]],"AQID"]"#,
+            event["pubkey"].as_str().unwrap()
+        );
+        let id: [u8; 32] = Sha256::digest(serialized.as_bytes()).into();
+        assert_eq!(event["id"], HEXLOWER.encode(&id));
+
+        let pubkey = HEXLOWER
+            .decode(event["pubkey"].as_str().unwrap().as_bytes())
+            .unwrap();
+        let signature = HEXLOWER
+            .decode(event["sig"].as_str().unwrap().as_bytes())
+            .unwrap();
+        VerifyingKey::from_bytes(&pubkey)
+            .unwrap()
+            .verify_raw(&id, &Signature::try_from(signature.as_slice()).unwrap())
+            .unwrap();
+    }
+
+    #[test]
+    fn different_content_gets_an_unrelated_key() {
+        let a = signed_event(&[7; 32], 1, vec![], "a".to_owned());
+        let b = signed_event(&[7; 32], 1, vec![], "b".to_owned());
+        assert_ne!(a["pubkey"], b["pubkey"]);
+    }
+}

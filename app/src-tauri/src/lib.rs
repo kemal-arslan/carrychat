@@ -5,7 +5,9 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use kervan_node::{ContactView, ImportReport, LanConfig, MessageView, Node, Profile, Status};
+use kervan_node::{
+    ContactView, ImportReport, InternetConfig, LanConfig, MessageView, Node, Profile, Status,
+};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 struct AppState {
@@ -29,7 +31,8 @@ fn text(error: impl ToString) -> String {
     error.to_string()
 }
 
-/// Starts the local network link and forwards node events to the window.
+/// Starts the local network and internet links and forwards node events to
+/// the window.
 fn launch(app: &AppHandle, node: &Node) {
     let mut events = node.subscribe();
     let handle = app.clone();
@@ -46,6 +49,9 @@ fn launch(app: &AppHandle, node: &Node) {
                 "kervan-error",
                 format!("Local network link is off: {error}"),
             );
+        }
+        if let Err(error) = node.start_internet(InternetConfig::default()) {
+            let _ = handle.emit("kervan-error", format!("Internet link is off: {error}"));
         }
     });
 }

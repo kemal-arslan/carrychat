@@ -10,7 +10,7 @@ use data_encoding::HEXLOWER;
 use kervan_proto::bundle::{seal_with_nonce, Message, Tombstone};
 use kervan_proto::frame::{frames_for, Frame, MESHTASTIC_MTU};
 use kervan_proto::identity::Identity;
-use kervan_proto::intro::seal_introduction_with;
+use kervan_proto::intro::{mailbox_tag, seal_introduction_with};
 use kervan_proto::pair::PairKeys;
 use kervan_proto::{day_of, DAY_SECS};
 use serde_json::{json, Value};
@@ -121,5 +121,6 @@ fn introduction(alice: &Identity, bob: &Identity) -> Value {
         "bundle_id": HEXLOWER.encode(&bundle.id.0),
         "bundle": HEXLOWER.encode(&bundle.to_bytes()),
         "meshtastic_frames": frames,
+        "mailbox_tag": HEXLOWER.encode(&mailbox_tag(&bob.dh_public(), day_of(CREATED_AT))),
     })
 }

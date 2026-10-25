@@ -226,11 +226,24 @@ Both sides send HELLO first. A second connection between the same two nodes is c
 
 ### 9.3 Internet via Nostr
 
-- Each bundle is published as one Nostr event signed with a fresh one-time key. Its content is the bundle in base64url, with a tag `["x", hex(recipient_tag)]`. The event kind is still to be chosen, from the range relays store.
-- A recipient subscribes with `{"kinds": [K], "#x": [every current tag]}`.
-- Tombstones are events tagged `["b", hex(bundle_id)]`, whose content is the tombstone frame. Senders subscribe to the ids of their undelivered bundles.
-- Relays see tags (unlinkable across days), sizes, timing and the client's IP address.
-- A node with internet access publishes the bundles it carries for others (uplink). Fetching for nodes without internet access (downlink) is an open question (§11).
+Implemented in `crates/kervan-node/src/internet.rs`.
+
+- **Events.** Every bundle and tombstone travels as one Nostr event (NIP-01) of kind `4733`, a provisional number not registered with Nostr. The content is the frame (§7) in base64url without padding. A bundle event has the tag `["x", hex(tag)]`, a tombstone event `["b", hex(bundle_id)]`.
+- **Tags.** A pair bundle is posted under its recipient tag. An introduction, whose own tag is random, is posted under the recipient's mailbox tag, which anyone holding the recipient's card can compute:
+
+  ```
+  mailbox_tag(pk, d) = HMAC(H("kervan/v0/mailbox" || pk), u32(d))[0..8]
+  ```
+
+  `d` is the day the introduction was created.
+- **Keys.** Each event is signed (BIP-340) with a one-time key `HMAC(node_secret, content)`, where `node_secret` is a random secret the node keeps. Keys cannot be linked to the user or to each other, and the same node posting the same frame again produces the same event, which relays drop as a duplicate.
+- **Time.** A bundle event's `created_at` is `expires_at − 604800`, never later than the bundle's creation. A tombstone event's is the time it is posted.
+- **Subscription.** A node asks every relay for `{"kinds": [4733], "#x": [...], "since": now − 691200}` with the pair tags of all its contacts and its own mailbox tags over the tag window (§4.1), and for `{"kinds": [4733], "#b": [...]}` with the ids of its own bundles still waiting for a receipt. It renews the subscription when its contacts change, when it sends, and every 10 minutes.
+- **What a node posts.** Its own bundles when it sends them and again on every connection, the tombstones of bundles it receives, and, as a gateway, every bundle it starts carrying that came over another link.
+- **What a node takes.** Only bundles for itself and tombstones. A bundle from a relay that does not open is dropped, not carried, so a relay cannot fill a node's store.
+- **Relays** see tags, sizes, timing and the node's IP address. They also see which tags one connection asks for together, which links the tags of one node's contacts within a day. Reaching relays over Tor is future work.
+
+The default relays are `wss://relay.damus.io`, `wss://nos.lol` and `wss://relay.primal.net`. Fetching for nodes without internet access (downlink through a gateway) is still open (§11).
 
 ### 9.4 File
 

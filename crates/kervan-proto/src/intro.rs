@@ -17,7 +17,7 @@ use crate::bundle::{
 };
 use crate::identity::{ContactCard, Identity};
 use crate::pair::{AckSecret, RecipientTag};
-use crate::{hmac_sha256, truncate, Error, Result};
+use crate::{hmac_sha256, sha256, truncate, Error, Result};
 
 /// The plaintext kind of an introduction (§5.2).
 pub const KIND_INTRODUCTION: u8 = 0x02;
@@ -27,6 +27,15 @@ const SIGNATURE_LEN: usize = 64;
 const FIXED_LEN: usize = 6;
 const INTRO_SALT: &[u8] = b"kervan/v0/intro";
 const SIGNATURE_LABEL: &[u8] = b"kervan/v0/intro-signature";
+const MAILBOX_LABEL: &[u8] = b"kervan/v0/mailbox";
+
+/// Where introductions to `recipient` created on `day` are posted on links
+/// that need a tag to find them, such as Nostr (§9.3). Anyone holding the
+/// recipient's card can compute it.
+pub fn mailbox_tag(recipient: &PublicKey, day: u32) -> RecipientTag {
+    let key = sha256(&[MAILBOX_LABEL, recipient.as_bytes()]);
+    truncate(&hmac_sha256(&key, &[&day.to_be_bytes()]))
+}
 
 /// An opened introduction: who wrote it and what they wrote.
 #[derive(Clone, Debug, PartialEq, Eq)]
