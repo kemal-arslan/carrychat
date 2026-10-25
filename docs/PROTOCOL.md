@@ -232,7 +232,7 @@ Implemented in `crates/kervan-node/src/file.rs`, with the extension `.kervan`. A
 3. Padding for LoRa frames: a smaller size leak against more airtime.
 4. Exchanging contacts at a distance.
 5. Group messages.
-6. A bridge to the bitchat Bluetooth mesh.
+6. A Bluetooth link between nearby devices.
 7. HF radio. Amateur bands forbid encryption that hides a message's meaning, so HF would need a separate signed but unencrypted message kind, limited to messages the user explicitly marks as public.
 
 ## 12. Constants

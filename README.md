@@ -1,16 +1,12 @@
 # Kervan
 
-**Reach the people you care about when the internet is down.**
+**Offline-first, end-to-end encrypted messaging between computers over any link: local network, LoRa radio, internet or a file on a USB stick.**
 
-Kervan is a messenger for computers that keeps working without the internet. It uses the internet when there is one. When there isn't, it uses whatever is left: your local network, a $20 LoRa radio plugged into USB, or a USB stick someone carries to the next city. Messages are end-to-end encrypted, wait until a path appears, and pass through other people's devices without those devices being able to read them or tell who they are for.
+Kervan is a store-and-forward messenger. Each message is sealed into a bundle of at most 4 KiB, kept until a link towards the recipient exists, and passed from computer to computer on the way. Computers that carry a bundle can neither read it nor tell who sent it or who it is for. The internet is one link among several, not a requirement.
 
 [![CI](https://github.com/kemal-arslan/kervan/actions/workflows/ci.yml/badge.svg)](https://github.com/kemal-arslan/kervan/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/kemalarslan)
 
 > **Status: early.** Kervan works today over the local network and by file, from a desktop app or the command line. LoRa radio and internet links come next. Nothing is packaged yet. See the [roadmap](#roadmap).
-
-## Why
-
-After the earthquakes of 6 February 2023 in Türkiye, mobile networks across the affected region were down or overloaded for days, just when people most needed to reach each other. Ordinary messengers assume the internet is there. Bluetooth mesh apps such as [bitchat](https://github.com/permissionlesstech/bitchat) work without it, but only between phones that are close to each other. Kervan is for the gap: computers, long distances, many kinds of link, one inbox.
 
 ## How it works
 
@@ -67,7 +63,7 @@ kervan export messages.kervan                # or carry everything on a USB stic
 2. **Local network link, message store, desktop app, command line, USB export and import** (done)
 3. LoRa link through a Meshtastic radio over USB
 4. Internet link over Nostr, and gateways that let offline islands reach it
-5. Bridge to the bitchat Bluetooth mesh, mobile apps, HF radio
+5. Bluetooth link, mobile apps, HF radio
 
 ## Build
 
