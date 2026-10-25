@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use kervan_proto::bundle::{
     open, seal, Bundle, BundleId, Kind, Message, Tombstone, DEFAULT_HOP_LIMIT, DEFAULT_TTL_SECS,
-    MAX_TTL_SECS,
+    MAX_READ_IDS, MAX_TTL_SECS,
 };
 use kervan_proto::frame::{Frame, Reassembler};
 use kervan_proto::identity::{ContactCard, Identity};
@@ -14,7 +14,7 @@ use kervan_proto::pair::{PairKeys, RecipientTag, TAG_WINDOW_FUTURE_DAYS, TAG_WIN
 use kervan_proto::{day_of, DAY_SECS};
 
 use crate::store::Store;
-use crate::{ContactView, Error, Event, MessageView, Profile, Result};
+use crate::{ContactView, Error, Event, MessageView, Profile, Result, Settings};
 
 /// Bundles that claim to live longer than this from now are refused (§8).
 const MAX_FUTURE_EXPIRY_SECS: u32 = MAX_TTL_SECS + DAY_SECS;
@@ -397,7 +397,80 @@ impl Engine {
 
     /// Own messages still waiting for delivery, and bundles carried for others.
     pub fn counts(&self) -> Result<(usize, usize)> {
-        self.store.bundle_counts()
+        self.store.counts()
+    }
+
+    /// Marks a contact's messages read. Returns the read receipts to send,
+    /// unless read receipts are off or the contact is a request.
+    pub fn mark_read(&mut self, contact_id: i64, now: u32) -> Result<Vec<(Frame, RecipientTag)>> {
+        let index = self.contact_index(contact_id)?;
+        let ids = self.store.mark_incoming_read(contact_id, now)?;
+        let contact = &self.contacts[index];
+        if ids.is_empty()
+            || contact.request
+            || !contact.introduced
+            || !self.settings()?.read_receipts
+        {
+            return Ok(Vec::new());
+        }
+        let mut receipts = Vec::new();
+        for chunk in ids.chunks(MAX_READ_IDS) {
+            let bundle = seal(
+                &contact.keys,
+                contact.card.dh_key(),
+                &Message::read(chunk, now),
+                now + DEFAULT_TTL_SECS,
+                DEFAULT_HOP_LIMIT,
+            )?;
+            self.store.insert_bundle(&bundle, true, now)?;
+            receipts.extend(forwarded(&bundle).map(|frame| (frame, bundle.tag)));
+        }
+        Ok(receipts)
+    }
+
+    /// Changes our name. Contacts that have our card get the new one; the
+    /// others get it with our next introduction.
+    pub fn rename(
+        &mut self,
+        name: &str,
+        now: u32,
+    ) -> Result<(Profile, Vec<(Frame, RecipientTag)>)> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(Error::Invalid("choose a name"));
+        }
+        let (signing, dh) = self.identity.secret_bytes();
+        self.identity = Identity::from_secret_bytes(&signing, &dh, name)?;
+        self.store.set_meta("name", name.as_bytes())?;
+        let card = self.identity.card();
+        let mut updates = Vec::new();
+        for contact in self
+            .contacts
+            .iter()
+            .filter(|contact| !contact.request && contact.introduced)
+        {
+            let bundle = seal(
+                &contact.keys,
+                contact.card.dh_key(),
+                &Message::card(&card, now),
+                now + DEFAULT_TTL_SECS,
+                DEFAULT_HOP_LIMIT,
+            )?;
+            self.store.insert_bundle(&bundle, true, now)?;
+            updates.extend(forwarded(&bundle).map(|frame| (frame, bundle.tag)));
+        }
+        Ok((self.profile(), updates))
+    }
+
+    pub fn settings(&self) -> Result<Settings> {
+        Ok(Settings {
+            read_receipts: self.store.meta("read_receipts")?.as_deref() != Some(b"0".as_slice()),
+        })
+    }
+
+    pub fn set_read_receipts(&self, on: bool) -> Result<()> {
+        self.store
+            .set_meta("read_receipts", if on { b"1" } else { b"0" })
     }
 
     pub fn prune(&self, now: u32) -> Result<()> {
@@ -442,23 +515,53 @@ impl Engine {
             return Ok(None);
         };
         self.mark_introduced(index)?;
-        let contact = &self.contacts[index];
-        let tombstone = Tombstone::for_bundle(&contact.keys, bundle);
+        let contact_id = self.contacts[index].id;
+        let tombstone = Tombstone::for_bundle(&self.contacts[index].keys, bundle);
         self.store.insert_tombstone(&tombstone, bundle.expires_at)?;
 
         let mut events = Vec::new();
-        if message.kind == Kind::Text {
-            let body = String::from_utf8_lossy(&message.body);
-            if let Some(view) = self.store.insert_message(
-                contact.id,
-                false,
-                bundle.id,
-                &body,
-                message.created_at,
-                Some(now),
-            )? {
-                events.push(Event::MessageReceived { message: view });
+        match message.kind {
+            Kind::Text => {
+                let body = String::from_utf8_lossy(&message.body);
+                if let Some(view) = self.store.insert_message(
+                    contact_id,
+                    false,
+                    bundle.id,
+                    &body,
+                    message.created_at,
+                    Some(now),
+                )? {
+                    events.push(Event::MessageReceived { message: view });
+                }
             }
+            Kind::Read => {
+                let message_ids =
+                    self.store
+                        .mark_read_by_peer(contact_id, &message.read_ids(), now)?;
+                if !message_ids.is_empty() {
+                    events.push(Event::MessagesRead {
+                        contact_id,
+                        message_ids,
+                    });
+                }
+            }
+            Kind::Card => {
+                // A new name, but only on the same keys (§5.2).
+                let current = &self.contacts[index].card;
+                if let Ok(card) = ContactCard::from_bytes(&message.body) {
+                    if card.signing_key() == current.signing_key()
+                        && card.dh_key() == current.dh_key()
+                        && &card != current
+                    {
+                        self.store.update_contact_card(contact_id, &card)?;
+                        self.contacts[index].card = card;
+                        events.push(Event::ContactChanged {
+                            contact: self.contact_view(contact_id)?,
+                        });
+                    }
+                }
+            }
+            Kind::Unknown(_) => {}
         }
         Ok(Some(Handled {
             outcome: Outcome::Received,
@@ -666,6 +769,7 @@ impl Engine {
             last_message: last.as_ref().map(|(body, _)| body.clone()),
             last_at: last.map(|(_, at)| at),
             request: contact.request,
+            unread: self.store.unread_count(contact_id)?,
         })
     }
 }

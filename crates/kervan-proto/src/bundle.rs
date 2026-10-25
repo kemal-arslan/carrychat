@@ -5,6 +5,7 @@ use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use rand_core::{OsRng, RngCore};
 use x25519_dalek::PublicKey;
 
+use crate::identity::ContactCard;
 use crate::pair::{AckSecret, PairKeys, RecipientTag, TAG_LEN};
 use crate::{day_of, sha256, truncate, Error, Result, DAY_SECS, VERSION};
 
@@ -20,6 +21,10 @@ pub const DEFAULT_HOP_LIMIT: u8 = 8;
 
 const BUNDLE_ID_LABEL: &[u8] = b"kervan/v0/ack";
 const KIND_TEXT: u8 = 0x01;
+const KIND_READ: u8 = 0x03;
+const KIND_CARD: u8 = 0x04;
+/// Bundle ids in one read receipt, at most.
+pub const MAX_READ_IDS: usize = 64;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub struct BundleId(pub [u8; 8]);
@@ -92,6 +97,10 @@ impl Bundle {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kind {
     Text,
+    /// Ids of the sender's bundles that the recipient has read.
+    Read,
+    /// The sender's contact card, after they changed their name.
+    Card,
     /// A kind this version does not know. The body is kept but not shown.
     Unknown(u8),
 }
@@ -100,6 +109,8 @@ impl Kind {
     fn to_byte(self) -> u8 {
         match self {
             Kind::Text => KIND_TEXT,
+            Kind::Read => KIND_READ,
+            Kind::Card => KIND_CARD,
             Kind::Unknown(byte) => byte,
         }
     }
@@ -107,6 +118,8 @@ impl Kind {
     fn from_byte(byte: u8) -> Self {
         match byte {
             KIND_TEXT => Kind::Text,
+            KIND_READ => Kind::Read,
+            KIND_CARD => Kind::Card,
             other => Kind::Unknown(other),
         }
     }
@@ -126,6 +139,33 @@ impl Message {
             kind: Kind::Text,
             created_at,
             body: text.as_bytes().to_vec(),
+        }
+    }
+
+    /// A read receipt for up to [`MAX_READ_IDS`] of the recipient's bundles.
+    pub fn read(ids: &[BundleId], created_at: u32) -> Self {
+        Self {
+            kind: Kind::Read,
+            created_at,
+            body: ids.iter().take(MAX_READ_IDS).flat_map(|id| id.0).collect(),
+        }
+    }
+
+    /// The bundle ids in a read receipt. Trailing bytes are ignored.
+    pub fn read_ids(&self) -> Vec<BundleId> {
+        self.body
+            .chunks_exact(8)
+            .take(MAX_READ_IDS)
+            .map(|id| BundleId(truncate(id)))
+            .collect()
+    }
+
+    /// The sender's new contact card.
+    pub fn card(card: &ContactCard, created_at: u32) -> Self {
+        Self {
+            kind: Kind::Card,
+            created_at,
+            body: card.to_bytes(),
         }
     }
 

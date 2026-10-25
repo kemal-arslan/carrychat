@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Contact, type Message, type Profile, type Status } from "./api";
 import { Chat } from "./Chat";
-import { AddContactDialog, ConnectDialog, MyCardDialog, NetworkDialog } from "./Dialogs";
+import { AddContactDialog, ConnectDialog, MyCardDialog, NetworkDialog, SettingsDialog } from "./Dialogs";
+import { shortTime } from "./format";
+import { useI18n } from "./i18n";
 import { Logo } from "./Logo";
+import { notificationsEnabled } from "./prefs";
 import { Setup } from "./Setup";
 import { StatusBar } from "./StatusBar";
-import { plural, shortTime } from "./format";
 
 export default function App() {
   const [profile, setProfile] = useState<Profile | null | undefined>(undefined);
@@ -16,21 +18,25 @@ export default function App() {
 
   if (profile === undefined) return null;
   if (profile === null) return <Setup onCreated={setProfile} />;
-  return <Main profile={profile} />;
+  return <Main profile={profile} onProfile={setProfile} />;
 }
 
-type DialogName = "add" | "card" | "connect" | "network";
+type DialogName = "add" | "card" | "connect" | "network" | "settings";
 
-function Main({ profile }: { profile: Profile }) {
+function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: Profile) => void }) {
+  const { t, language } = useI18n();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [unread, setUnread] = useState<Record<number, number>>({});
   const [status, setStatus] = useState<Status | null>(null);
   const [dialog, setDialog] = useState<DialogName | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+  const contactsRef = useRef(contacts);
+  contactsRef.current = contacts;
+  const tRef = useRef(t);
+  tRef.current = t;
 
   const refreshContacts = useCallback(() => api.contacts().then(setContacts), []);
   const refreshStatus = useCallback(() => api.status().then(setStatus), []);
@@ -40,13 +46,24 @@ function Main({ profile }: { profile: Profile }) {
     window.setTimeout(() => setNotice((current) => (current === text ? null : current)), 5000);
   }, []);
 
+  // Messages count as read only while someone is looking at them.
+  const markSelectedRead = useCallback(() => {
+    const contactId = selectedRef.current;
+    if (contactId === null || !document.hasFocus()) return;
+    api.markRead(contactId).then(refreshContacts);
+  }, [refreshContacts]);
+
   useEffect(() => {
-    refreshContacts().then(() => undefined);
+    refreshContacts();
     refreshStatus();
     // Carried bundles change without events, so the counts are polled too.
     const timer = window.setInterval(refreshStatus, 5000);
-    return () => window.clearInterval(timer);
-  }, [refreshContacts, refreshStatus]);
+    window.addEventListener("focus", markSelectedRead);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", markSelectedRead);
+    };
+  }, [refreshContacts, refreshStatus, markSelectedRead]);
 
   useEffect(() => {
     if (selected === null && contacts.length > 0) setSelected(contacts[0].id);
@@ -55,34 +72,51 @@ function Main({ profile }: { profile: Profile }) {
   useEffect(() => {
     if (selected === null) return;
     api.messages(selected).then(setMessages);
-    setUnread((counts) => ({ ...counts, [selected]: 0 }));
-  }, [selected]);
+    markSelectedRead();
+  }, [selected, markSelectedRead]);
 
   useEffect(() => {
     const stops = [
       api.onEvent((event) => {
+        const t = tRef.current;
         if (event.type === "messageReceived") {
           const { message } = event;
+          const looking = message.contactId === selectedRef.current && document.hasFocus();
           if (message.contactId === selectedRef.current) {
             setMessages((current) => [...current, message]);
-          } else {
-            setUnread((counts) => ({ ...counts, [message.contactId]: (counts[message.contactId] ?? 0) + 1 }));
           }
-          refreshContacts();
+          if (looking) {
+            markSelectedRead();
+          } else {
+            const sender = contactsRef.current.find((contact) => contact.id === message.contactId);
+            // A first message from someone new is announced by its request.
+            if (sender && notificationsEnabled()) api.notify(sender.name, message.body);
+            refreshContacts();
+          }
         } else if (event.type === "contactRequest") {
-          show(`${event.contact.name} wants to message you.`);
+          show(t.wantsToMessage(event.contact.name));
+          if (!document.hasFocus() && notificationsEnabled()) api.notify(t.wantsToMessage(event.contact.name), "");
           refreshContacts();
         } else if (event.type === "messageDelivered") {
           setMessages((current) =>
             current.map((message) => (message.id === event.messageId ? { ...message, delivered: true } : message)),
           );
+        } else if (event.type === "messagesRead") {
+          const read = new Set(event.messageIds);
+          setMessages((current) =>
+            current.map((message) =>
+              read.has(message.id) ? { ...message, delivered: true, read: true } : message,
+            ),
+          );
+        } else if (event.type === "contactChanged") {
+          refreshContacts();
         }
         refreshStatus();
       }),
       api.onError(show),
     ];
     return () => stops.forEach((stop) => stop.then((unlisten) => unlisten()));
-  }, [refreshContacts, refreshStatus, show]);
+  }, [refreshContacts, refreshStatus, show, markSelectedRead]);
 
   const contact = contacts.find((candidate) => candidate.id === selected) ?? null;
 
@@ -111,7 +145,29 @@ function Main({ profile }: { profile: Profile }) {
       setSelected(null);
       setMessages([]);
       refreshContacts();
-      show(`Declined ${contact.name}. Their messages are deleted and new ones will be ignored.`);
+      show(t.declined(contact.name));
+    } catch (error) {
+      show(String(error));
+    }
+  }
+
+  async function exportFile() {
+    try {
+      const count = await api.exportFile();
+      if (count !== null) show(t.exported(count));
+    } catch (error) {
+      show(String(error));
+    }
+  }
+
+  async function importFile() {
+    try {
+      const report = await api.importFile();
+      if (report === null) return;
+      show(t.imported(report.received, report.delivered, report.carried, report.skipped));
+      refreshContacts();
+      refreshStatus();
+      if (selected !== null) api.messages(selected).then(setMessages);
     } catch (error) {
       show(String(error));
     }
@@ -128,46 +184,18 @@ function Main({ profile }: { profile: Profile }) {
         onClick={() => setSelected(item.id)}
       >
         <span className="avatar" aria-hidden>
-          {item.name.slice(0, 1).toUpperCase()}
+          {item.name.slice(0, 1).toLocaleUpperCase(language)}
         </span>
         <span className="who">
           <span className="name">{item.name}</span>
-          <span className="preview">{item.lastMessage ?? "No messages yet"}</span>
+          <span className="preview">{item.lastMessage ?? t.noMessagesYet}</span>
         </span>
         <span className="meta">
-          {item.lastAt !== null && <time>{shortTime(item.lastAt)}</time>}
-          {(unread[item.id] ?? 0) > 0 && <span className="badge">{unread[item.id]}</span>}
+          {item.lastAt !== null && <time>{shortTime(item.lastAt, language)}</time>}
+          {item.unread > 0 && item.id !== selected && <span className="badge">{item.unread}</span>}
         </span>
       </button>
     );
-  }
-
-  async function exportFile() {
-    try {
-      const count = await api.exportFile();
-      if (count !== null) show(`Saved ${plural(count, "item", "items")} to the file. Carry it to another Kervan computer.`);
-    } catch (error) {
-      show(String(error));
-    }
-  }
-
-  async function importFile() {
-    try {
-      const report = await api.importFile();
-      if (report === null) return;
-      const parts = [
-        plural(report.received, "new message", "new messages"),
-        plural(report.delivered, "delivery receipt", "delivery receipts"),
-        `${report.carried} to carry for others`,
-      ];
-      if (report.skipped > 0) parts.push(`${report.skipped} unreadable`);
-      show(`Imported: ${parts.join(", ")}.`);
-      refreshContacts();
-      refreshStatus();
-      if (selected !== null) api.messages(selected).then(setMessages);
-    } catch (error) {
-      show(String(error));
-    }
   }
 
   return (
@@ -179,28 +207,32 @@ function Main({ profile }: { profile: Profile }) {
             <strong>Kervan</strong>
             <span>{profile.name}</span>
           </div>
+          <button className="icon-button" onClick={() => setDialog("settings")} aria-label={t.settings} title={t.settings}>
+            <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
+              <path
+                fill="currentColor"
+                d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3.3h-4l-.4 2.6a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.5 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"
+                transform="translate(-1 0)"
+              />
+            </svg>
+          </button>
         </header>
-        <nav className="contacts" aria-label="Contacts">
+        <nav className="contacts" aria-label={t.contacts}>
           {requests.length > 0 && (
             <>
-              <h3 className="section-title">Requests</h3>
+              <h3 className="section-title">{t.requests}</h3>
               {requests.map(contactRow)}
-              <h3 className="section-title">Contacts</h3>
+              <h3 className="section-title">{t.contacts}</h3>
             </>
           )}
           {accepted.map(contactRow)}
-          {contacts.length === 0 && (
-            <p className="sidebar-empty">
-              Add the people you want to reach. Only one of you needs the other's card: your first message carries
-              yours.
-            </p>
-          )}
+          {contacts.length === 0 && <p className="sidebar-empty">{t.sidebarEmpty}</p>}
         </nav>
         <footer className="sidebar-actions">
           <button className="primary" onClick={() => setDialog("add")}>
-            Add contact
+            {t.addContact}
           </button>
-          <button onClick={() => setDialog("card")}>My card</button>
+          <button onClick={() => setDialog("card")}>{t.myCard}</button>
         </footer>
       </aside>
 
@@ -210,8 +242,8 @@ function Main({ profile }: { profile: Profile }) {
         ) : (
           <div className="placeholder">
             <Logo size={56} />
-            <h2>No conversation yet</h2>
-            <p>Give your card to someone and add theirs. Messages then wait on this computer until a path appears.</p>
+            <h2>{t.noConversation}</h2>
+            <p>{t.noConversationHint}</p>
           </div>
         )}
       </main>
@@ -235,6 +267,16 @@ function Main({ profile }: { profile: Profile }) {
         />
       )}
       {dialog === "card" && <MyCardDialog profile={profile} onClose={() => setDialog(null)} />}
+      {dialog === "settings" && (
+        <SettingsDialog
+          profile={profile}
+          onClose={() => setDialog(null)}
+          onRenamed={(renamed) => {
+            onProfile(renamed);
+            show(t.renamed);
+          }}
+        />
+      )}
       {dialog === "network" && status?.lanProblem && (
         <NetworkDialog problem={status.lanProblem} onClose={() => setDialog(null)} />
       )}

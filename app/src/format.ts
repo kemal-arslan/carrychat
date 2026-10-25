@@ -1,3 +1,5 @@
+import type { Language } from "./i18n";
+
 // Sizes from docs/PROTOCOL.md §5.4 and §7.
 const BUNDLE_OVERHEAD = 67;
 const MAX_BUNDLE = 4096;
@@ -21,19 +23,20 @@ export function radioPackets(bytes: number): number {
   return Math.ceil(bundle / (MESHTASTIC_MTU - FRAGMENT_HEADER));
 }
 
-const timeFormat = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
-const dayFormat = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" });
-
-export function shortTime(unix: number): string {
+export function shortTime(unix: number, language: Language): string {
   const date = new Date(unix * 1000);
-  return date.toDateString() === new Date().toDateString() ? timeFormat.format(date) : dayFormat.format(date);
+  const today = date.toDateString() === new Date().toDateString();
+  return new Intl.DateTimeFormat(
+    language,
+    today ? { hour: "2-digit", minute: "2-digit" } : { day: "numeric", month: "short" },
+  ).format(date);
 }
 
-export function fullTime(unix: number): string {
-  const date = new Date(unix * 1000);
-  return `${dayFormat.format(date)}, ${timeFormat.format(date)}`;
-}
-
-export function plural(count: number, one: string, many: string): string {
-  return `${count} ${count === 1 ? one : many}`;
+export function fullTime(unix: number, language: Language): string {
+  return new Intl.DateTimeFormat(language, {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(unix * 1000));
 }

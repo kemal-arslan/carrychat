@@ -210,3 +210,13 @@ async fn nodes_find_each_other_by_multicast() {
     .await;
     assert_eq!(alice.node.status().unwrap().lan_problem, None);
 }
+
+#[test]
+fn erasing_leaves_nothing_behind() {
+    let dir = TempDir::new().unwrap();
+    let card = Node::create(dir.path(), "alice").unwrap().profile().card;
+    kervan_node::erase(dir.path()).unwrap();
+    assert!(Node::open(dir.path()).unwrap().is_none());
+    let again = Node::create(dir.path(), "alice").unwrap();
+    assert_ne!(again.profile().card, card);
+}

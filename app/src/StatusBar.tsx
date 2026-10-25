@@ -1,5 +1,5 @@
 import type { Status } from "./api";
-import { plural } from "./format";
+import { useI18n } from "./i18n";
 
 type Props = {
   status: Status | null;
@@ -11,6 +11,7 @@ type Props = {
 };
 
 export function StatusBar({ status, preview, onNetworkHelp, onConnect, onImport, onExport }: Props) {
+  const { t } = useI18n();
   const link =
     !status || status.lanPort === null
       ? "off"
@@ -20,18 +21,18 @@ export function StatusBar({ status, preview, onNetworkHelp, onConnect, onImport,
           ? "up"
           : "waiting";
   const label = {
-    off: "Local network: off",
-    waiting: "Local network: looking for other computers",
-    up: `Local network: ${plural(status?.lanPeers ?? 0, "computer", "computers")} nearby`,
-    blocked: "Local network: blocked by macOS",
-    failed: "Local network: not working",
+    off: t.lanOff,
+    waiting: t.lanWaiting,
+    up: t.lanUp(status?.lanPeers ?? 0),
+    blocked: t.lanBlocked,
+    failed: t.lanFailed,
   }[link];
 
   const internet = !status?.internetOn ? "off" : status.internetRelays > 0 ? "up" : "waiting";
   const internetLabel = {
-    off: "Internet: off",
-    waiting: "Internet: connecting",
-    up: `Internet: ${plural(status?.internetRelays ?? 0, "relay", "relays")}`,
+    off: t.internetOff,
+    waiting: t.internetConnecting,
+    up: t.internetUp(status?.internetRelays ?? 0),
   }[internet];
 
   return (
@@ -41,7 +42,7 @@ export function StatusBar({ status, preview, onNetworkHelp, onConnect, onImport,
         {label}
         {(link === "blocked" || link === "failed") && (
           <button className="link-action" onClick={onNetworkHelp}>
-            {link === "blocked" ? "Fix…" : "Details…"}
+            {link === "blocked" ? t.fix : t.details}
           </button>
         )}
       </span>
@@ -51,15 +52,15 @@ export function StatusBar({ status, preview, onNetworkHelp, onConnect, onImport,
       </span>
       {status && (
         <>
-          <span>{plural(status.outbox, "message", "messages")} waiting to send</span>
-          <span>carrying {status.carried} for others</span>
+          <span>{t.waitingToSend(status.outbox)}</span>
+          <span>{t.carrying(status.carried)}</span>
         </>
       )}
-      {preview && <span className="preview-tag">Browser preview with sample data</span>}
+      {preview && <span className="preview-tag">{t.preview}</span>}
       <span className="status-actions">
-        <button onClick={onConnect}>Connect…</button>
-        <button onClick={onImport}>Import file…</button>
-        <button onClick={onExport}>Export file…</button>
+        <button onClick={onConnect}>{t.connect}</button>
+        <button onClick={onImport}>{t.importFile}</button>
+        <button onClick={onExport}>{t.exportFile}</button>
       </span>
     </footer>
   );

@@ -44,6 +44,8 @@ pub struct ContactView {
     pub last_at: Option<u32>,
     /// Wrote first and waits to be accepted or declined.
     pub request: bool,
+    /// Messages from them we have not read.
+    pub unread: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -56,6 +58,16 @@ pub struct MessageView {
     pub created_at: u32,
     /// For outgoing messages: whether the recipient's tombstone came back.
     pub delivered: bool,
+    /// For outgoing messages: whether the recipient read it, if they send
+    /// read receipts. For incoming ones: whether we read it.
+    pub read: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Settings {
+    /// Whether contacts learn when we read their messages.
+    pub read_receipts: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -95,6 +107,15 @@ pub enum Event {
     MessageDelivered { contact_id: i64, message_id: i64 },
     #[serde(rename_all = "camelCase")]
     PeersChanged { count: usize },
+    /// The contact read some of our messages.
+    #[serde(rename_all = "camelCase")]
+    MessagesRead {
+        contact_id: i64,
+        message_ids: Vec<i64>,
+    },
+    /// A contact changed their name.
+    #[serde(rename_all = "camelCase")]
+    ContactChanged { contact: ContactView },
     /// Someone who has our card wrote to us for the first time.
     #[serde(rename_all = "camelCase")]
     ContactRequest { contact: ContactView },
@@ -163,6 +184,29 @@ impl Node {
         }
         self.shared.internet.renew_subscription();
         Ok(contact)
+    }
+
+    /// Marks a contact's messages read and, unless read receipts are off,
+    /// tells them.
+    pub fn mark_read(&self, contact_id: i64) -> Result<()> {
+        let receipts = self.shared.engine().mark_read(contact_id, now())?;
+        self.shared.send_own(&receipts);
+        Ok(())
+    }
+
+    /// Changes our name and sends the new card to our contacts.
+    pub fn rename(&self, name: &str) -> Result<Profile> {
+        let (profile, updates) = self.shared.engine().rename(name, now())?;
+        self.shared.send_own(&updates);
+        Ok(profile)
+    }
+
+    pub fn settings(&self) -> Result<Settings> {
+        self.shared.engine().settings()
+    }
+
+    pub fn set_read_receipts(&self, on: bool) -> Result<()> {
+        self.shared.engine().set_read_receipts(on)
     }
 
     /// Accepts a request: its sender becomes a contact.
@@ -322,9 +366,34 @@ impl Shared {
         }
     }
 
+    /// Sends our own new bundles on every link that is up.
+    fn send_own(&self, frames: &[(Frame, kervan_proto::pair::RecipientTag)]) {
+        for (frame, tag) in frames {
+            self.lan.broadcast(&frame.to_bytes(), None);
+            self.internet.post_bundle(frame, tag);
+        }
+        if !frames.is_empty() {
+            self.internet.renew_subscription();
+        }
+    }
+
     pub(crate) fn emit(&self, event: Event) {
         let _ = self.events.send(event);
     }
+}
+
+/// Deletes everything a node keeps in `dir`: identity, contacts, messages
+/// and carried bundles. Stop using every [`Node`] opened from `dir` first; a
+/// running one keeps what it has in memory until it ends.
+pub fn erase(dir: &Path) -> Result<()> {
+    for name in [DATABASE_FILE, "kervan.db-wal", "kervan.db-shm"] {
+        match std::fs::remove_file(dir.join(name)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
 }
 
 fn open_store(dir: &Path) -> Result<Store> {

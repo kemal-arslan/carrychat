@@ -263,3 +263,57 @@ fn own_card_and_garbage_are_refused_as_contacts() {
     assert!(alice.add_contact("kervan:not-a-card", NOW).is_err());
     assert!(alice.contacts().unwrap().is_empty());
 }
+
+#[test]
+fn read_receipts_reach_the_sender_unless_turned_off() {
+    let (mut alice, mut bob, bob_id) = alice_and_bob();
+    let (sent, frame) = alice.send_text(bob_id, "Okudun mu?", NOW).unwrap();
+    bob.handle(frame, NOW).unwrap();
+    let alice_id = bob.contacts().unwrap()[0].id;
+    assert_eq!(bob.contacts().unwrap()[0].unread, 1);
+
+    let receipts = bob.mark_read(alice_id, NOW + 5).unwrap();
+    assert_eq!(receipts.len(), 1);
+    assert_eq!(bob.contacts().unwrap()[0].unread, 0);
+    assert!(bob.messages(alice_id).unwrap()[0].read);
+    assert!(bob.mark_read(alice_id, NOW + 6).unwrap().is_empty());
+
+    let at_alice = alice.handle(receipts[0].0.clone(), NOW + 6).unwrap();
+    assert_eq!(
+        at_alice.events,
+        vec![Event::MessagesRead {
+            contact_id: bob_id,
+            message_ids: vec![sent.id]
+        }]
+    );
+    assert!(alice.messages(bob_id).unwrap()[0].read);
+
+    bob.set_read_receipts(false).unwrap();
+    assert!(!bob.settings().unwrap().read_receipts);
+    let (_, second) = alice.send_text(bob_id, "Ya bunu?", NOW + 10).unwrap();
+    bob.handle(second, NOW + 10).unwrap();
+    assert!(bob.mark_read(alice_id, NOW + 11).unwrap().is_empty());
+    assert_eq!(bob.contacts().unwrap()[0].unread, 0);
+}
+
+#[test]
+fn a_new_name_reaches_contacts_and_keeps_the_fingerprint() {
+    let (mut alice, mut bob, bob_id) = alice_and_bob();
+    let (_, frame) = alice.send_text(bob_id, "hi", NOW).unwrap();
+    let received = bob.handle(frame, NOW).unwrap();
+    alice.handle(received.relay[0].clone(), NOW).unwrap();
+
+    let fingerprint = alice.profile().fingerprint;
+    let (profile, updates) = alice.rename("Ayşe", NOW + 1).unwrap();
+    assert_eq!(profile.name, "Ayşe");
+    assert_eq!(profile.fingerprint, fingerprint);
+    assert_eq!(updates.len(), 1);
+
+    let changed = bob.handle(updates[0].0.clone(), NOW + 2).unwrap();
+    let [Event::ContactChanged { contact }] = &changed.events[..] else {
+        panic!("expected a changed contact, got {:?}", changed.events);
+    };
+    assert_eq!(contact.name, "Ayşe");
+    assert_eq!(contact.fingerprint, fingerprint);
+    assert!(alice.rename("   ", NOW + 3).is_err());
+}

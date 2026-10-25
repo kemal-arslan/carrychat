@@ -39,7 +39,7 @@ npm install
 npm run tauri dev
 ```
 
-Create your identity and give your card (**My card**) to the people you want to hear from, or add theirs with **Add contact**. Only one side needs the other's card: the first message introduces the sender, and the recipient accepts the request. Kervan computers on the same network find each other by themselves, and while there is internet, messages also go through public Nostr relays, so computers on different networks reach each other. If your network blocks that, use **Connect…** with the other computer's address. **Export file…** writes everything waiting to be delivered to a `.kervan` file that someone can carry to another Kervan computer and import there.
+Create your identity and give your card (**My card**, also as a QR code) to the people you want to hear from, or add theirs with **Add contact**. Only one side needs the other's card: the first message introduces the sender, and the recipient accepts the request. Kervan computers on the same network find each other by themselves, and while there is internet, messages also go through public Nostr relays, so computers on different networks reach each other. If your network blocks that, use **Connect…** with the other computer's address. **Export file…** writes everything waiting to be delivered to a `.kervan` file that someone can carry to another Kervan computer and import there.
 
 `npm run dev` opens the interface in a browser with sample data, without building the app.
 
@@ -54,6 +54,9 @@ kervan accept Deniz                          # accept someone who wrote to you f
 kervan send Deniz "İyiyim, Kadıköy'deyim."
 kervan run                                   # deliver, receive and relay (local network and internet)
 kervan export messages.kervan                # or carry everything on a USB stick
+kervan rename "Ayşe Yılmaz"                  # contacts get the new name
+kervan read-receipts off                     # stop telling contacts what you read
+kervan erase --yes                           # delete identity, contacts and messages
 ```
 
 `kervan run` on a computer without a screen turns it into a relay: it carries other people's messages until they are delivered, without being able to read them.

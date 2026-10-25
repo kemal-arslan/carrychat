@@ -43,8 +43,21 @@ enum Command {
         #[arg(required = true, num_args = 1..)]
         text: Vec<String>,
     },
-    /// Show the conversation with a contact.
+    /// Show the conversation with a contact and mark it read.
     Log { contact: String },
+    /// Change your name. Contacts get the new name with your new card.
+    Rename { name: String },
+    /// Tell contacts when you read their messages, or stop telling them.
+    ReadReceipts {
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
+    },
+    /// Delete your identity, contacts and messages from this computer.
+    Erase {
+        /// Required: there is no undo.
+        #[arg(long)]
+        yes: bool,
+    },
     /// Write everything this node holds to a file, to carry to another node.
     Export { file: PathBuf },
     /// Take in a file written by `export`.
@@ -88,6 +101,16 @@ type AnyResult = Result<(), Box<dyn std::error::Error>>;
 
 async fn run(cli: Cli) -> AnyResult {
     let dir = cli.dir.unwrap_or_else(default_dir);
+    if let Command::Erase { yes } = &cli.command {
+        if !yes {
+            return Err(
+                "this deletes your identity, contacts and messages for good; add --yes".into(),
+            );
+        }
+        kervan_node::erase(&dir)?;
+        println!("Erased everything in {}", dir.display());
+        return Ok(());
+    }
     if let Command::Init { name } = &cli.command {
         let node = Node::create(&dir, name)?;
         println!("Created {} in {}", name, dir.display());
@@ -102,7 +125,7 @@ async fn run(cli: Cli) -> AnyResult {
     })?;
 
     match cli.command {
-        Command::Init { .. } => unreachable!("handled above"),
+        Command::Init { .. } | Command::Erase { .. } => unreachable!("handled above"),
         Command::Card => print_card(&node),
         Command::Add { card } => {
             let contact = node.add_contact(&card)?;
@@ -147,13 +170,23 @@ async fn run(cli: Cli) -> AnyResult {
                 } else {
                     contact.name.as_str()
                 };
-                let mark = if message.outgoing && message.delivered {
-                    " ✓"
-                } else {
-                    ""
+                let mark = match (message.outgoing, message.read, message.delivered) {
+                    (true, true, _) => " ✓✓",
+                    (true, false, true) => " ✓",
+                    _ => "",
                 };
                 println!("{who}: {}{mark}", message.body);
             }
+            // Read receipts wait for the next `kervan run` or `kervan export`.
+            node.mark_read(contact.id)?;
+        }
+        Command::Rename { name } => {
+            let profile = node.rename(&name)?;
+            println!("You are {} now. Contacts get the new name with the next `kervan run` or `kervan export`.", profile.name);
+        }
+        Command::ReadReceipts { state } => {
+            node.set_read_receipts(state == "on")?;
+            println!("Read receipts are {state}.");
         }
         Command::Export { file } => {
             let frames = node.export_file(&file)?;
@@ -240,6 +273,10 @@ async fn run_node(
                 }
                 Ok(Event::PeersChanged { count }) => println!("· {count} node(s) nearby"),
                 Ok(Event::InternetChanged { relays }) => println!("· {relays} internet relay(s) connected"),
+                Ok(Event::MessagesRead { contact_id, message_ids }) => {
+                    println!("✓✓ {} read {} message(s)", names(contact_id), message_ids.len());
+                }
+                Ok(Event::ContactChanged { contact }) => println!("· contact {} is called {} now", contact.id, contact.name),
                 Ok(Event::ContactRequest { contact }) => {
                     println!("? {} ({}) wants to message you.", contact.name, contact.fingerprint);
                     println!("  Accept with `kervan accept {}`, or `kervan decline {}`.", contact.id, contact.id);

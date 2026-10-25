@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { Contact, Message } from "./api";
 import { MAX_MESSAGE_BYTES, ONE_PACKET_BYTES, fullTime, radioPackets, shortTime, utf8Length } from "./format";
+import { useI18n } from "./i18n";
 
 type Props = {
   contact: Contact;
@@ -11,6 +12,7 @@ type Props = {
 };
 
 export function Chat({ contact, messages, onSend, onAccept, onDecline }: Props) {
+  const { t, language } = useI18n();
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -27,6 +29,7 @@ export function Chat({ contact, messages, onSend, onAccept, onDecline }: Props) 
 
   const bytes = utf8Length(draft.trim());
   const tooLong = bytes > MAX_MESSAGE_BYTES;
+  const packets = radioPackets(bytes);
 
   async function send() {
     if (bytes === 0 || tooLong || sending) return;
@@ -36,7 +39,7 @@ export function Chat({ contact, messages, onSend, onAccept, onDecline }: Props) 
       await onSend(draft);
       setDraft("");
     } catch (failure) {
-      setError(String(failure));
+      setError(String(failure).replace(/^Error: /, ""));
     } finally {
       setSending(false);
     }
@@ -49,48 +52,45 @@ export function Chat({ contact, messages, onSend, onAccept, onDecline }: Props) 
     }
   }
 
+  function state(message: Message) {
+    if (message.read) return ["read", t.read];
+    if (message.delivered) return ["delivered", t.delivered];
+    return ["waiting", t.waitingForPath];
+  }
+
   return (
-    <section className="chat" aria-label={`Conversation with ${contact.name}`}>
+    <section className="chat" aria-label={contact.name}>
       <header className="chat-header">
         <h2>{contact.name}</h2>
-        <span className="fingerprint" title="Compare this with what they see under My card">
+        <span className="fingerprint" title={t.compareFingerprint}>
           {contact.fingerprint}
         </span>
       </header>
 
       <ol className="messages" ref={list}>
-        {messages.length === 0 && (
-          <li className="messages-empty">
-            Nothing here yet. What you write waits on this computer until a path to {contact.name} appears: another
-            Kervan computer on the network, or a file someone carries.
-          </li>
-        )}
-        {messages.map((message) => (
-          <li key={message.id} className={message.outgoing ? "bubble outgoing" : "bubble incoming"}>
-            <p>{message.body}</p>
-            <footer>
-              <time title={fullTime(message.createdAt)}>{shortTime(message.createdAt)}</time>
-              {message.outgoing && (
-                <span className={message.delivered ? "state delivered" : "state waiting"}>
-                  {message.delivered ? "Delivered" : "Waiting for a path"}
-                </span>
-              )}
-            </footer>
-          </li>
-        ))}
+        {messages.length === 0 && <li className="messages-empty">{t.chatEmpty(contact.name)}</li>}
+        {messages.map((message) => {
+          const [stateClass, stateLabel] = state(message);
+          return (
+            <li key={message.id} className={message.outgoing ? "bubble outgoing" : "bubble incoming"}>
+              <p>{message.body}</p>
+              <footer>
+                <time title={fullTime(message.createdAt, language)}>{shortTime(message.createdAt, language)}</time>
+                {message.outgoing && <span className={`state ${stateClass}`}>{stateLabel}</span>}
+              </footer>
+            </li>
+          );
+        })}
       </ol>
 
       {contact.request ? (
         <div className="request-bar">
-          <p>
-            <strong>{contact.name}</strong> has your card and wrote to you first. Check this fingerprint with them
-            before you accept:
-          </p>
+          <p>{t.requestBar(contact.name)}</p>
           <p className="fingerprint large">{contact.fingerprint}</p>
           <div className="dialog-actions">
-            <button onClick={onDecline}>Decline</button>
+            <button onClick={onDecline}>{t.decline}</button>
             <button className="primary" onClick={onAccept}>
-              Accept and reply
+              {t.acceptAndReply}
             </button>
           </div>
         </div>
@@ -100,21 +100,23 @@ export function Chat({ contact, messages, onSend, onAccept, onDecline }: Props) 
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={onKeyDown}
-            placeholder={`Message ${contact.name}`}
+            placeholder={t.messageTo(contact.name)}
             rows={2}
-            aria-label="Message"
+            aria-label={t.messageTo(contact.name)}
           />
           <div className="composer-row">
             <span className={tooLong ? "meter error" : bytes > ONE_PACKET_BYTES ? "meter warn" : "meter"}>
               {error ??
                 (tooLong
-                  ? `Too long: ${bytes} of ${MAX_MESSAGE_BYTES} bytes`
+                  ? t.tooLong(bytes, MAX_MESSAGE_BYTES)
                   : bytes === 0
-                    ? "Enter sends, Shift+Enter starts a new line"
-                    : `${bytes} bytes · ${radioPackets(bytes) === 1 ? "fits one radio packet" : `${radioPackets(bytes)} radio packets`}`)}
+                    ? t.composerHint
+                    : packets === 1
+                      ? t.onePacket(bytes)
+                      : t.packets(bytes, packets))}
             </span>
             <button className="primary" onClick={send} disabled={bytes === 0 || tooLong || sending}>
-              Send
+              {t.send}
             </button>
           </div>
         </div>

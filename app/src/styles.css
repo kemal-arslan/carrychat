@@ -170,6 +170,27 @@ label {
   font-size: 12.5px;
 }
 
+.brand > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  border-color: transparent;
+}
+
+.icon-button:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--line);
+}
+
 .contacts {
   flex: 1;
   overflow-y: auto;
@@ -394,6 +415,10 @@ label {
   content: "✓ ";
 }
 
+.state.read::before {
+  content: "✓✓ ";
+}
+
 .composer {
   padding: 12px 24px 16px;
   border-top: 1px solid var(--line);
@@ -573,6 +598,76 @@ dialog p + p {
   background: var(--sidebar);
   color: var(--muted);
   overflow-wrap: anywhere;
+}
+
+.qr {
+  display: block;
+  margin: 14px auto 0;
+  padding: 10px;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+.hint.center {
+  text-align: center;
+}
+
+.inline-field {
+  display: flex;
+  gap: 8px;
+}
+
+.inline-field input {
+  flex: 1;
+}
+
+.settings-section {
+  margin: 22px 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.settings-section.danger {
+  color: var(--danger);
+}
+
+label.toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0;
+  font-weight: 400;
+}
+
+label.toggle input {
+  width: auto;
+}
+
+select {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+  font-weight: 600;
+}
+
+button.danger-outline {
+  color: var(--danger);
+  border-color: var(--danger);
+  margin-right: auto;
 }
 
 .dialog-actions {

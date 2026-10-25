@@ -5,6 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 
 export type Profile = { name: string; fingerprint: string; card: string };
 
@@ -16,6 +17,8 @@ export type Contact = {
   lastAt: number | null;
   /** Wrote first and waits to be accepted or declined. */
   request: boolean;
+  /** Messages from them not read yet. */
+  unread: number;
 };
 
 export type Message = {
@@ -25,7 +28,11 @@ export type Message = {
   body: string;
   createdAt: number;
   delivered: boolean;
+  /** Outgoing: they read it. Incoming: we read it. */
+  read: boolean;
 };
+
+export type Settings = { readReceipts: boolean };
 
 /** Why the local network link is not working. `blocked`: macOS denies the Local Network permission. */
 export type LanProblem = { kind: "blocked" | "failed"; detail: string };
@@ -52,6 +59,8 @@ export type ImportReport = {
 export type NodeEvent =
   | { type: "messageReceived"; message: Message }
   | { type: "messageDelivered"; contactId: number; messageId: number }
+  | { type: "messagesRead"; contactId: number; messageIds: number[] }
+  | { type: "contactChanged"; contact: Contact }
   | { type: "peersChanged"; count: number }
   | { type: "contactRequest"; contact: Contact }
   | { type: "localNetworkChanged"; problem: LanProblem | null }
@@ -62,12 +71,16 @@ export interface Api {
   preview: boolean;
   profile(): Promise<Profile | null>;
   createProfile(name: string): Promise<Profile>;
+  rename(name: string): Promise<Profile>;
   contacts(): Promise<Contact[]>;
   addContact(card: string): Promise<Contact>;
   acceptContact(contactId: number): Promise<Contact>;
   declineContact(contactId: number): Promise<void>;
   messages(contactId: number): Promise<Message[]>;
   sendMessage(contactId: number, text: string): Promise<Message>;
+  markRead(contactId: number): Promise<void>;
+  settings(): Promise<Settings>;
+  setReadReceipts(on: boolean): Promise<void>;
   status(): Promise<Status>;
   /** Asks where to save, then exports. Returns null if cancelled. */
   exportFile(): Promise<number | null>;
@@ -76,11 +89,15 @@ export interface Api {
   connectPeer(address: string): Promise<void>;
   /** Opens the Local Network permission in macOS System Settings. */
   openNetworkSettings(): Promise<void>;
+  /** Deletes identity, contacts and messages, and restarts empty. */
+  eraseEverything(): Promise<void>;
+  /** Shows a system notification, asking for permission the first time. */
+  notify(title: string, body: string): Promise<void>;
   onEvent(handler: (event: NodeEvent) => void): Promise<() => void>;
   onError(handler: (message: string) => void): Promise<() => void>;
 }
 
-const FILE_FILTERS = [{ name: "Kervan messages", extensions: ["kervan"] }];
+const FILE_FILTERS = [{ name: "Kervan", extensions: ["kervan"] }];
 
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   try {
@@ -95,12 +112,16 @@ function desktopApi(): Api {
     preview: false,
     profile: () => call("profile"),
     createProfile: (name) => call("create_profile", { name }),
+    rename: (name) => call("rename", { name }),
     contacts: () => call("contacts"),
     addContact: (card) => call("add_contact", { card }),
     acceptContact: (contactId) => call("accept_contact", { contactId }),
     declineContact: (contactId) => call("decline_contact", { contactId }),
     messages: (contactId) => call("messages", { contactId }),
     sendMessage: (contactId, text) => call("send_message", { contactId, text }),
+    markRead: (contactId) => call("mark_read", { contactId }),
+    settings: () => call("settings"),
+    setReadReceipts: (on) => call("set_read_receipts", { on }),
     status: () => call("status"),
     async exportFile() {
       const day = new Date().toISOString().slice(0, 10);
@@ -113,6 +134,12 @@ function desktopApi(): Api {
     },
     connectPeer: (address) => call("connect_peer", { address }),
     openNetworkSettings: () => call("open_network_settings"),
+    eraseEverything: () => call("erase_everything"),
+    async notify(title, body) {
+      let granted = await isPermissionGranted();
+      if (!granted) granted = (await requestPermission()) === "granted";
+      if (granted) sendNotification({ title, body });
+    },
     onEvent: (handler) => listen<NodeEvent>("kervan-event", (event) => handler(event.payload)),
     onError: (handler) => listen<string>("kervan-error", (event) => handler(event.payload)),
   };
@@ -123,24 +150,50 @@ function previewApi(): Api {
   const listeners: ((event: NodeEvent) => void)[] = [];
   const emit = (event: NodeEvent) => listeners.forEach((listener) => listener(event));
   let profile: Profile | null = null;
+  let settings: Settings = { readReceipts: true };
   let nextId = 10;
+  const contact = (id: number, name: string, fingerprint: string, request = false): Contact => ({
+    id,
+    name,
+    fingerprint,
+    lastMessage: null,
+    lastAt: null,
+    request,
+    unread: 0,
+  });
   const contacts: Contact[] = [
-    { id: 1, name: "Deniz", fingerprint: "7jgi 54zm 2zkd yent vzen s3pg lq", lastMessage: null, lastAt: null, request: false },
-    { id: 2, name: "Ayşe", fingerprint: "gp6m vxkt dnvv lqmw ewpx qfox be", lastMessage: null, lastAt: null, request: false },
-    { id: 3, name: "Mehmet", fingerprint: "fwtj 6jv4 jq4d zgfb o2vz bv72 kq", lastMessage: null, lastAt: null, request: true },
+    contact(1, "Deniz", "7jgi 54zm 2zkd yent vzen s3pg lq"),
+    contact(2, "Ayşe", "gp6m vxkt dnvv lqmw ewpx qfox be"),
+    contact(3, "Mehmet", "fwtj 6jv4 jq4d zgfb o2vz bv72 kq", true),
   ];
+  const message = (id: number, contactId: number, outgoing: boolean, body: string, ago: number, done = true): Message => ({
+    id,
+    contactId,
+    outgoing,
+    body,
+    createdAt: now() - ago,
+    delivered: outgoing && done,
+    read: done,
+  });
   const messages: Message[] = [
-    { id: 1, contactId: 1, outgoing: false, body: "Elektrik geldi mi sizde?", createdAt: now() - 5400, delivered: false },
-    { id: 2, contactId: 1, outgoing: true, body: "Geldi, ama internet hâlâ yok. Su var mı?", createdAt: now() - 5100, delivered: true },
-    { id: 3, contactId: 1, outgoing: false, body: "Var, yarın sabah okulun önünde dağıtım olacak.", createdAt: now() - 4900, delivered: false },
-    { id: 4, contactId: 1, outgoing: true, body: "Tamam, oraya gelirim. Annem de yanımda.", createdAt: now() - 600, delivered: false },
-    { id: 5, contactId: 2, outgoing: true, body: "İyiyim, Kadıköy'deyim.", createdAt: now() - 86400, delivered: true },
-    { id: 6, contactId: 3, outgoing: false, body: "Merhaba, ben Mehmet. Kartını Deniz'den aldım.", createdAt: now() - 300, delivered: false },
+    message(1, 1, false, "Elektrik geldi mi sizde?", 5400),
+    message(2, 1, true, "Geldi, ama internet hâlâ yok. Su var mı?", 5100),
+    message(3, 1, false, "Var, yarın sabah okulun önünde dağıtım olacak.", 4900),
+    message(4, 1, true, "Tamam, oraya gelirim. Annem de yanımda.", 600, false),
+    message(5, 2, true, "İyiyim, Kadıköy'deyim.", 86400),
+    message(7, 2, false, "Çok sevindim. Akşam ararım.", 80000, false),
+    message(6, 3, false, "Merhaba, ben Mehmet. Kartını Deniz'den aldım.", 300, false),
   ];
   const summarize = () =>
     contacts.map((contact) => {
-      const last = messages.filter((message) => message.contactId === contact.id).at(-1);
-      return { ...contact, lastMessage: last?.body ?? null, lastAt: last?.createdAt ?? null };
+      const own = messages.filter((message) => message.contactId === contact.id);
+      const last = own.at(-1);
+      return {
+        ...contact,
+        lastMessage: last?.body ?? null,
+        lastAt: last?.createdAt ?? null,
+        unread: own.filter((message) => !message.outgoing && !message.read).length,
+      };
     });
   return {
     preview: true,
@@ -155,34 +208,53 @@ function previewApi(): Api {
       };
       return profile;
     },
+    async rename(name) {
+      profile = { ...profile!, name: name.trim() };
+      return profile;
+    },
     async contacts() {
       return summarize();
     },
     async addContact(card) {
       if (!card.trim().startsWith("kervan:")) throw new Error("invalid card prefix");
-      const contact = { id: nextId++, name: "Elif", fingerprint: "q3rd 7kpa mx2c vuhe 4tzn 6wyb fo", lastMessage: null, lastAt: null, request: false };
-      contacts.push(contact);
-      return contact;
+      const added = contact(nextId++, "Elif", "q3rd 7kpa mx2c vuhe 4tzn 6wyb fo");
+      contacts.push(added);
+      return added;
     },
     async acceptContact(contactId) {
-      const contact = contacts.find((candidate) => candidate.id === contactId)!;
-      contact.request = false;
-      return contact;
+      const found = contacts.find((candidate) => candidate.id === contactId)!;
+      found.request = false;
+      return found;
     },
     async declineContact(contactId) {
       contacts.splice(contacts.findIndex((candidate) => candidate.id === contactId), 1);
     },
     async messages(contactId) {
-      return messages.filter((message) => message.contactId === contactId);
+      return messages.filter((message) => message.contactId === contactId).map((message) => ({ ...message }));
     },
     async sendMessage(contactId, text) {
-      const message = { id: nextId++, contactId, outgoing: true, body: text.trim(), createdAt: now(), delivered: false };
-      messages.push(message);
+      const sent = { ...message(nextId++, contactId, true, text.trim(), 0, false) };
+      messages.push(sent);
       setTimeout(() => {
-        message.delivered = true;
-        emit({ type: "messageDelivered", contactId, messageId: message.id });
-      }, 2500);
-      return message;
+        sent.delivered = true;
+        emit({ type: "messageDelivered", contactId, messageId: sent.id });
+      }, 2000);
+      setTimeout(() => {
+        sent.read = true;
+        emit({ type: "messagesRead", contactId, messageIds: [sent.id] });
+      }, 4000);
+      return { ...sent };
+    },
+    async markRead(contactId) {
+      messages.filter((message) => message.contactId === contactId && !message.outgoing).forEach((message) => {
+        message.read = true;
+      });
+    },
+    async settings() {
+      return settings;
+    },
+    async setReadReceipts(on) {
+      settings = { readReceipts: on };
     },
     async status() {
       // ?lan=blocked or ?lan=failed shows the local network warnings.
@@ -212,6 +284,10 @@ function previewApi(): Api {
     },
     async connectPeer() {},
     async openNetworkSettings() {},
+    async eraseEverything() {
+      location.reload();
+    },
+    async notify() {},
     async onEvent(handler) {
       listeners.push(handler);
       return () => listeners.splice(listeners.indexOf(handler), 1);

@@ -1,9 +1,11 @@
 import { useState, type FormEvent } from "react";
 import { api, type Profile } from "./api";
-import { Logo } from "./Logo";
 import { MAX_NAME_BYTES, utf8Length } from "./format";
+import { useI18n } from "./i18n";
+import { Logo } from "./Logo";
 
 export function Setup({ onCreated }: { onCreated: (profile: Profile) => void }) {
+  const { t } = useI18n();
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -16,7 +18,7 @@ export function Setup({ onCreated }: { onCreated: (profile: Profile) => void }) 
     try {
       onCreated(await api.createProfile(name));
     } catch (failure) {
-      setError(String(failure));
+      setError(String(failure).replace(/^Error: /, ""));
       setBusy(false);
     }
   }
@@ -26,8 +28,8 @@ export function Setup({ onCreated }: { onCreated: (profile: Profile) => void }) 
       <form className="setup-card" onSubmit={submit}>
         <Logo size={64} />
         <h1>Kervan</h1>
-        <p className="lede">Messages that get through when the internet doesn't.</p>
-        <label htmlFor="name">Your name</label>
+        <p className="lede">{t.tagline}</p>
+        <label htmlFor="name">{t.yourName}</label>
         <input
           id="name"
           autoFocus
@@ -36,14 +38,10 @@ export function Setup({ onCreated }: { onCreated: (profile: Profile) => void }) 
           placeholder="Ayşe Yılmaz"
           aria-invalid={tooLong}
         />
-        <p className={tooLong ? "hint error" : "hint"}>
-          {tooLong
-            ? "That name is too long for a contact card."
-            : "Your contacts see this name. There is no account: your identity is created and kept on this computer."}
-        </p>
+        <p className={tooLong ? "hint error" : "hint"}>{tooLong ? t.nameTooLong : t.nameHint}</p>
         {error && <p className="hint error">{error}</p>}
         <button className="primary" disabled={busy || tooLong || name.trim() === ""}>
-          Create my identity
+          {t.createIdentity}
         </button>
       </form>
     </div>

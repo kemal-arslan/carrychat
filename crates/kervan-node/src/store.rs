@@ -57,6 +57,8 @@ const MIGRATIONS: &[&str] = &[
     "ALTER TABLE contacts ADD COLUMN request INTEGER NOT NULL DEFAULT 0;
      ALTER TABLE contacts ADD COLUMN introduced INTEGER NOT NULL DEFAULT 0;
      CREATE TABLE blocked (dh_key BLOB PRIMARY KEY);",
+    // Read receipts: when we read an incoming message, or they read ours.
+    "ALTER TABLE messages ADD COLUMN read_at INTEGER;",
 ];
 
 pub struct StoredContact {
@@ -230,13 +232,14 @@ impl Store {
             body: body.to_owned(),
             created_at,
             delivered: false,
+            read: false,
         }))
     }
 
     pub fn messages(&self, contact_id: i64) -> Result<Vec<MessageView>> {
         let mut statement = self.conn.prepare(
-            "SELECT id, outgoing, body, created_at, delivered_at IS NOT NULL FROM messages
-             WHERE contact_id = ? ORDER BY created_at, id",
+            "SELECT id, outgoing, body, created_at, delivered_at IS NOT NULL, read_at IS NOT NULL
+             FROM messages WHERE contact_id = ? ORDER BY created_at, id",
         )?;
         let rows = statement.query_map([contact_id], |row| {
             Ok(MessageView {
@@ -246,6 +249,7 @@ impl Store {
                 body: row.get(2)?,
                 created_at: row.get(3)?,
                 delivered: row.get(4)?,
+                read: row.get(5)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -367,12 +371,71 @@ impl Store {
     }
 
     /// Own and carried bundle counts.
-    pub fn bundle_counts(&self) -> Result<(usize, usize)> {
+    /// Own messages not delivered yet, and bundles carried for others.
+    pub fn counts(&self) -> Result<(usize, usize)> {
         Ok(self.conn.query_row(
-            "SELECT COALESCE(SUM(own = 1), 0), COALESCE(SUM(own = 0), 0) FROM bundles",
+            "SELECT
+                 (SELECT COUNT(*) FROM messages m JOIN bundles b ON b.id = m.bundle_id
+                  WHERE m.outgoing = 1 AND m.delivered_at IS NULL),
+                 (SELECT COUNT(*) FROM bundles WHERE own = 0)",
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?)
+    }
+
+    pub fn unread_count(&self, contact_id: i64) -> Result<usize> {
+        Ok(self.conn.query_row(
+            "SELECT COUNT(*) FROM messages WHERE contact_id = ? AND outgoing = 0 AND read_at IS NULL",
+            [contact_id],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// Marks a contact's messages to us read. Returns the bundle ids that were
+    /// unread.
+    pub fn mark_incoming_read(&self, contact_id: i64, now: u32) -> Result<Vec<BundleId>> {
+        let mut statement = self.conn.prepare(
+            "UPDATE messages SET read_at = ?
+             WHERE contact_id = ? AND outgoing = 0 AND read_at IS NULL
+             RETURNING bundle_id",
+        )?;
+        let rows = statement.query_map(params![now, contact_id], |row| {
+            Ok(BundleId(row.get::<_, [u8; 8]>(0)?))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Marks our messages to a contact read by them. Returns the message ids
+    /// that were not marked yet.
+    pub fn mark_read_by_peer(
+        &self,
+        contact_id: i64,
+        ids: &[BundleId],
+        now: u32,
+    ) -> Result<Vec<i64>> {
+        let mut marked = Vec::new();
+        for id in ids {
+            let message: Option<i64> = self
+                .conn
+                .query_row(
+                    "UPDATE messages SET read_at = ?
+                     WHERE contact_id = ? AND outgoing = 1 AND bundle_id = ? AND read_at IS NULL
+                     RETURNING id",
+                    params![now, contact_id, id.0],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            marked.extend(message);
+        }
+        Ok(marked)
+    }
+
+    pub fn update_contact_card(&self, id: i64, card: &ContactCard) -> Result<()> {
+        self.conn.execute(
+            "UPDATE contacts SET card = ? WHERE id = ?",
+            params![card.to_bytes(), id],
+        )?;
+        Ok(())
     }
 
     pub fn has_tombstone(&self, id: BundleId) -> Result<bool> {

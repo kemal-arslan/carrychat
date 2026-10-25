@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import QRCode from "qrcode";
 import { api, type Contact, type LanProblem, type Profile } from "./api";
+import { MAX_NAME_BYTES, utf8Length } from "./format";
+import { useI18n, type LanguageChoice } from "./i18n";
+import { notificationsEnabled, setNotificationsEnabled } from "./prefs";
 
 function Dialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -14,7 +18,12 @@ function Dialog({ title, onClose, children }: { title: string; onClose: () => vo
   );
 }
 
+function errorText(failure: unknown): string {
+  return String(failure).replace(/^Error: /, "");
+}
+
 export function AddContactDialog({ onClose, onAdded }: { onClose: () => void; onAdded: (contact: Contact) => void }) {
+  const { t } = useI18n();
   const [card, setCard] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [added, setAdded] = useState<Contact | null>(null);
@@ -27,19 +36,19 @@ export function AddContactDialog({ onClose, onAdded }: { onClose: () => void; on
       setAdded(contact);
       onAdded(contact);
     } catch (failure) {
-      setError(String(failure).replace(/^Error: /, ""));
+      setError(errorText(failure));
     }
   }
 
   if (added) {
     return (
-      <Dialog title={`${added.name} is a contact`} onClose={onClose}>
-        <p>Before you rely on it, check that {added.name} sees this fingerprint under My card:</p>
+      <Dialog title={t.addedTitle(added.name)} onClose={onClose}>
+        <p>{t.addedCheck(added.name)}</p>
         <p className="fingerprint large">{added.fingerprint}</p>
-        <p className="hint">If it differs, the card was changed on its way to you.</p>
+        <p className="hint">{t.addedWarning}</p>
         <div className="dialog-actions">
           <button className="primary" onClick={onClose} autoFocus>
-            Done
+            {t.done}
           </button>
         </div>
       </Dialog>
@@ -47,9 +56,9 @@ export function AddContactDialog({ onClose, onAdded }: { onClose: () => void; on
   }
 
   return (
-    <Dialog title="Add a contact" onClose={onClose}>
+    <Dialog title={t.addTitle} onClose={onClose}>
       <form onSubmit={submit}>
-        <label htmlFor="card">Their card</label>
+        <label htmlFor="card">{t.theirCard}</label>
         <textarea
           id="card"
           className="mono"
@@ -59,15 +68,13 @@ export function AddContactDialog({ onClose, onAdded }: { onClose: () => void; on
           placeholder="kervan:…"
           autoFocus
         />
-        <p className={error ? "hint error" : "hint"}>
-          {error ?? "Paste the card they gave you. It starts with kervan:. They don't need yours: your first message carries it."}
-        </p>
+        <p className={error ? "hint error" : "hint"}>{error ?? t.addHint}</p>
         <div className="dialog-actions">
           <button type="button" onClick={onClose}>
-            Cancel
+            {t.cancel}
           </button>
           <button className="primary" disabled={card.trim() === ""}>
-            Add
+            {t.add}
           </button>
         </div>
       </form>
@@ -76,7 +83,15 @@ export function AddContactDialog({ onClose, onAdded }: { onClose: () => void; on
 }
 
 export function MyCardDialog({ profile, onClose }: { profile: Profile; onClose: () => void }) {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
+  const [qr, setQr] = useState<string | null>(null);
+
+  useEffect(() => {
+    QRCode.toString(profile.card, { type: "svg", margin: 1, errorCorrectionLevel: "M" }).then((svg) =>
+      setQr(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`),
+    );
+  }, [profile.card]);
 
   async function copy() {
     await navigator.clipboard.writeText(profile.card);
@@ -84,18 +99,17 @@ export function MyCardDialog({ profile, onClose }: { profile: Profile; onClose: 
   }
 
   return (
-    <Dialog title="My card" onClose={onClose}>
-      <p>
-        Give this card to the people you want to hear from. They can write to you right away, and you see their first
-        message as a request.
-      </p>
-      <textarea className="mono" rows={5} readOnly value={profile.card} onFocus={(event) => event.target.select()} />
-      <p className="hint">Your fingerprint. Read it out to your contacts so they can check your card:</p>
+    <Dialog title={t.myCard} onClose={onClose}>
+      <p>{t.cardIntro}</p>
+      {qr && <img className="qr" src={qr} alt={profile.card} width={200} height={200} />}
+      <p className="hint center">{t.cardQr}</p>
+      <textarea className="mono" rows={4} readOnly value={profile.card} onFocus={(event) => event.target.select()} />
+      <p className="hint">{t.cardFingerprint}</p>
       <p className="fingerprint large">{profile.fingerprint}</p>
       <div className="dialog-actions">
-        <button onClick={onClose}>Close</button>
+        <button onClick={onClose}>{t.close}</button>
         <button className="primary" onClick={copy}>
-          {copied ? "Copied" : "Copy card"}
+          {copied ? t.copied : t.copyCard}
         </button>
       </div>
     </Dialog>
@@ -111,6 +125,7 @@ export function ConnectDialog({
   onClose: () => void;
   onConnected: (notice: string) => void;
 }) {
+  const { t } = useI18n();
   const [address, setAddress] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -121,27 +136,22 @@ export function ConnectDialog({
     setError(null);
     try {
       await api.connectPeer(address);
-      onConnected(`Connected to ${address.trim()}.`);
+      onConnected(t.connected(address.trim()));
       onClose();
     } catch (failure) {
-      setError(String(failure).replace(/^Error: /, ""));
+      setError(errorText(failure));
       setBusy(false);
     }
   }
 
   return (
-    <Dialog title="Connect to a computer" onClose={onClose}>
+    <Dialog title={t.connectTitle} onClose={onClose}>
       <form onSubmit={submit}>
         <p>
-          Computers on the same network usually find each other. If they don't, connect by address.
-          {port !== null && (
-            <>
-              {" "}
-              This computer listens on port <strong>{port}</strong>.
-            </>
-          )}
+          {t.connectIntro}
+          {port !== null && t.listensOn(port)}
         </p>
-        <label htmlFor="address">Address</label>
+        <label htmlFor="address">{t.address}</label>
         <input
           id="address"
           className="mono"
@@ -153,10 +163,10 @@ export function ConnectDialog({
         {error && <p className="hint error">{error}</p>}
         <div className="dialog-actions">
           <button type="button" onClick={onClose}>
-            Cancel
+            {t.cancel}
           </button>
           <button className="primary" disabled={busy || address.trim() === ""}>
-            Connect
+            {t.connectButton}
           </button>
         </div>
       </form>
@@ -165,28 +175,26 @@ export function ConnectDialog({
 }
 
 export function NetworkDialog({ problem, onClose }: { problem: LanProblem; onClose: () => void }) {
+  const { t } = useI18n();
   const [error, setError] = useState<string | null>(null);
 
   async function openSettings() {
     try {
       await api.openNetworkSettings();
     } catch (failure) {
-      setError(String(failure).replace(/^Error: /, ""));
+      setError(errorText(failure));
     }
   }
 
   if (problem.kind === "failed") {
     return (
-      <Dialog title="The local network is not working" onClose={onClose}>
-        <p>Kervan could not reach another computer on this network:</p>
+      <Dialog title={t.failedTitle} onClose={onClose}>
+        <p>{t.failedIntro}</p>
         <p className="mono problem-detail">{problem.detail}</p>
-        <p className="hint">
-          Check that both computers are on the same network and that the other computer's firewall lets Kervan
-          accept connections. Guest networks often keep computers from reaching each other.
-        </p>
+        <p className="hint">{t.failedHint}</p>
         <div className="dialog-actions">
           <button className="primary" onClick={onClose} autoFocus>
-            Close
+            {t.close}
           </button>
         </div>
       </Dialog>
@@ -194,24 +202,135 @@ export function NetworkDialog({ problem, onClose }: { problem: LanProblem; onClo
   }
 
   return (
-    <Dialog title="Let Kervan use the local network" onClose={onClose}>
-      <p>macOS is not letting Kervan reach other computers on this network, so messages cannot leave this Mac.</p>
+    <Dialog title={t.blockedTitle} onClose={onClose}>
+      <p>{t.blockedIntro}</p>
       <ol className="steps">
-        <li>
-          Open <strong>System Settings → Privacy &amp; Security → Local Network</strong>.
-        </li>
-        <li>
-          Turn on <strong>Kervan</strong>.
-        </li>
-        <li>If this still shows as blocked after a few seconds, quit Kervan and open it again.</li>
+        <li>{t.blockedStep1}</li>
+        <li>{t.blockedStep2}</li>
+        <li>{t.blockedStep3}</li>
       </ol>
       <p className="mono problem-detail">{problem.detail}</p>
       {error && <p className="hint error">{error}</p>}
       <div className="dialog-actions">
-        <button onClick={onClose}>Close</button>
+        <button onClick={onClose}>{t.close}</button>
         <button className="primary" onClick={openSettings} autoFocus>
-          Open System Settings
+          {t.openSystemSettings}
         </button>
+      </div>
+    </Dialog>
+  );
+}
+
+export function SettingsDialog({
+  profile,
+  onClose,
+  onRenamed,
+}: {
+  profile: Profile;
+  onClose: () => void;
+  onRenamed: (profile: Profile) => void;
+}) {
+  const { t, choice, setChoice } = useI18n();
+  const [name, setName] = useState(profile.name);
+  const [readReceipts, setReadReceipts] = useState<boolean | null>(null);
+  const [notifications, setNotifications] = useState(notificationsEnabled);
+  const [confirmErase, setConfirmErase] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const trimmed = name.trim();
+  const tooLong = utf8Length(trimmed) > MAX_NAME_BYTES;
+
+  useEffect(() => {
+    api.settings().then((settings) => setReadReceipts(settings.readReceipts));
+  }, []);
+
+  async function rename(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    try {
+      onRenamed(await api.rename(trimmed));
+    } catch (failure) {
+      setError(errorText(failure));
+    }
+  }
+
+  async function toggleReadReceipts(on: boolean) {
+    setReadReceipts(on);
+    await api.setReadReceipts(on).catch((failure) => setError(errorText(failure)));
+  }
+
+  function toggleNotifications(on: boolean) {
+    setNotifications(on);
+    setNotificationsEnabled(on);
+  }
+
+  async function erase() {
+    try {
+      await api.eraseEverything();
+    } catch (failure) {
+      setError(errorText(failure));
+    }
+  }
+
+  return (
+    <Dialog title={t.settingsTitle} onClose={onClose}>
+      <form onSubmit={rename}>
+        <label htmlFor="rename">{t.yourName}</label>
+        <div className="inline-field">
+          <input id="rename" value={name} onChange={(event) => setName(event.target.value)} aria-invalid={tooLong} />
+          <button className="primary" disabled={tooLong || trimmed === "" || trimmed === profile.name}>
+            {t.save}
+          </button>
+        </div>
+        <p className={tooLong ? "hint error" : "hint"}>{tooLong ? t.nameTooLong : t.renameHint}</p>
+      </form>
+
+      <h3 className="settings-section">{t.privacy}</h3>
+      <label className="toggle">
+        <input
+          type="checkbox"
+          checked={readReceipts ?? true}
+          disabled={readReceipts === null}
+          onChange={(event) => toggleReadReceipts(event.target.checked)}
+        />
+        {t.readReceipts}
+      </label>
+      <label className="toggle">
+        <input
+          type="checkbox"
+          checked={notifications}
+          onChange={(event) => toggleNotifications(event.target.checked)}
+        />
+        {t.notifications}
+      </label>
+
+      <label htmlFor="language">{t.language}</label>
+      <select id="language" value={choice} onChange={(event) => setChoice(event.target.value as LanguageChoice)}>
+        <option value="system">{t.languageSystem}</option>
+        <option value="en">English</option>
+        <option value="tr">Türkçe</option>
+      </select>
+
+      <h3 className="settings-section danger">{t.eraseTitle}</h3>
+      <p className="hint">{confirmErase ? t.eraseConfirm : t.eraseHint}</p>
+      {error && <p className="hint error">{error}</p>}
+      <div className="dialog-actions">
+        {confirmErase ? (
+          <>
+            <button onClick={() => setConfirmErase(false)}>{t.cancel}</button>
+            <button className="danger" onClick={erase}>
+              {t.eraseNow}
+            </button>
+          </>
+        ) : (
+          <>
+            <button className="danger-outline" onClick={() => setConfirmErase(true)}>
+              {t.eraseButton}
+            </button>
+            <button className="primary" onClick={onClose}>
+              {t.close}
+            </button>
+          </>
+        )}
       </div>
     </Dialog>
   );

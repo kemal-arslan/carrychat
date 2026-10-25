@@ -6,7 +6,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use kervan_node::{
-    ContactView, ImportReport, InternetConfig, LanConfig, MessageView, Node, Profile, Status,
+    ContactView, ImportReport, InternetConfig, LanConfig, MessageView, Node, Profile, Settings,
+    Status,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -92,6 +93,39 @@ fn add_contact(state: State<'_, AppState>, card: String) -> CommandResult<Contac
 }
 
 #[tauri::command]
+fn mark_read(state: State<'_, AppState>, contact_id: i64) -> CommandResult<()> {
+    state.node()?.mark_read(contact_id).map_err(text)
+}
+
+#[tauri::command]
+fn rename(state: State<'_, AppState>, name: String) -> CommandResult<Profile> {
+    state.node()?.rename(&name).map_err(text)
+}
+
+#[tauri::command]
+fn settings(state: State<'_, AppState>) -> CommandResult<Settings> {
+    state.node()?.settings().map_err(text)
+}
+
+#[tauri::command]
+fn set_read_receipts(state: State<'_, AppState>, on: bool) -> CommandResult<()> {
+    state.node()?.set_read_receipts(on).map_err(text)
+}
+
+/// Deletes the identity, contacts and messages, then starts the app again
+/// on the first-run screen.
+#[tauri::command]
+fn erase_everything(app: AppHandle, state: State<'_, AppState>) -> CommandResult<()> {
+    state
+        .node
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .take();
+    kervan_node::erase(&state.dir).map_err(text)?;
+    app.restart()
+}
+
+#[tauri::command]
 fn accept_contact(state: State<'_, AppState>, contact_id: i64) -> CommandResult<ContactView> {
     state.node()?.accept_contact(contact_id).map_err(text)
 }
@@ -160,6 +194,7 @@ fn open_network_settings() -> CommandResult<()> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             // KERVAN_DIR lets two copies run side by side for testing.
             let dir = match std::env::var_os("KERVAN_DIR") {
@@ -183,6 +218,11 @@ pub fn run() {
             add_contact,
             accept_contact,
             decline_contact,
+            mark_read,
+            rename,
+            settings,
+            set_read_receipts,
+            erase_everything,
             messages,
             send_message,
             status,

@@ -111,7 +111,14 @@ The hop limit is left out of the associated data so relays can decrement it. Eve
 | 1 | 4 | created at, `u32` |
 | 5 | rest | body |
 
-Kinds: `0x01` is text, UTF-8. `0x02` is an introduction and appears only inside one (§5.5). All other values are reserved. A receiver that opens a bundle of an unknown kind ignores the body but still emits a tombstone, so the bundle stops circulating.
+| Kind | Body |
+| --- | --- |
+| `0x01` text | UTF-8 text |
+| `0x02` introduction | Only inside introductions (§5.5) |
+| `0x03` read | Up to 64 bundle ids (8 bytes each) of the recipient's bundles that the sender has read. Optional: a user may turn read receipts off. |
+| `0x04` card | The sender's contact card (§3.1), after a name change. The receiver accepts it only if both keys equal those of the card it has. |
+
+All other values are reserved. A receiver that opens a bundle of an unknown kind ignores the body but still emits a tombstone, so the bundle stops circulating.
 
 ### 5.3 Opening
 
