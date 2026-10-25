@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use kervan_node::{ContactView, Event, InternetConfig, LanConfig, LanProblem, Node};
+use kervan_node::{ContactView, Event, GroupView, InternetConfig, LanConfig, LanProblem, Node};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 #[derive(Parser)]
@@ -47,6 +47,9 @@ enum Command {
     Log { contact: String },
     /// Change your name. Contacts get the new name with your new card.
     Rename { name: String },
+    /// Groups: create one, change who is in it, write to it, read it.
+    #[command(subcommand)]
+    Group(GroupCommand),
     /// Tell contacts when you read their messages, or stop telling them.
     ReadReceipts {
         #[arg(value_parser = ["on", "off"])]
@@ -83,6 +86,32 @@ enum Command {
         #[arg(long)]
         chat: Option<String>,
     },
+}
+
+#[derive(Subcommand)]
+enum GroupCommand {
+    /// List your groups and their members.
+    List,
+    /// Create a group with these contacts. You become its admin.
+    Create {
+        name: String,
+        #[arg(required = true, num_args = 1..)]
+        contacts: Vec<String>,
+    },
+    /// Add a contact to a group you are the admin of.
+    Add { group: String, contact: String },
+    /// Take a member off a group you are the admin of, by name or fingerprint.
+    Remove { group: String, member: String },
+    /// Leave a group.
+    Leave { group: String },
+    /// Queue a message to a group. It goes out like any other message.
+    Send {
+        group: String,
+        #[arg(required = true, num_args = 1..)]
+        text: Vec<String>,
+    },
+    /// Show a group's messages and mark them read.
+    Log { group: String },
 }
 
 #[tokio::main]
@@ -190,6 +219,7 @@ async fn run(cli: Cli) -> AnyResult {
             let profile = node.rename(&name)?;
             println!("You are {} now. Contacts get the new name with the next `kervan run` or `kervan export`.", profile.name);
         }
+        Command::Group(command) => group_command(&node, command)?,
         Command::ReadReceipts { state } => {
             node.set_read_receipts(state == "on")?;
             println!("Read receipts are {state}.");
@@ -287,6 +317,22 @@ async fn run_node(
                     println!("? {} ({}) wants to message you.", contact.name, contact.fingerprint);
                     println!("  Accept with `kervan accept {}`, or `kervan decline {}`.", contact.id, contact.id);
                 }
+                Ok(Event::GroupMessageReceived { message }) => {
+                    let group = node
+                        .groups()
+                        .ok()
+                        .and_then(|groups| groups.into_iter().find(|group| group.id == message.group_id))
+                        .map_or_else(|| format!("group {}", message.group_id), |group| group.name);
+                    let sender = message.sender.unwrap_or_default();
+                    println!("[{group}] {sender}: {}", message.body);
+                }
+                Ok(Event::GroupChanged { group }) => {
+                    if group.member {
+                        println!("· group {} has {} member(s)", group.name, group.members.len());
+                    } else {
+                        println!("· you are no longer in group {}", group.name);
+                    }
+                }
                 Ok(Event::LocalNetworkChanged { problem: None }) => println!("· local network works"),
                 Ok(Event::LocalNetworkChanged { problem: Some(LanProblem::Blocked { detail }) }) => {
                     eprintln!("! macOS is blocking local network access ({detail}).");
@@ -306,6 +352,104 @@ async fn run_node(
             },
             _ = tokio::signal::ctrl_c() => return Ok(()),
         }
+    }
+}
+
+fn group_command(node: &Node, command: GroupCommand) -> AnyResult {
+    match command {
+        GroupCommand::List => {
+            for group in node.groups()? {
+                let state = match (group.member, group.admin) {
+                    (false, _) => "  (left)",
+                    (true, true) => "  (admin)",
+                    (true, false) => "",
+                };
+                println!("{:>3}  {}{state}", group.id, group.name);
+                for member in &group.members {
+                    let role = match (member.me, member.admin) {
+                        (true, _) => " (you)",
+                        (false, true) => " (admin)",
+                        (false, false) => "",
+                    };
+                    println!("       {:<32}  {}{role}", member.name, member.fingerprint);
+                }
+            }
+        }
+        GroupCommand::Create { name, contacts } => {
+            let ids = contacts
+                .iter()
+                .map(|contact| find_contact(node, contact).map(|contact| contact.id))
+                .collect::<Result<Vec<_>, _>>()?;
+            let group = node.create_group(&name, &ids)?;
+            println!(
+                "Created {} with {} member(s). They join with the next `kervan run` or `kervan export`.",
+                group.name,
+                group.members.len()
+            );
+        }
+        GroupCommand::Add { group, contact } => {
+            let group = find_group(node, &group)?;
+            let contact = find_contact(node, &contact)?;
+            node.add_group_member(group.id, contact.id)?;
+            println!("Added {} to {}.", contact.name, group.name);
+        }
+        GroupCommand::Remove { group, member } => {
+            let group = find_group(node, &group)?;
+            let found = group
+                .members
+                .iter()
+                .find(|m| {
+                    !m.me && (m.fingerprint == member || m.name.eq_ignore_ascii_case(&member))
+                })
+                .ok_or_else(|| format!("{} has no member {member}", group.name))?;
+            node.remove_group_member(group.id, &found.fingerprint)?;
+            println!(
+                "Removed {} from {}. The others start new keys when they hear of it.",
+                found.name, group.name
+            );
+        }
+        GroupCommand::Leave { group } => {
+            let group = find_group(node, &group)?;
+            node.leave_group(group.id)?;
+            println!("You left {}.", group.name);
+        }
+        GroupCommand::Send { group, text } => {
+            let group = find_group(node, &group)?;
+            node.send_group_text(group.id, &text.join(" "))?;
+            println!(
+                "Queued for {}. It leaves with the next `kervan run` or `kervan export`.",
+                group.name
+            );
+        }
+        GroupCommand::Log { group } => {
+            let group = find_group(node, &group)?;
+            for message in node.group_messages(group.id)? {
+                let who = message.sender.as_deref().unwrap_or("you");
+                println!("{who}: {}", message.body);
+            }
+            node.mark_group_read(group.id)?;
+        }
+    }
+    Ok(())
+}
+
+/// A group by id or by name, ignoring case.
+fn find_group(node: &Node, query: &str) -> Result<GroupView, Box<dyn std::error::Error>> {
+    let groups = node.groups()?;
+    if let Ok(id) = query.parse::<i64>() {
+        if let Some(group) = groups.iter().find(|group| group.id == id) {
+            return Ok(group.clone());
+        }
+    }
+    let mut matches = groups
+        .into_iter()
+        .filter(|group| group.name.eq_ignore_ascii_case(query));
+    match (matches.next(), matches.next()) {
+        (Some(group), None) => Ok(group),
+        (Some(_), Some(_)) => {
+            Err(format!("more than one group is called {query}; use the id").into())
+        }
+        (None, _) => Err(format!("no group called {query}").into()),
     }
 }
 

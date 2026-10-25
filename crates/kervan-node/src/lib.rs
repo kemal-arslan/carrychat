@@ -48,6 +48,8 @@ pub struct ContactView {
     pub unread: usize,
     /// Whether a ratchet session runs both ways (§5.6): forward secrecy.
     pub secure: bool,
+    /// Whether they have our card, so they can join our groups.
+    pub has_our_card: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -62,6 +64,46 @@ pub struct MessageView {
     pub delivered: bool,
     /// For outgoing messages: whether the recipient read it, if they send
     /// read receipts. For incoming ones: whether we read it.
+    pub read: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupView {
+    pub id: i64,
+    pub name: String,
+    /// Whether we are its admin, who alone changes its members.
+    pub admin: bool,
+    /// Whether we are still in it.
+    pub member: bool,
+    pub members: Vec<MemberView>,
+    pub last_message: Option<String>,
+    pub last_at: Option<u32>,
+    pub unread: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemberView {
+    pub name: String,
+    pub fingerprint: String,
+    pub me: bool,
+    pub admin: bool,
+    /// Their contact id, if they are one of our contacts.
+    pub contact_id: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupMessageView {
+    pub id: i64,
+    pub group_id: i64,
+    pub outgoing: bool,
+    /// The sender's name, for messages from other members.
+    pub sender: Option<String>,
+    pub body: String,
+    pub created_at: u32,
+    /// Whether we read it. Our own messages count as read.
     pub read: bool,
 }
 
@@ -121,6 +163,11 @@ pub enum Event {
     /// Someone who has our card wrote to us for the first time.
     #[serde(rename_all = "camelCase")]
     ContactRequest { contact: ContactView },
+    #[serde(rename_all = "camelCase")]
+    GroupMessageReceived { message: GroupMessageView },
+    /// We joined or left a group, or its name or members changed.
+    #[serde(rename_all = "camelCase")]
+    GroupChanged { group: GroupView },
     /// An internet relay connected or disconnected.
     #[serde(rename_all = "camelCase")]
     InternetChanged { relays: usize },
@@ -252,6 +299,68 @@ impl Node {
         Ok(message)
     }
 
+    pub fn groups(&self) -> Result<Vec<GroupView>> {
+        self.shared.engine().groups()
+    }
+
+    pub fn group_messages(&self, group_id: i64) -> Result<Vec<GroupMessageView>> {
+        self.shared.engine().group_messages(group_id)
+    }
+
+    /// Creates a group with us as its admin and the given contacts in it.
+    pub fn create_group(&self, name: &str, contact_ids: &[i64]) -> Result<GroupView> {
+        let group = self
+            .shared
+            .engine()
+            .create_group(name, contact_ids, now())?;
+        self.shared.flush_own();
+        Ok(group)
+    }
+
+    pub fn add_group_member(&self, group_id: i64, contact_id: i64) -> Result<GroupView> {
+        let group = self
+            .shared
+            .engine()
+            .add_group_member(group_id, contact_id, now())?;
+        self.shared.flush_own();
+        Ok(group)
+    }
+
+    /// Removes a member, named by fingerprint.
+    pub fn remove_group_member(&self, group_id: i64, fingerprint: &str) -> Result<GroupView> {
+        let group = self
+            .shared
+            .engine()
+            .remove_group_member(group_id, fingerprint, now())?;
+        self.shared.flush_own();
+        Ok(group)
+    }
+
+    pub fn leave_group(&self, group_id: i64) -> Result<GroupView> {
+        let group = self.shared.engine().leave_group(group_id, now())?;
+        self.shared.flush_own();
+        Ok(group)
+    }
+
+    /// Sends a text message to a group: one bundle that every member opens.
+    pub fn send_group_text(&self, group_id: i64, text: &str) -> Result<GroupMessageView> {
+        let (message, frame) = self
+            .shared
+            .engine()
+            .send_group_text(group_id, text, now())?;
+        let Frame::Bundle(bundle) = &frame else {
+            unreachable!("sending makes a bundle");
+        };
+        self.shared.lan.broadcast(&frame.to_bytes(), None);
+        self.shared.internet.post_bundle(&frame, &bundle.tag);
+        self.shared.internet.probe();
+        Ok(message)
+    }
+
+    pub fn mark_group_read(&self, group_id: i64) -> Result<()> {
+        self.shared.engine().mark_group_read(group_id, now())
+    }
+
     pub fn status(&self) -> Result<Status> {
         let (outbox, carried) = self.shared.engine().counts()?;
         Ok(Status {
@@ -356,8 +465,7 @@ impl Shared {
             self.lan.broadcast(&frame.to_bytes(), except);
         }
         self.internet.post_handled(&handled);
-        let own = self.engine().take_own();
-        self.send_own(&own);
+        self.flush_own();
         if handled
             .events
             .iter()
@@ -367,6 +475,16 @@ impl Shared {
         }
         for event in handled.events {
             self.emit(event);
+        }
+    }
+
+    /// Sends the own bundles the engine made on its own, such as session
+    /// starts and group keys.
+    fn flush_own(&self) {
+        let own = self.engine().take_own();
+        self.send_own(&own);
+        if self.engine().take_tags_changed() {
+            self.internet.renew_subscription();
         }
     }
 

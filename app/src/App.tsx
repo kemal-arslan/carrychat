@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type Contact, type Message, type Profile, type Status } from "./api";
+import { api, type Contact, type Group, type GroupMessage, type Message, type Profile, type Status } from "./api";
 import { Chat } from "./Chat";
-import { AddContactDialog, ConnectDialog, MyCardDialog, NetworkDialog, SettingsDialog } from "./Dialogs";
+import {
+  AddContactDialog,
+  ConnectDialog,
+  MembersDialog,
+  MyCardDialog,
+  NetworkDialog,
+  NewGroupDialog,
+  SettingsDialog,
+} from "./Dialogs";
+import { GroupChat } from "./GroupChat";
 import { shortTime } from "./format";
 import { useI18n } from "./i18n";
 import { Logo } from "./Logo";
@@ -21,13 +30,16 @@ export default function App() {
   return <Main profile={profile} onProfile={setProfile} />;
 }
 
-type DialogName = "add" | "card" | "connect" | "network" | "settings";
+type DialogName = "add" | "card" | "connect" | "network" | "settings" | "newGroup" | "members";
 
 function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: Profile) => void }) {
   const { t, language } = useI18n();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState<number | null>(null);
+  const [groupMessages, setGroupMessages] = useState<GroupMessage[]>([]);
   const [status, setStatus] = useState<Status | null>(null);
   const [dialog, setDialog] = useState<DialogName | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -35,10 +47,15 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
   selectedRef.current = selected;
   const contactsRef = useRef(contacts);
   contactsRef.current = contacts;
+  const selectedGroupRef = useRef(selectedGroup);
+  selectedGroupRef.current = selectedGroup;
+  const groupsRef = useRef(groups);
+  groupsRef.current = groups;
   const tRef = useRef(t);
   tRef.current = t;
 
   const refreshContacts = useCallback(() => api.contacts().then(setContacts), []);
+  const refreshGroups = useCallback(() => api.groups().then(setGroups), []);
   const refreshStatus = useCallback(() => api.status().then(setStatus), []);
 
   const show = useCallback((text: string) => {
@@ -48,13 +65,26 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
 
   // Messages count as read only while someone is looking at them.
   const markSelectedRead = useCallback(() => {
+    if (!document.hasFocus()) return;
     const contactId = selectedRef.current;
-    if (contactId === null || !document.hasFocus()) return;
-    api.markRead(contactId).then(refreshContacts);
-  }, [refreshContacts]);
+    const groupId = selectedGroupRef.current;
+    if (contactId !== null) api.markRead(contactId).then(refreshContacts);
+    if (groupId !== null) api.markGroupRead(groupId).then(refreshGroups);
+  }, [refreshContacts, refreshGroups]);
+
+  function selectContact(id: number) {
+    setSelectedGroup(null);
+    setSelected(id);
+  }
+
+  function selectGroup(id: number) {
+    setSelected(null);
+    setSelectedGroup(id);
+  }
 
   useEffect(() => {
     refreshContacts();
+    refreshGroups();
     refreshStatus();
     // Carried bundles change without events, so the counts are polled too.
     const timer = window.setInterval(refreshStatus, 5000);
@@ -63,11 +93,17 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
       window.clearInterval(timer);
       window.removeEventListener("focus", markSelectedRead);
     };
-  }, [refreshContacts, refreshStatus, markSelectedRead]);
+  }, [refreshContacts, refreshGroups, refreshStatus, markSelectedRead]);
 
   useEffect(() => {
-    if (selected === null && contacts.length > 0) setSelected(contacts[0].id);
-  }, [contacts, selected]);
+    if (selected === null && selectedGroup === null && contacts.length > 0) setSelected(contacts[0].id);
+  }, [contacts, selected, selectedGroup]);
+
+  useEffect(() => {
+    if (selectedGroup === null) return;
+    api.groupMessages(selectedGroup).then(setGroupMessages);
+    markSelectedRead();
+  }, [selectedGroup, markSelectedRead]);
 
   useEffect(() => {
     if (selected === null) return;
@@ -110,15 +146,38 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
           );
         } else if (event.type === "contactChanged") {
           refreshContacts();
+        } else if (event.type === "groupMessageReceived") {
+          const { message } = event;
+          const open = message.groupId === selectedGroupRef.current;
+          if (open) setGroupMessages((current) => [...current, message]);
+          if (open && document.hasFocus()) {
+            markSelectedRead();
+          } else {
+            const group = groupsRef.current.find((candidate) => candidate.id === message.groupId);
+            if (group && notificationsEnabled()) api.notify(`${message.sender} · ${group.name}`, message.body);
+            refreshGroups();
+          }
+        } else if (event.type === "groupChanged") {
+          refreshGroups();
+          refreshContacts();
         }
         refreshStatus();
       }),
       api.onError(show),
     ];
     return () => stops.forEach((stop) => stop.then((unlisten) => unlisten()));
-  }, [refreshContacts, refreshStatus, show, markSelectedRead]);
+  }, [refreshContacts, refreshGroups, refreshStatus, show, markSelectedRead]);
 
   const contact = contacts.find((candidate) => candidate.id === selected) ?? null;
+  const group = groups.find((candidate) => candidate.id === selectedGroup) ?? null;
+
+  async function sendToGroup(text: string) {
+    if (!group) return;
+    const message = await api.sendGroupMessage(group.id, text);
+    setGroupMessages((current) => [...current, message]);
+    refreshGroups();
+    refreshStatus();
+  }
 
   async function send(text: string) {
     if (!contact) return;
@@ -166,8 +225,10 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
       if (report === null) return;
       show(t.imported(report.received, report.delivered, report.carried, report.skipped));
       refreshContacts();
+      refreshGroups();
       refreshStatus();
       if (selected !== null) api.messages(selected).then(setMessages);
+      if (selectedGroup !== null) api.groupMessages(selectedGroup).then(setGroupMessages);
     } catch (error) {
       show(String(error));
     }
@@ -181,7 +242,7 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
       <button
         key={item.id}
         className={item.id === selected ? "contact active" : "contact"}
-        onClick={() => setSelected(item.id)}
+        onClick={() => selectContact(item.id)}
       >
         <span className="avatar" aria-hidden>
           {item.name.slice(0, 1).toLocaleUpperCase(language)}
@@ -193,6 +254,28 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
         <span className="meta">
           {item.lastAt !== null && <time>{shortTime(item.lastAt, language)}</time>}
           {item.unread > 0 && item.id !== selected && <span className="badge">{item.unread}</span>}
+        </span>
+      </button>
+    );
+  }
+
+  function groupRow(item: Group) {
+    return (
+      <button
+        key={item.id}
+        className={item.id === selectedGroup ? "contact active" : "contact"}
+        onClick={() => selectGroup(item.id)}
+      >
+        <span className="avatar group" aria-hidden>
+          {item.name.slice(0, 1).toLocaleUpperCase(language)}
+        </span>
+        <span className="who">
+          <span className="name">{item.name}</span>
+          <span className="preview">{item.lastMessage ?? t.membersCount(item.members.length)}</span>
+        </span>
+        <span className="meta">
+          {item.lastAt !== null && <time>{shortTime(item.lastAt, language)}</time>}
+          {item.unread > 0 && item.id !== selectedGroup && <span className="badge">{item.unread}</span>}
         </span>
       </button>
     );
@@ -222,9 +305,18 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
             <>
               <h3 className="section-title">{t.requests}</h3>
               {requests.map(contactRow)}
-              <h3 className="section-title">{t.contacts}</h3>
             </>
           )}
+          {accepted.length > 0 && (
+            <div className="section-row">
+              <h3 className="section-title">{t.groups}</h3>
+              <button className="icon-button small" onClick={() => setDialog("newGroup")} aria-label={t.newGroup} title={t.newGroup}>
+                +
+              </button>
+            </div>
+          )}
+          {groups.map(groupRow)}
+          {(requests.length > 0 || accepted.length > 0) && <h3 className="section-title">{t.contacts}</h3>}
           {accepted.map(contactRow)}
           {contacts.length === 0 && <p className="sidebar-empty">{t.sidebarEmpty}</p>}
         </nav>
@@ -237,7 +329,9 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
       </aside>
 
       <main className="conversation">
-        {contact ? (
+        {group ? (
+          <GroupChat group={group} messages={groupMessages} onSend={sendToGroup} onMembers={() => setDialog("members")} />
+        ) : contact ? (
           <Chat contact={contact} messages={messages} onSend={send} onAccept={accept} onDecline={decline} />
         ) : (
           <div className="placeholder">
@@ -262,7 +356,29 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
           onClose={() => setDialog(null)}
           onAdded={(added) => {
             refreshContacts();
-            setSelected(added.id);
+            selectContact(added.id);
+          }}
+        />
+      )}
+      {dialog === "newGroup" && (
+        <NewGroupDialog
+          contacts={contacts}
+          onClose={() => setDialog(null)}
+          onCreated={(created) => {
+            refreshGroups();
+            selectGroup(created.id);
+            show(t.groupCreated(created.name));
+          }}
+        />
+      )}
+      {dialog === "members" && group && (
+        <MembersDialog
+          group={group}
+          contacts={contacts}
+          onClose={() => setDialog(null)}
+          onChanged={() => {
+            refreshGroups();
+            refreshStatus();
           }}
         />
       )}

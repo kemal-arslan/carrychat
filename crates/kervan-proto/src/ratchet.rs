@@ -374,7 +374,7 @@ fn kdf_rk(root: &[u8; 32], dh: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
     keys
 }
 
-fn kdf_ck(chain: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
+pub(crate) fn kdf_ck(chain: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
     (
         hmac_sha256(chain, &[&[0x02]]),
         hmac_sha256(chain, &[&[0x01]]),
@@ -399,8 +399,8 @@ fn random_secret(rng: &mut impl CryptoRngCore) -> [u8; 32] {
     secret
 }
 
-/// XORs the header with the XChaCha20 keystream from block 0 (§5.6).
-fn mask(key: &[u8; 32], nonce: &[u8; 24], header: &mut [u8; HEADER_LEN]) {
+/// XORs a header with the XChaCha20 keystream from block 0 (§5.6, §5.7).
+pub(crate) fn mask(key: &[u8; 32], nonce: &[u8; 24], header: &mut [u8]) {
     XChaCha20::new(key.into(), nonce.into()).apply_keystream(header);
 }
 

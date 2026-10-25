@@ -123,6 +123,37 @@ const en = {
   eraseButton: "Erase everything…",
   eraseConfirm: "Are you sure? Kervan starts again empty.",
   eraseNow: "Erase now",
+
+  groups: "Groups",
+  newGroup: "New group",
+  groupName: "Group name",
+  groupNameTooLong: "That name is too long for a group.",
+  groupWho: "Who is in it",
+  groupNoContacts: "Add contacts first: a group is made of your contacts.",
+  needsYourCard: "write to them once first",
+  groupHint:
+    "You become the group's admin: only you add and remove members. Up to 16 people, you included.",
+  create: "Create",
+  groupCreated: (name: string) => `Created ${name}. Members join as the group reaches them.`,
+  membersCount: (count: number) => (count === 1 ? "1 member" : `${count} members`),
+  membersTitle: (name: string) => `${name}: members`,
+  you: "you",
+  admin: "admin",
+  remove: "Remove",
+  addMember: "Add",
+  chooseContact: "Add a contact…",
+  nobodyToAdd: "No one else to add",
+  membersAdminHint:
+    "Members you remove read nothing sent after the others hear of it. Only contacts who have your card can join.",
+  membersHint: "Only the admin adds and removes members.",
+  leaveGroup: "Leave group…",
+  leaveNow: "Leave now",
+  leftGroup: "You are not in this group any more. What was sent before stays here.",
+  groupSecure: "Members only",
+  groupSecureHint:
+    "One message reaches every member. Only members can read it, and no member can write in another's name.",
+  groupChatEmpty: (name: string) =>
+    `Nothing in ${name} yet. A message here is one bundle that every member opens, and members carry it on for one another.`,
 };
 
 type Strings = typeof en;
@@ -241,6 +272,36 @@ const tr: Strings = {
   eraseButton: "Her şeyi sil…",
   eraseConfirm: "Emin misin? Kervan boş olarak yeniden başlar.",
   eraseNow: "Şimdi sil",
+
+  groups: "Gruplar",
+  newGroup: "Yeni grup",
+  groupName: "Grup adı",
+  groupNameTooLong: "Bu ad grup için fazla uzun.",
+  groupWho: "Kimler olacak",
+  groupNoContacts: "Önce kişi ekle: grup kişilerinden oluşur.",
+  needsYourCard: "önce ona bir kez yaz",
+  groupHint: "Grubun yöneticisi sen olursun: üye ekleyip çıkaran yalnızca sensin. Sen dahil en fazla 16 kişi.",
+  create: "Oluştur",
+  groupCreated: (name) => `${name} oluşturuldu. Üyeler grup kendilerine ulaştıkça katılır.`,
+  membersCount: (count) => `${count} üye`,
+  membersTitle: (name) => `${name}: üyeler`,
+  you: "sen",
+  admin: "yönetici",
+  remove: "Çıkar",
+  addMember: "Ekle",
+  chooseContact: "Bir kişi ekle…",
+  nobodyToAdd: "Eklenecek başka kimse yok",
+  membersAdminHint:
+    "Çıkardığın üye, diğerleri bunu duyduktan sonra gönderilenleri okuyamaz. Yalnızca kartına sahip kişiler katılabilir.",
+  membersHint: "Üye ekleyip çıkaran yalnızca yöneticidir.",
+  leaveGroup: "Gruptan ayrıl…",
+  leaveNow: "Şimdi ayrıl",
+  leftGroup: "Artık bu grupta değilsin. Daha önce gönderilenler burada kalır.",
+  groupSecure: "Yalnızca üyeler",
+  groupSecureHint:
+    "Tek bir mesaj bütün üyelere ulaşır. Onu yalnızca üyeler okuyabilir ve hiçbir üye başkası adına yazamaz.",
+  groupChatEmpty: (name) =>
+    `${name} grubunda henüz bir şey yok. Buradaki her mesaj, bütün üyelerin açtığı tek bir pakettir ve üyeler onu birbirlerine taşır.`,
 };
 
 const STORAGE_KEY = "kervan.language";

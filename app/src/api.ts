@@ -21,6 +21,41 @@ export type Contact = {
   unread: number;
   /** A ratchet session runs both ways, so messages have forward secrecy. */
   secure: boolean;
+  /** They have our card, so they can join our groups. */
+  hasOurCard: boolean;
+};
+
+export type Member = {
+  name: string;
+  fingerprint: string;
+  me: boolean;
+  admin: boolean;
+  /** Their contact id, if they are one of our contacts. */
+  contactId: number | null;
+};
+
+export type Group = {
+  id: number;
+  name: string;
+  /** We are its admin, who alone changes its members. */
+  admin: boolean;
+  /** We are still in it. */
+  member: boolean;
+  members: Member[];
+  lastMessage: string | null;
+  lastAt: number | null;
+  unread: number;
+};
+
+export type GroupMessage = {
+  id: number;
+  groupId: number;
+  outgoing: boolean;
+  /** The sender's name, for messages from other members. */
+  sender: string | null;
+  body: string;
+  createdAt: number;
+  read: boolean;
 };
 
 export type Message = {
@@ -66,7 +101,9 @@ export type NodeEvent =
   | { type: "peersChanged"; count: number }
   | { type: "contactRequest"; contact: Contact }
   | { type: "localNetworkChanged"; problem: LanProblem | null }
-  | { type: "internetChanged"; relays: number };
+  | { type: "internetChanged"; relays: number }
+  | { type: "groupMessageReceived"; message: GroupMessage }
+  | { type: "groupChanged"; group: Group };
 
 export interface Api {
   /** Whether this is the browser preview with sample data. */
@@ -81,6 +118,14 @@ export interface Api {
   messages(contactId: number): Promise<Message[]>;
   sendMessage(contactId: number, text: string): Promise<Message>;
   markRead(contactId: number): Promise<void>;
+  groups(): Promise<Group[]>;
+  groupMessages(groupId: number): Promise<GroupMessage[]>;
+  createGroup(name: string, contactIds: number[]): Promise<Group>;
+  addGroupMember(groupId: number, contactId: number): Promise<Group>;
+  removeGroupMember(groupId: number, fingerprint: string): Promise<Group>;
+  leaveGroup(groupId: number): Promise<Group>;
+  sendGroupMessage(groupId: number, text: string): Promise<GroupMessage>;
+  markGroupRead(groupId: number): Promise<void>;
   settings(): Promise<Settings>;
   setReadReceipts(on: boolean): Promise<void>;
   status(): Promise<Status>;
@@ -122,6 +167,14 @@ function desktopApi(): Api {
     messages: (contactId) => call("messages", { contactId }),
     sendMessage: (contactId, text) => call("send_message", { contactId, text }),
     markRead: (contactId) => call("mark_read", { contactId }),
+    groups: () => call("groups"),
+    groupMessages: (groupId) => call("group_messages", { groupId }),
+    createGroup: (name, contactIds) => call("create_group", { name, contactIds }),
+    addGroupMember: (groupId, contactId) => call("add_group_member", { groupId, contactId }),
+    removeGroupMember: (groupId, fingerprint) => call("remove_group_member", { groupId, fingerprint }),
+    leaveGroup: (groupId) => call("leave_group", { groupId }),
+    sendGroupMessage: (groupId, text) => call("send_group_message", { groupId, text }),
+    markGroupRead: (groupId) => call("mark_group_read", { groupId }),
     settings: () => call("settings"),
     setReadReceipts: (on) => call("set_read_receipts", { on }),
     status: () => call("status"),
@@ -163,6 +216,7 @@ function previewApi(): Api {
     request,
     unread: 0,
     secure,
+    hasOurCard: !request,
   });
   const contacts: Contact[] = [
     contact(1, "Deniz", "7jgi 54zm 2zkd yent vzen s3pg lq", false, true),
@@ -187,6 +241,55 @@ function previewApi(): Api {
     message(7, 2, false, "Çok sevindim. Akşam ararım.", 80000, false),
     message(6, 3, false, "Merhaba, ben Mehmet. Kartını Deniz'den aldım.", 300, false),
   ];
+  const member = (name: string, fingerprint: string, contactId: number | null, admin = false): Member => ({
+    name,
+    fingerprint,
+    me: false,
+    admin,
+    contactId,
+  });
+  const groups: Group[] = [
+    {
+      id: 1,
+      name: "Mahalle",
+      admin: true,
+      member: true,
+      members: [
+        { ...member("Sen", "b3oi uvmj hsk3 wflg ofyx lmwu ci", null, true), me: true },
+        member("Deniz", "7jgi 54zm 2zkd yent vzen s3pg lq", 1),
+        member("Ayşe", "gp6m vxkt dnvv lqmw ewpx qfox be", 2),
+        member("Kerem", "u2ab 5ycq oxwf 7mnt l3dk hz6a qe", null),
+      ],
+      lastMessage: null,
+      lastAt: null,
+      unread: 0,
+    },
+  ];
+  const groupMessage = (id: number, sender: string | null, body: string, ago: number): GroupMessage => ({
+    id,
+    groupId: 1,
+    outgoing: sender === null,
+    sender,
+    body,
+    createdAt: now() - ago,
+    read: true,
+  });
+  const groupMessages: GroupMessage[] = [
+    groupMessage(101, "Kerem", "Okulun önünde su dağıtımı var, saat 10'da.", 7200),
+    groupMessage(102, null, "Teşekkürler, Deniz'le birlikte geliriz.", 7000),
+    { ...groupMessage(103, "Ayşe", "Bizim sokakta elektrik geldi.", 900), read: false },
+  ];
+  const summarizeGroups = () =>
+    groups.map((group) => {
+      const own = groupMessages.filter((message) => message.groupId === group.id);
+      const last = own.at(-1);
+      return {
+        ...group,
+        lastMessage: last?.body ?? null,
+        lastAt: last?.createdAt ?? null,
+        unread: own.filter((message) => !message.read).length,
+      };
+    });
   const summarize = () =>
     contacts.map((contact) => {
       const own = messages.filter((message) => message.contactId === contact.id);
@@ -250,6 +353,57 @@ function previewApi(): Api {
     },
     async markRead(contactId) {
       messages.filter((message) => message.contactId === contactId && !message.outgoing).forEach((message) => {
+        message.read = true;
+      });
+    },
+    async groups() {
+      return summarizeGroups();
+    },
+    async groupMessages(groupId) {
+      return groupMessages.filter((message) => message.groupId === groupId).map((message) => ({ ...message }));
+    },
+    async createGroup(name, contactIds) {
+      const created: Group = {
+        id: nextId++,
+        name: name.trim(),
+        admin: true,
+        member: true,
+        members: [
+          { ...member(profile?.name ?? "Sen", profile?.fingerprint ?? "", null, true), me: true },
+          ...contacts
+            .filter((contact) => contactIds.includes(contact.id))
+            .map((contact) => member(contact.name, contact.fingerprint, contact.id)),
+        ],
+        lastMessage: null,
+        lastAt: null,
+        unread: 0,
+      };
+      groups.push(created);
+      return created;
+    },
+    async addGroupMember(groupId, contactId) {
+      const group = groups.find((candidate) => candidate.id === groupId)!;
+      const added = contacts.find((contact) => contact.id === contactId)!;
+      group.members.push(member(added.name, added.fingerprint, added.id));
+      return { ...group };
+    },
+    async removeGroupMember(groupId, fingerprint) {
+      const group = groups.find((candidate) => candidate.id === groupId)!;
+      group.members = group.members.filter((candidate) => candidate.fingerprint !== fingerprint);
+      return { ...group };
+    },
+    async leaveGroup(groupId) {
+      const group = groups.find((candidate) => candidate.id === groupId)!;
+      group.member = false;
+      return { ...group };
+    },
+    async sendGroupMessage(groupId, text) {
+      const sent = { ...groupMessage(nextId++, null, text.trim(), 0), groupId };
+      groupMessages.push(sent);
+      return { ...sent };
+    },
+    async markGroupRead(groupId) {
+      groupMessages.filter((message) => message.groupId === groupId).forEach((message) => {
         message.read = true;
       });
     },

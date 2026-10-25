@@ -8,6 +8,7 @@
 pub mod bundle;
 pub mod error;
 pub mod frame;
+pub mod group;
 pub mod identity;
 pub mod intro;
 pub mod pair;

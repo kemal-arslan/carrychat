@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use kervan_node::{
-    ContactView, ImportReport, InternetConfig, LanConfig, MessageView, Node, Profile, Settings,
-    Status,
+    ContactView, GroupMessageView, GroupView, ImportReport, InternetConfig, LanConfig, MessageView,
+    Node, Profile, Settings, Status,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -153,6 +153,77 @@ fn send_message(
 }
 
 #[tauri::command]
+fn groups(state: State<'_, AppState>) -> CommandResult<Vec<GroupView>> {
+    state.node()?.groups().map_err(text)
+}
+
+#[tauri::command]
+fn group_messages(
+    state: State<'_, AppState>,
+    group_id: i64,
+) -> CommandResult<Vec<GroupMessageView>> {
+    state.node()?.group_messages(group_id).map_err(text)
+}
+
+#[tauri::command]
+fn create_group(
+    state: State<'_, AppState>,
+    name: String,
+    contact_ids: Vec<i64>,
+) -> CommandResult<GroupView> {
+    state
+        .node()?
+        .create_group(&name, &contact_ids)
+        .map_err(text)
+}
+
+#[tauri::command]
+fn add_group_member(
+    state: State<'_, AppState>,
+    group_id: i64,
+    contact_id: i64,
+) -> CommandResult<GroupView> {
+    state
+        .node()?
+        .add_group_member(group_id, contact_id)
+        .map_err(text)
+}
+
+#[tauri::command]
+fn remove_group_member(
+    state: State<'_, AppState>,
+    group_id: i64,
+    fingerprint: String,
+) -> CommandResult<GroupView> {
+    state
+        .node()?
+        .remove_group_member(group_id, &fingerprint)
+        .map_err(text)
+}
+
+#[tauri::command]
+fn leave_group(state: State<'_, AppState>, group_id: i64) -> CommandResult<GroupView> {
+    state.node()?.leave_group(group_id).map_err(text)
+}
+
+#[tauri::command]
+fn send_group_message(
+    state: State<'_, AppState>,
+    group_id: i64,
+    text: String,
+) -> CommandResult<GroupMessageView> {
+    state
+        .node()?
+        .send_group_text(group_id, &text)
+        .map_err(self::text)
+}
+
+#[tauri::command]
+fn mark_group_read(state: State<'_, AppState>, group_id: i64) -> CommandResult<()> {
+    state.node()?.mark_group_read(group_id).map_err(text)
+}
+
+#[tauri::command]
 fn status(state: State<'_, AppState>) -> CommandResult<Status> {
     state.node()?.status().map_err(text)
 }
@@ -225,6 +296,14 @@ pub fn run() {
             erase_everything,
             messages,
             send_message,
+            groups,
+            group_messages,
+            create_group,
+            add_group_member,
+            remove_group_member,
+            leave_group,
+            send_group_message,
+            mark_group_read,
             status,
             export_file,
             import_file,

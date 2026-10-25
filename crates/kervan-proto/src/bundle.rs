@@ -24,6 +24,9 @@ const KIND_TEXT: u8 = 0x01;
 const KIND_READ: u8 = 0x03;
 const KIND_CARD: u8 = 0x04;
 const KIND_SESSION: u8 = 0x05;
+const KIND_GROUP: u8 = 0x06;
+const KIND_SENDER_KEY: u8 = 0x07;
+const KIND_LEAVE: u8 = 0x08;
 /// Bundle ids in one read receipt, at most.
 pub const MAX_READ_IDS: usize = 64;
 
@@ -104,6 +107,12 @@ pub enum Kind {
     Card,
     /// Starts a ratchet session; carries nothing to show (§5.6).
     Session,
+    /// A group state, from the group's admin (§5.7).
+    Group,
+    /// A member's sender chain for a group (§5.7).
+    SenderKey,
+    /// The sender leaves a group (§5.7).
+    Leave,
     /// A kind this version does not know. The body is kept but not shown.
     Unknown(u8),
 }
@@ -115,6 +124,9 @@ impl Kind {
             Kind::Read => KIND_READ,
             Kind::Card => KIND_CARD,
             Kind::Session => KIND_SESSION,
+            Kind::Group => KIND_GROUP,
+            Kind::SenderKey => KIND_SENDER_KEY,
+            Kind::Leave => KIND_LEAVE,
             Kind::Unknown(byte) => byte,
         }
     }
@@ -125,6 +137,9 @@ impl Kind {
             KIND_READ => Kind::Read,
             KIND_CARD => Kind::Card,
             KIND_SESSION => Kind::Session,
+            KIND_GROUP => Kind::Group,
+            KIND_SENDER_KEY => Kind::SenderKey,
+            KIND_LEAVE => Kind::Leave,
             other => Kind::Unknown(other),
         }
     }

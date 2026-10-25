@@ -9,6 +9,10 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::{MessageView, Result};
 
+mod groups;
+
+pub use groups::{StoredGroup, StoredGroupMessage};
+
 /// Bundles carried for others, at most. Own bundles do not count.
 pub const MAX_CARRIED_BUNDLES: usize = 2000;
 pub const MAX_CARRIED_BYTES: usize = 8 * 1024 * 1024;
@@ -70,6 +74,53 @@ const MIGRATIONS: &[&str] = &[
          stored_at INTEGER NOT NULL,
          PRIMARY KEY (contact_id, ratchet, n)
      );",
+    // Groups (§5.7): members, sender chains and messages. Group peers are
+    // members we know only through a group, kept as hidden contacts.
+    "ALTER TABLE contacts ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
+     CREATE TABLE groups (
+         id INTEGER PRIMARY KEY,
+         group_id BLOB NOT NULL UNIQUE,
+         name TEXT NOT NULL,
+         admin BLOB NOT NULL,
+         version INTEGER NOT NULL,
+         member INTEGER NOT NULL,
+         created_at INTEGER NOT NULL
+     );
+     CREATE TABLE group_members (
+         group_ref INTEGER NOT NULL REFERENCES groups (id),
+         position INTEGER NOT NULL,
+         dh_key BLOB NOT NULL,
+         card BLOB NOT NULL,
+         PRIMARY KEY (group_ref, dh_key)
+     );
+     CREATE TABLE sender_keys (
+         id INTEGER PRIMARY KEY,
+         group_id BLOB NOT NULL,
+         sender BLOB NOT NULL,
+         chain_id BLOB NOT NULL UNIQUE,
+         state BLOB NOT NULL,
+         own INTEGER NOT NULL,
+         created_at INTEGER NOT NULL,
+         retired_at INTEGER
+     );
+     CREATE TABLE group_skipped (
+         chain INTEGER NOT NULL,
+         iteration INTEGER NOT NULL,
+         key BLOB NOT NULL,
+         stored_at INTEGER NOT NULL,
+         PRIMARY KEY (chain, iteration)
+     );
+     CREATE TABLE group_messages (
+         id INTEGER PRIMARY KEY,
+         group_ref INTEGER NOT NULL REFERENCES groups (id),
+         sender BLOB,
+         bundle_id BLOB NOT NULL UNIQUE,
+         body TEXT NOT NULL,
+         created_at INTEGER NOT NULL,
+         received_at INTEGER,
+         read_at INTEGER
+     );
+     CREATE INDEX group_messages_by_group ON group_messages (group_ref, created_at);",
 ];
 
 /// Skipped keys kept per contact, at most; the oldest go first.
@@ -82,6 +133,8 @@ pub struct StoredContact {
     pub card: ContactCard,
     pub request: bool,
     pub introduced: bool,
+    /// Known only as a member of a group (§5.7).
+    pub hidden: bool,
 }
 
 pub struct Store {
@@ -132,17 +185,42 @@ impl Store {
         Ok(())
     }
 
-    /// Adds a contact, or returns the id it already has.
     /// Adds a contact, or returns the id it already has. Adding someone as a
-    /// contact also accepts them if they were a request.
+    /// contact also accepts them if they were a request, and shows them if
+    /// they were a group peer.
     pub fn insert_contact(&self, card: &ContactCard, now: u32, request: bool) -> Result<i64> {
         self.conn.execute(
             "INSERT INTO contacts (card, dh_key, added_at, request) VALUES (?, ?, ?, ?)
              ON CONFLICT (dh_key) DO UPDATE SET
                  card = excluded.card,
-                 request = MIN(contacts.request, excluded.request)",
+                 request = MIN(contacts.request, excluded.request),
+                 hidden = 0",
             params![card.to_bytes(), card.dh_key().as_bytes(), now, request],
         )?;
+        self.contact_id(card)
+    }
+
+    /// Adds a group peer: someone we know only through a group, who has our
+    /// card through it. Returns the id it already has if it is known.
+    pub fn insert_peer(&self, card: &ContactCard, now: u32) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO contacts (card, dh_key, added_at, introduced, hidden) VALUES (?, ?, ?, 1, 1)
+             ON CONFLICT (dh_key) DO NOTHING",
+            params![card.to_bytes(), card.dh_key().as_bytes(), now],
+        )?;
+        self.contact_id(card)
+    }
+
+    /// Turns a group peer that wrote to us directly into a request.
+    pub fn reveal_peer(&self, id: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE contacts SET hidden = 0, request = 1 WHERE id = ? AND hidden = 1",
+            [id],
+        )?;
+        Ok(())
+    }
+
+    fn contact_id(&self, card: &ContactCard) -> Result<i64> {
         Ok(self.conn.query_row(
             "SELECT id FROM contacts WHERE dh_key = ?",
             [card.dh_key().as_bytes()],
@@ -153,23 +231,25 @@ impl Store {
     pub fn contacts(&self) -> Result<Vec<StoredContact>> {
         let mut statement = self
             .conn
-            .prepare("SELECT id, card, request, introduced FROM contacts ORDER BY id")?;
+            .prepare("SELECT id, card, request, introduced, hidden FROM contacts ORDER BY id")?;
         let rows = statement.query_map([], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
                 row.get::<_, Vec<u8>>(1)?,
                 row.get::<_, bool>(2)?,
                 row.get::<_, bool>(3)?,
+                row.get::<_, bool>(4)?,
             ))
         })?;
         let mut contacts = Vec::new();
         for row in rows {
-            let (id, card, request, introduced) = row?;
+            let (id, card, request, introduced, hidden) = row?;
             contacts.push(StoredContact {
                 id,
                 card: ContactCard::from_bytes(&card)?,
                 request,
                 introduced,
+                hidden,
             });
         }
         Ok(contacts)
@@ -562,7 +642,7 @@ impl Store {
             "DELETE FROM skipped_keys WHERE stored_at <= ?",
             [now.saturating_sub(SKIPPED_KEY_LIFETIME)],
         )?;
-        Ok(())
+        self.prune_groups(now)
     }
 
     /// Evicts carried bundles closest to expiry until the quota holds (§8).

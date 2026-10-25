@@ -1,13 +1,16 @@
 import type { Language } from "./i18n";
 
-// Sizes from docs/PROTOCOL.md §5.4 and §7.
-const BUNDLE_OVERHEAD = 67;
+// Sizes from docs/PROTOCOL.md §5.4, §5.6, §5.7 and §7.
+/** A message to a contact, sealed in a ratchet session. */
+export const PAIR_OVERHEAD = 104;
+/** A group message, with its signature. */
+export const GROUP_OVERHEAD = 135;
 const MAX_BUNDLE = 4096;
 const MESHTASTIC_MTU = 233;
 const FRAGMENT_HEADER = 11;
 
-export const MAX_MESSAGE_BYTES = MAX_BUNDLE - BUNDLE_OVERHEAD;
-export const ONE_PACKET_BYTES = MESHTASTIC_MTU - 1 - BUNDLE_OVERHEAD;
+export const maxMessageBytes = (overhead: number) => MAX_BUNDLE - overhead;
+export const onePacketBytes = (overhead: number) => MESHTASTIC_MTU - 1 - overhead;
 export const MAX_NAME_BYTES = 32;
 
 const encoder = new TextEncoder();
@@ -17,8 +20,8 @@ export function utf8Length(text: string): number {
 }
 
 /** How many LoRa packets a message of this many bytes takes. */
-export function radioPackets(bytes: number): number {
-  const bundle = BUNDLE_OVERHEAD + bytes;
+export function radioPackets(bytes: number, overhead: number): number {
+  const bundle = overhead + bytes;
   if (1 + bundle <= MESHTASTIC_MTU) return 1;
   return Math.ceil(bundle / (MESHTASTIC_MTU - FRAGMENT_HEADER));
 }

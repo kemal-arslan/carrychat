@@ -9,6 +9,7 @@
 use data_encoding::HEXLOWER;
 use kervan_proto::bundle::{seal_with_nonce, Message, Tombstone};
 use kervan_proto::frame::{frames_for, Frame, MESHTASTIC_MTU};
+use kervan_proto::group::{GroupId, GroupState, ReceiverChain, SenderChain};
 use kervan_proto::identity::Identity;
 use kervan_proto::intro::{mailbox_tag, seal_introduction_with};
 use kervan_proto::pair::PairKeys;
@@ -71,6 +72,7 @@ pub fn vectors() -> Value {
         "messages": messages,
         "introduction": introduction(&alice, &bob),
         "ratchet": ratchet(&alice, &bob),
+        "group": group(&alice, &bob),
     })
 }
 
@@ -228,5 +230,61 @@ fn ratchet(alice: &Identity, bob: &Identity) -> Value {
             "nonce": HEXLOWER.encode(&second_nonce),
             "bundle": HEXLOWER.encode(&second.to_bytes()),
         },
+    })
+}
+
+/// Alice, the admin, writes twice to a group of two on her sender chain (§5.7).
+fn group(alice: &Identity, bob: &Identity) -> Value {
+    let state = GroupState {
+        id: GroupId([0xa1; 16]),
+        version: 2,
+        name: "Mahalle".into(),
+        members: vec![alice.card(), bob.card()],
+    };
+    let (sender_key, chain, signing) = ([0xb1; 32], [0xb2; 32], [0xb3; 32]);
+    let mut sender = SenderChain::from_bytes(
+        &[sender_key.as_slice(), &chain, &0u32.to_be_bytes(), &signing].concat(),
+    )
+    .unwrap();
+    let distribution = sender.distribution(state.id);
+    let mut receiver = ReceiverChain::new(&distribution);
+    let expires_at = CREATED_AT + 3 * DAY_SECS;
+
+    let messages: Vec<Value> = [
+        ("Su dağıtımı okulun önünde.", CREATED_AT, [0xc1; 24]),
+        ("Saat ondan sonra.", CREATED_AT + 30, [0xc2; 24]),
+    ]
+    .into_iter()
+    .map(|(text, created_at, nonce)| {
+        let iteration = sender.iteration();
+        let bundle = sender
+            .seal_with_nonce(&Message::text(text, created_at), expires_at, 8, nonce)
+            .unwrap();
+        let opened = receiver.open(&bundle, |_| None).unwrap();
+        assert_eq!(opened.message.body, text.as_bytes());
+        receiver = opened.chain;
+        json!({
+            "text": text,
+            "created_at": created_at,
+            "expires_at": expires_at,
+            "hop_limit": 8,
+            "iteration": iteration,
+            "nonce": HEXLOWER.encode(&nonce),
+            "bundle": HEXLOWER.encode(&bundle.to_bytes()),
+        })
+    })
+    .collect();
+
+    json!({
+        "description": "Alice's group state, her sender chain as she hands it to Bob, and two messages on it.",
+        "state": HEXLOWER.encode(&state.to_bytes().unwrap()),
+        "group_id": HEXLOWER.encode(&state.id.0),
+        "version": state.version,
+        "name": state.name,
+        "sender_key": HEXLOWER.encode(&sender_key),
+        "chain_key": HEXLOWER.encode(&chain),
+        "ed25519_secret": HEXLOWER.encode(&signing),
+        "distribution": HEXLOWER.encode(&distribution.to_bytes()),
+        "messages": messages,
     })
 }

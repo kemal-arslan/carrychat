@@ -18,6 +18,8 @@ use rand_core::OsRng;
 use crate::store::Store;
 use crate::{ContactView, Error, Event, MessageView, Profile, Result, Settings};
 
+mod groups;
+
 /// Bundles that claim to live longer than this from now are refused (§8).
 const MAX_FUTURE_EXPIRY_SECS: u32 = MAX_TTL_SECS + DAY_SECS;
 
@@ -63,6 +65,8 @@ struct Contact {
     request: bool,
     /// Has our card, so we can send pair bundles instead of introductions.
     introduced: bool,
+    /// Known only through a group (§5.7): not listed among the contacts.
+    hidden: bool,
     session: Session,
 }
 
@@ -73,6 +77,10 @@ pub struct Engine {
     /// Recipient tags of bundles for us, for the days in the tag window.
     tags: HashMap<RecipientTag, usize>,
     tags_day: Option<u32>,
+    /// Tags of group bundles, by the row of the chain they belong to.
+    group_tags: HashMap<RecipientTag, i64>,
+    /// Whether the tags changed since the node last renewed its subscription.
+    tags_changed: bool,
     reassembler: Reassembler,
     /// Own bundles made while handling frames, such as session starts.
     own_out: Vec<(Frame, RecipientTag)>,
@@ -121,6 +129,7 @@ impl Engine {
                 keys,
                 request: stored.request,
                 introduced: stored.introduced,
+                hidden: stored.hidden,
                 session,
             });
         }
@@ -130,6 +139,8 @@ impl Engine {
             contacts,
             tags: HashMap::new(),
             tags_day: None,
+            group_tags: HashMap::new(),
+            tags_changed: false,
             reassembler: Reassembler::default(),
             own_out: Vec::new(),
         })
@@ -160,6 +171,7 @@ impl Engine {
         if let Some(existing) = self.contacts.iter_mut().find(|contact| contact.id == id) {
             existing.card = card;
             existing.request = false;
+            existing.hidden = false;
         } else {
             let keys = PairKeys::derive(&self.identity, card.dh_key())?;
             let session = Session::new(&self.identity, card.dh_key(), &keys);
@@ -169,10 +181,11 @@ impl Engine {
                 keys,
                 request: false,
                 introduced: false,
+                hidden: false,
                 session,
             });
         }
-        self.tags_day = None;
+        self.forget_tags();
         let opened = self.open_carried_from(id, now)?;
         Ok((self.contact_view(id)?, opened))
     }
@@ -195,13 +208,14 @@ impl Engine {
         let contact = self.contacts.remove(index);
         self.store.block(contact.card.dh_key().as_bytes())?;
         self.store.delete_contact(contact_id)?;
-        self.tags_day = None;
+        self.forget_tags();
         Ok(())
     }
 
     pub fn contacts(&self) -> Result<Vec<ContactView>> {
         self.contacts
             .iter()
+            .filter(|contact| !contact.hidden)
             .map(|contact| self.contact_view(contact.id))
             .collect()
     }
@@ -336,6 +350,7 @@ impl Engine {
         self.refresh_tags(now);
         let me = self.identity.dh_public();
         let mut tags: Vec<RecipientTag> = self.tags.keys().copied().collect();
+        tags.extend(self.group_tags.keys());
         tags.extend(tag_window(now).map(|day| mailbox_tag(&me, day)));
         let waiting = self
             .store
@@ -485,6 +500,9 @@ impl Engine {
                 return Ok(handled);
             }
         }
+        if let Some(handled) = self.receive_group(&bundle, now, false)? {
+            return Ok(handled);
+        }
         if let Some(handled) = self.introduce(&bundle, now)? {
             return Ok(handled);
         }
@@ -512,8 +530,16 @@ impl Engine {
         self.store.insert_tombstone(&tombstone, bundle.expires_at)?;
 
         let mut events = Vec::new();
+        let mut reopened = Vec::new();
         match message.kind {
             Kind::Text => {
+                // A group peer that writes to us directly becomes a request.
+                let revealed = self.contacts[index].hidden;
+                if revealed {
+                    self.store.reveal_peer(contact_id)?;
+                    self.contacts[index].hidden = false;
+                    self.contacts[index].request = true;
+                }
                 let body = String::from_utf8_lossy(&message.body);
                 if let Some(view) = self.store.insert_message(
                     contact_id,
@@ -524,6 +550,11 @@ impl Engine {
                     Some(now),
                 )? {
                     events.push(Event::MessageReceived { message: view });
+                }
+                if revealed {
+                    events.push(Event::ContactRequest {
+                        contact: self.contact_view(contact_id)?,
+                    });
                 }
             }
             Kind::Read => {
@@ -553,6 +584,11 @@ impl Engine {
                     }
                 }
             }
+            Kind::Group => {
+                reopened = self.receive_group_state(index, &message, now, &mut events)?;
+            }
+            Kind::SenderKey => reopened = self.receive_sender_key(index, &message, now)?,
+            Kind::Leave => self.receive_leave(index, &message, now, &mut events)?,
             Kind::Session | Kind::Unknown(_) => {}
         }
         if self.contacts[index].session.is_established() != was_secure
@@ -576,14 +612,19 @@ impl Engine {
             self.own_out
                 .extend(forwarded(&start).map(|frame| (frame, start.tag)));
         }
-        Ok(Some(Handled {
+        let mut handled = Handled {
             outcome: Outcome::Received,
             relay: vec![Frame::Tombstone {
                 hop_limit: DEFAULT_HOP_LIMIT,
                 tombstone,
             }],
             events,
-        }))
+        };
+        for opened in reopened {
+            handled.relay.extend(opened.relay);
+            handled.events.extend(opened.events);
+        }
+        Ok(Some(handled))
     }
 
     /// Seals a message to a contact: in their ratchet session when there is
@@ -662,6 +703,18 @@ impl Engine {
         std::mem::take(&mut self.own_out)
     }
 
+    /// Whether the tags to ask relays for changed since the last call.
+    pub fn take_tags_changed(&mut self) -> bool {
+        std::mem::take(&mut self.tags_changed)
+    }
+
+    /// Rebuilds the tags on next use, and tells the node to renew its
+    /// subscription.
+    fn forget_tags(&mut self) {
+        self.tags_day = None;
+        self.tags_changed = true;
+    }
+
     /// Opens a bundle as an introduction to us (§5.5). The sender becomes a
     /// request unless they are a contact already. Returns `None` if it is not
     /// one.
@@ -700,9 +753,10 @@ impl Engine {
                     keys,
                     request: true,
                     introduced: false,
+                    hidden: false,
                     session,
                 });
-                self.tags_day = None;
+                self.forget_tags();
                 self.contacts.len() - 1
             }
         };
@@ -818,7 +872,8 @@ impl Engine {
     fn seen(&self, id: BundleId) -> Result<bool> {
         Ok(self.store.has_bundle(id)?
             || self.store.has_tombstone(id)?
-            || self.store.has_message(id)?)
+            || self.store.has_message(id)?
+            || self.store.has_group_message(id)?)
     }
 
     fn contact_for_tag(&mut self, tag: &RecipientTag, now: u32) -> Option<usize> {
@@ -838,6 +893,12 @@ impl Engine {
             for day in tag_window(now) {
                 self.tags
                     .insert(contact.keys.recipient_tag(&me, day), index);
+            }
+        }
+        self.group_tags.clear();
+        for (id, chain) in self.store.receiver_chains().unwrap_or_default() {
+            for day in tag_window(now) {
+                self.group_tags.insert(chain.tag(day), id);
             }
         }
         self.tags_day = Some(today);
@@ -862,6 +923,7 @@ impl Engine {
             request: contact.request,
             unread: self.store.unread_count(contact_id)?,
             secure: contact.session.is_established(),
+            has_our_card: contact.introduced,
         })
     }
 }

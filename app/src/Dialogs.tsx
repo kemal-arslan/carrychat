@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import QRCode from "qrcode";
-import { api, type Contact, type LanProblem, type Profile } from "./api";
+import { api, type Contact, type Group, type LanProblem, type Profile } from "./api";
 import { MAX_NAME_BYTES, utf8Length } from "./format";
 import { useI18n, type LanguageChoice } from "./i18n";
 import { notificationsEnabled, setNotificationsEnabled } from "./prefs";
@@ -331,6 +331,172 @@ export function SettingsDialog({
             </button>
           </>
         )}
+      </div>
+    </Dialog>
+  );
+}
+
+export function NewGroupDialog({
+  contacts,
+  onClose,
+  onCreated,
+}: {
+  contacts: Contact[];
+  onClose: () => void;
+  onCreated: (group: Group) => void;
+}) {
+  const { t } = useI18n();
+  const [name, setName] = useState("");
+  const [chosen, setChosen] = useState<number[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const candidates = contacts.filter((contact) => !contact.request);
+  const tooLong = utf8Length(name.trim()) > MAX_NAME_BYTES;
+
+  function toggle(id: number) {
+    setChosen((current) => (current.includes(id) ? current.filter((other) => other !== id) : [...current, id]));
+  }
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    try {
+      onCreated(await api.createGroup(name, chosen));
+      onClose();
+    } catch (failure) {
+      setError(errorText(failure));
+    }
+  }
+
+  return (
+    <Dialog title={t.newGroup} onClose={onClose}>
+      <form onSubmit={submit}>
+        <label htmlFor="group-name">{t.groupName}</label>
+        <input id="group-name" value={name} onChange={(event) => setName(event.target.value)} autoFocus />
+        <h3 className="settings-section">{t.groupWho}</h3>
+        {candidates.length === 0 ? (
+          <p className="hint">{t.groupNoContacts}</p>
+        ) : (
+          <ul className="pick-list">
+            {candidates.map((contact) => (
+              <li key={contact.id}>
+                <label className={contact.hasOurCard ? undefined : "disabled"}>
+                  <input
+                    type="checkbox"
+                    checked={chosen.includes(contact.id)}
+                    disabled={!contact.hasOurCard}
+                    onChange={() => toggle(contact.id)}
+                  />
+                  <span>{contact.name}</span>
+                  {!contact.hasOurCard && <span className="hint">{t.needsYourCard}</span>}
+                </label>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className={error ? "hint error" : "hint"}>{error ?? (tooLong ? t.groupNameTooLong : t.groupHint)}</p>
+        <div className="dialog-actions">
+          <button type="button" onClick={onClose}>
+            {t.cancel}
+          </button>
+          <button className="primary" disabled={name.trim() === "" || tooLong || chosen.length === 0}>
+            {t.create}
+          </button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+export function MembersDialog({
+  group,
+  contacts,
+  onClose,
+  onChanged,
+}: {
+  group: Group;
+  contacts: Contact[];
+  onClose: () => void;
+  onChanged: (group: Group) => void;
+}) {
+  const { t } = useI18n();
+  const [adding, setAdding] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const inGroup = new Set(group.members.map((member) => member.contactId));
+  const addable = contacts.filter((contact) => !contact.request && contact.hasOurCard && !inGroup.has(contact.id));
+
+  async function change(action: () => Promise<Group>) {
+    setError(null);
+    try {
+      onChanged(await action());
+    } catch (failure) {
+      setError(errorText(failure));
+    }
+  }
+
+  return (
+    <Dialog title={t.membersTitle(group.name)} onClose={onClose}>
+      <ul className="member-list">
+        {group.members.map((member) => (
+          <li key={member.fingerprint}>
+            <span className="who">
+              <span className="name">
+                {member.name}
+                {member.me && <span className="tag">{t.you}</span>}
+                {member.admin && <span className="tag">{t.admin}</span>}
+              </span>
+              <span className="fingerprint">{member.fingerprint}</span>
+            </span>
+            {group.admin && group.member && !member.me && (
+              <button onClick={() => change(() => api.removeGroupMember(group.id, member.fingerprint))}>
+                {t.remove}
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+      {group.admin && group.member && (
+        <div className="inline-field">
+          <select value={adding} onChange={(event) => setAdding(event.target.value)} aria-label={t.addMember}>
+            <option value="">{addable.length > 0 ? t.chooseContact : t.nobodyToAdd}</option>
+            {addable.map((contact) => (
+              <option key={contact.id} value={contact.id}>
+                {contact.name}
+              </option>
+            ))}
+          </select>
+          <button
+            disabled={adding === ""}
+            onClick={() =>
+              change(async () => {
+                const changed = await api.addGroupMember(group.id, Number(adding));
+                setAdding("");
+                return changed;
+              })
+            }
+          >
+            {t.addMember}
+          </button>
+        </div>
+      )}
+      <p className={error ? "hint error" : "hint"}>
+        {error ?? (group.admin ? t.membersAdminHint : group.member ? t.membersHint : t.leftGroup)}
+      </p>
+      <div className="dialog-actions">
+        {!group.admin && group.member && (
+          confirmLeave ? (
+            <button className="danger" onClick={() => change(() => api.leaveGroup(group.id))}>
+              {t.leaveNow}
+            </button>
+          ) : (
+            <button className="danger-outline" onClick={() => setConfirmLeave(true)}>
+              {t.leaveGroup}
+            </button>
+          )
+        )}
+        <button className="primary" onClick={onClose}>
+          {t.done}
+        </button>
       </div>
     </Dialog>
   );

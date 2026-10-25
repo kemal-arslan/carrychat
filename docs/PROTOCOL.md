@@ -10,7 +10,7 @@
 - Store and forward: a message may take days and several kinds of link to arrive.
 - Delivery receipts that anyone carrying a copy can verify, so copies are dropped as soon as the message has arrived.
 
-Not in v0: group chat, public channels, messages from people who do not have your card, files, voice, forward secrecy.
+Not yet: public channels, messages from people who do not have your card, files, voice.
 
 ## 2. Notation
 
@@ -120,6 +120,9 @@ The hop limit is left out of the associated data so relays can decrement it. Eve
 | `0x03` read | Up to 64 bundle ids (8 bytes each) of the recipient's bundles that the sender has read. Optional: a user may turn read receipts off. |
 | `0x04` card | The sender's contact card (§3.1), after a name change. The receiver accepts it only if both keys equal those of the card it has. |
 | `0x05` session | Empty. Starts a ratchet session (§5.6) and is not shown. |
+| `0x06` group | A group state (§5.7), from the group's admin. |
+| `0x07` sender key | A member's sender chain for a group (§5.7). |
+| `0x08` leave | A group id (16 bytes): the sender leaves that group (§5.7). |
 
 All other values are reserved. A receiver that opens a bundle of an unknown kind ignores the body but still emits a tombstone, so the bundle stops circulating.
 
@@ -190,6 +193,61 @@ ciphertext = header_ct || XChaCha20-Poly1305-Encrypt(mk, nonce, plaintext, aad |
 **Starting.** When the initiator opens a `K_enc` bundle from its contact and has no sending chain, it replies with a session message (kind `0x05`), so the responder can switch to ratchet messages.
 
 **Hygiene.** Message keys are deleted once used. Skipped keys are deleted once used and after 8 days. The store overwrites deleted data (SQLite `secure_delete`). A chain allows 65535 messages; a sender that reaches that without hearing back falls back to `K_enc`.
+
+### 5.7 Groups
+
+A group message is one bundle that every member can open, however many members there are. Each member has its own *sender chain*, which it hands to the other members in pair bundles (§5.1, §5.6), and seals and signs its group messages with it.
+
+**State.** The member who creates a group is its admin. The group state is
+
+```
+group_id (16) || u32(version) || u8(len(name)) || name || u8(n) || (u8(len(card)) || card) × n
+```
+
+`group_id` is 16 random bytes, `name` is UTF-8 of at most 32 bytes, and the `n` cards (§3.1) are the members, the admin included, at most 16. The admin raises `version` with every change and sends the new state in a pair bundle of kind `0x06` to every member, including members it has just removed. A node takes the state of a group it does not know only from a contact it has accepted, who becomes that group's admin; after that, only from that admin and only with a higher version. A node that is not in the member list has left the group.
+
+**Peers.** The state gives every member the cards of the others. A member that is not a contact becomes a *group peer*: the node derives its pair keys and tags (§4), exchanges pair bundles with it, and treats it as having its card, but shows no direct messages from it.
+
+**Sender chains.** A member starts a sender chain when it joins a group, and again whenever it sees a member leave or be removed:
+
+```
+sender_key = 32 random bytes
+CK         = 32 random bytes, at iteration 0
+(sk, pk)   = a fresh Ed25519 key pair
+```
+
+It sends every other member a pair bundle of kind `0x07` with the chain as it stands:
+
+```
+group_id (16) || sender_key (32) || u32(iteration) || CK (32) || pk (32)
+```
+
+When a member joins, every other member sends it its current chain the same way, so the new member reads nothing sent before. A node keeps a chain it receives until it leaves the group, or until 8 days after the same member sent a newer one.
+
+**Sealing.** Message `i` of a chain is sealed with the bundle header of §5:
+
+```
+prk        = HKDF-Extract(salt = "kervan/v1/group", ikm = sender_key)
+K_gtag     = HKDF-Expand(prk, "tag", 32)
+K_ghdr     = HKDF-Expand(prk, "hdr", 32)
+(CK', mk)  = KDF_CK(CK)                                 as in §5.6; CK' is at iteration i + 1
+tag        = HMAC(K_gtag, u32(day(created_at)))[0..8]
+bundle_id  = H("kervan/v1/group" || nonce)[0..8]
+header_ct  = u32(i) XOR XChaCha20(K_ghdr, nonce)[0..4]    keystream from block 0
+sealed     = XChaCha20-Poly1305-Encrypt(mk, nonce, plaintext, aad || header_ct)
+signature  = Ed25519-Sign(sk, "kervan/v1/group-signature" || aad || header_ct || sealed)
+ciphertext = header_ct || sealed || signature
+```
+
+`aad` is the one of §5.1 and the plaintext that of §5.2. Version 1 sends only text (kind `0x01`) in groups. The tag changes daily and differs per chain, so carriers can tell neither which group a bundle belongs to nor which member sent it.
+
+**Receiving.** A member precomputes the tags of every chain it holds over the tag window (§4.1). For a bundle whose tag matches, it verifies the signature (strict Ed25519) with the chain's `pk`, decrypts the header, and takes the message key for iteration `i`: a stored skipped key, or the chain derived forward, storing the keys of the iterations it passes, at most 1000. It then decrypts and checks the tag against `day(created_at)`, the lifetime rule of §5.1 and the bundle id. Changes are kept only if every step succeeds, and each key opens one message. The bundle is accepted only if the chain belongs to someone the node currently counts as a member. A node opens the bundles it carries again when it learns a new chain or member, as it does for a new contact (§8).
+
+**Delivery.** A group bundle has no tombstone: one member's receipt must not stop it from reaching the others. It circulates until it expires, and members carry it on for one another.
+
+**Leaving.** A member leaves by sending the admin a pair bundle of kind `0x08` with the group id, and the admin removes it. The admin cannot leave, but can remove every other member. A removed member receives none of the chains started after its removal. Until a member has seen the new state, though, it keeps writing on its old chain, which the removed member can still read.
+
+**Size.** A group bundle adds 46 (header) + 4 (iteration) + 5 (plaintext header) + 16 (Poly1305 tag) + 64 (signature) = **135 bytes**, so up to **97 bytes** of text fit in one Meshtastic packet.
 
 ## 6. Tombstone
 
@@ -296,7 +354,8 @@ Implemented in `crates/kervan-node/src/file.rs`, with the extension `.kervan`. A
 - confidentiality and integrity of message content end to end, whatever carried it,
 - unlinkability for relays: without a pair key they cannot tell sender or recipient, or link a pair's traffic across days or directions,
 - delivery receipts that cannot be forged,
-- a closed inbox: only someone holding your card can write to you, and their first message is a request you accept or decline.
+- a closed inbox: only someone holding your card can write to you, and their first message is a request you accept or decline,
+- group messages that only current members can read and that no member can forge in another member's name (§5.7).
 
 **v0 does not provide:**
 
@@ -305,6 +364,7 @@ Implemented in `crates/kervan-node/src/file.rs`, with the extension `.kervan`. A
 - **Radio metadata privacy.** A LoRa transmission reveals the transmitting Meshtastic node and, to direction-finding equipment, its location. Bundle sizes and timing are visible, because v0 does not pad.
 - **Replay protection on the network.** A recorded bundle can be injected again until it expires. Receivers drop duplicates, but replays still spend airtime.
 - **Fragment integrity at relays.** Relays cannot authenticate fragments, so a forged fragment spoils reassembly of that bundle until the timeout.
+- **Immediate removal from a group.** Members that have not yet seen a removal keep writing on chains the removed member holds. Group bundles also have no delivery receipts, and a group's admin and member list are visible to every member.
 - **Reliable time.** Devices without internet access may have wrong clocks. The tag window absorbs a day of drift, and expiry checks use local time.
 
 ## 11. Open questions
@@ -313,9 +373,8 @@ Implemented in `crates/kervan-node/src/file.rs`, with the extension `.kervan`. A
 2. Downlink for nodes without internet access through a gateway, without telling the gateway who they are.
 3. Padding for LoRa frames: a smaller size leak against more airtime.
 4. Exchanging contacts at a distance.
-5. Group messages.
-6. A Bluetooth link between nearby devices.
-7. HF radio. Amateur bands forbid encryption that hides a message's meaning, so HF would need a separate signed but unencrypted message kind, limited to messages the user explicitly marks as public.
+5. A Bluetooth link between nearby devices.
+6. HF radio. Amateur bands forbid encryption that hides a message's meaning, so HF would need a separate signed but unencrypted message kind, limited to messages the user explicitly marks as public.
 
 ## 12. Constants
 
@@ -326,6 +385,8 @@ Implemented in `crates/kervan-node/src/file.rs`, with the extension `.kervan`. A
 | Longest bundle | 4096 bytes |
 | Bundle overhead | 67 bytes, 104 with a ratchet header |
 | Introduction overhead | 164 bytes plus the card |
+| Group bundle overhead | 135 bytes |
+| Members in a group | 16 at most, the admin included |
 | Default lifetime | 259200 s (3 days) |
 | Longest lifetime | 604800 s (7 days) |
 | Default hop limit | 8 |

@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef } from "react";
 import type { Contact, Message } from "./api";
-import { MAX_MESSAGE_BYTES, ONE_PACKET_BYTES, fullTime, radioPackets, shortTime, utf8Length } from "./format";
+import { Composer } from "./Composer";
+import { PAIR_OVERHEAD, fullTime, shortTime } from "./format";
 import { useI18n } from "./i18n";
 
 type Props = {
@@ -13,44 +14,11 @@ type Props = {
 
 export function Chat({ contact, messages, onSend, onAccept, onDecline }: Props) {
   const { t, language } = useI18n();
-  const [draft, setDraft] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
   const list = useRef<HTMLOListElement>(null);
 
   useEffect(() => {
     list.current?.scrollTo({ top: list.current.scrollHeight });
   }, [messages, contact.id]);
-
-  useEffect(() => {
-    setDraft("");
-    setError(null);
-  }, [contact.id]);
-
-  const bytes = utf8Length(draft.trim());
-  const tooLong = bytes > MAX_MESSAGE_BYTES;
-  const packets = radioPackets(bytes);
-
-  async function send() {
-    if (bytes === 0 || tooLong || sending) return;
-    setSending(true);
-    setError(null);
-    try {
-      await onSend(draft);
-      setDraft("");
-    } catch (failure) {
-      setError(String(failure).replace(/^Error: /, ""));
-    } finally {
-      setSending(false);
-    }
-  }
-
-  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-      event.preventDefault();
-      send();
-    }
-  }
 
   function state(message: Message) {
     if (message.read) return ["read", t.read];
@@ -103,31 +71,12 @@ export function Chat({ contact, messages, onSend, onAccept, onDecline }: Props) 
           </div>
         </div>
       ) : (
-        <div className="composer">
-          <textarea
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={onKeyDown}
-            placeholder={t.messageTo(contact.name)}
-            rows={2}
-            aria-label={t.messageTo(contact.name)}
-          />
-          <div className="composer-row">
-            <span className={tooLong ? "meter error" : bytes > ONE_PACKET_BYTES ? "meter warn" : "meter"}>
-              {error ??
-                (tooLong
-                  ? t.tooLong(bytes, MAX_MESSAGE_BYTES)
-                  : bytes === 0
-                    ? t.composerHint
-                    : packets === 1
-                      ? t.onePacket(bytes)
-                      : t.packets(bytes, packets))}
-            </span>
-            <button className="primary" onClick={send} disabled={bytes === 0 || tooLong || sending}>
-              {t.send}
-            </button>
-          </div>
-        </div>
+        <Composer
+          placeholder={t.messageTo(contact.name)}
+          overhead={PAIR_OVERHEAD}
+          conversation={`contact-${contact.id}`}
+          onSend={onSend}
+        />
       )}
     </section>
   );
