@@ -228,7 +228,7 @@ Both sides send HELLO first. A second connection between the same two nodes is c
 
 Implemented in `crates/kervan-node/src/internet.rs`.
 
-- **Events.** Every bundle and tombstone travels as one Nostr event (NIP-01) of kind `4733`, a provisional number not registered with Nostr. The content is the frame (§7) in base64url without padding. A bundle event has the tag `["x", hex(tag)]`, a tombstone event `["b", hex(bundle_id)]`.
+- **Events.** Every bundle and tombstone travels as one Nostr event (NIP-01) of kind `9378`, a provisional number not registered with Nostr. The content is the frame (§7) in base64url without padding. A bundle event has the tag `["x", hex(tag)]`, a tombstone event `["b", hex(bundle_id)]`.
 - **Tags.** A pair bundle is posted under its recipient tag. An introduction, whose own tag is random, is posted under the recipient's mailbox tag, which anyone holding the recipient's card can compute:
 
   ```
@@ -238,7 +238,8 @@ Implemented in `crates/kervan-node/src/internet.rs`.
   `d` is the day the introduction was created.
 - **Keys.** Each event is signed (BIP-340) with a one-time key `HMAC(node_secret, content)`, where `node_secret` is a random secret the node keeps. Keys cannot be linked to the user or to each other, and the same node posting the same frame again produces the same event, which relays drop as a duplicate.
 - **Time.** A bundle event's `created_at` is `expires_at − 604800`, never later than the bundle's creation. A tombstone event's is the time it is posted.
-- **Subscription.** A node asks every relay for `{"kinds": [4733], "#x": [...], "since": now − 691200}` with the pair tags of all its contacts and its own mailbox tags over the tag window (§4.1), and for `{"kinds": [4733], "#b": [...]}` with the ids of its own bundles still waiting for a receipt. It renews the subscription when its contacts change, when it sends, and every 10 minutes.
+- **Subscription.** A node asks every relay for `{"kinds": [9378], "#x": [...], "since": now − 691200}` with the pair tags of all its contacts and its own mailbox tags over the tag window (§4.1), and for `{"kinds": [9378], "#b": [...]}` with the ids of its own bundles still waiting for a receipt. It renews the subscription when its contacts change, when it sends, and every 10 minutes.
+- **Connections.** A node pings every relay every 20 seconds and drops a connection that has been silent for 40, then connects again. Right after sending, it also pings every relay and drops a connection that does not answer within 5 seconds. On connecting again it posts its waiting bundles once more. A computer that moves to another network can otherwise keep a dead connection for minutes without noticing, and lose what it sends into it.
 - **What a node posts.** Its own bundles when it sends them and again on every connection, the tombstones of bundles it receives, and, as a gateway, every bundle it starts carrying that came over another link.
 - **What a node takes.** Only bundles for itself and tombstones. A bundle from a relay that does not open is dropped, not carried, so a relay cannot fill a node's store.
 - **Relays** see tags, sizes, timing and the node's IP address. They also see which tags one connection asks for together, which links the tags of one node's contacts within a day. Reaching relays over Tor is future work.

@@ -186,7 +186,10 @@ async fn run(cli: Cli) -> AnyResult {
                 if relays.is_empty() {
                     InternetConfig::default()
                 } else {
-                    InternetConfig { relays }
+                    InternetConfig {
+                        relays,
+                        ..InternetConfig::default()
+                    }
                 }
             });
             run_node(node, lan, internet, connect, chat).await?;

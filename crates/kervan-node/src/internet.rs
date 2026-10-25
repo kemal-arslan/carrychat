@@ -5,7 +5,7 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use data_encoding::{BASE64URL_NOPAD, HEXLOWER};
 use futures_util::{SinkExt, StreamExt};
@@ -24,7 +24,7 @@ use crate::engine::{Handled, Outcome};
 use crate::{now, Error, Event, Result, Shared};
 
 /// The Nostr event kind of Kervan frames. Provisional, not registered.
-pub const KIND: u32 = 4733;
+pub const KIND: u32 = 9378;
 pub const DEFAULT_RELAYS: &[&str] = &[
     "wss://relay.damus.io",
     "wss://nos.lol",
@@ -37,13 +37,19 @@ const SUBSCRIPTION_ID: &str = "kervan";
 const LOOKBACK_SECS: u32 = MAX_TTL_SECS + DAY_SECS;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const RENEW_INTERVAL: Duration = Duration::from_secs(600);
-const PING_INTERVAL: Duration = Duration::from_secs(30);
 const FIRST_RETRY: Duration = Duration::from_secs(2);
 const MAX_RETRY: Duration = Duration::from_secs(60);
+/// How long a relay has to answer after a message is sent before the
+/// connection is taken as dead.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Debug)]
 pub struct InternetConfig {
     pub relays: Vec<String>,
+    /// How often a relay is pinged. A relay silent for twice as long is taken
+    /// as gone, as happens when the computer moves to another network, and is
+    /// connected to again.
+    pub keepalive: Duration,
 }
 
 impl Default for InternetConfig {
@@ -53,6 +59,7 @@ impl Default for InternetConfig {
                 .iter()
                 .map(|relay| relay.to_string())
                 .collect(),
+            keepalive: Duration::from_secs(20),
         }
     }
 }
@@ -62,6 +69,8 @@ pub(crate) struct Internet {
     outgoing: broadcast::Sender<String>,
     /// Bumped when the subscription should be renewed.
     renew: watch::Sender<u64>,
+    /// Bumped to make every connection prove it is alive.
+    probe: watch::Sender<u64>,
     connected: AtomicUsize,
     secret: OnceLock<[u8; 32]>,
     /// The last reason a relay gave for refusing an event.
@@ -73,6 +82,7 @@ impl Internet {
         Self {
             outgoing: broadcast::channel(1024).0,
             renew: watch::channel(0).0,
+            probe: watch::channel(0).0,
             connected: AtomicUsize::new(0),
             secret: OnceLock::new(),
             refusal: Mutex::default(),
@@ -92,6 +102,13 @@ impl Internet {
 
     pub(crate) fn renew_subscription(&self) {
         self.renew.send_modify(|count| *count += 1);
+    }
+
+    /// Pings every relay and drops connections that do not answer within a
+    /// few seconds, so a message sent into a dead connection, for example
+    /// right after moving to another network, goes out again soon.
+    pub(crate) fn probe(&self) {
+        self.probe.send_modify(|count| *count += 1);
     }
 
     /// Posts a bundle frame under `tag` to every connected relay.
@@ -141,7 +158,7 @@ pub(crate) fn start(shared: &Arc<Shared>, config: InternetConfig) -> Result<()> 
         return Err(Error::Invalid("the internet link is already running"));
     }
     for relay in config.relays {
-        tokio::spawn(relay_loop(Arc::downgrade(shared), relay));
+        tokio::spawn(relay_loop(Arc::downgrade(shared), relay, config.keepalive));
     }
     Ok(())
 }
@@ -184,13 +201,14 @@ pub fn signed_event(
     })
 }
 
-async fn relay_loop(shared: Weak<Shared>, url: String) {
+async fn relay_loop(shared: Weak<Shared>, url: String, keepalive: Duration) {
     let mut retry = FIRST_RETRY;
     loop {
-        let Some((mut outgoing, mut renew)) = shared.upgrade().map(|shared| {
+        let Some((mut outgoing, mut renew, mut probe)) = shared.upgrade().map(|shared| {
             (
                 shared.internet.outgoing.subscribe(),
                 shared.internet.renew.subscribe(),
+                shared.internet.probe.subscribe(),
             )
         }) else {
             return;
@@ -202,7 +220,15 @@ async fn relay_loop(shared: Weak<Shared>, url: String) {
         .await;
         if let Ok(Ok((socket, _))) = connected {
             retry = FIRST_RETRY;
-            run_relay(&shared, socket, &mut outgoing, &mut renew).await;
+            run_relay(
+                &shared,
+                socket,
+                &mut outgoing,
+                &mut renew,
+                &mut probe,
+                keepalive,
+            )
+            .await;
         }
         tokio::time::sleep(retry).await;
         retry = (retry * 2).min(MAX_RETRY);
@@ -214,6 +240,8 @@ async fn run_relay<S>(
     socket: S,
     outgoing: &mut broadcast::Receiver<String>,
     renew: &mut watch::Receiver<u64>,
+    probe: &mut watch::Receiver<u64>,
+    keepalive: Duration,
 ) where
     S: futures_util::Sink<Message>
         + futures_util::Stream<Item = tokio_tungstenite::tungstenite::Result<Message>>
@@ -237,7 +265,10 @@ async fn run_relay<S>(
             break;
         }
     }
-    let mut ping = tokio::time::interval(PING_INTERVAL);
+    let mut ping = tokio::time::interval(keepalive);
+    let mut last_heard = Instant::now();
+    // A probe asked for before or during the greeting still counts.
+    let mut probe_deadline: Option<tokio::time::Instant> = None;
     let mut renewal = tokio::time::interval(RENEW_INTERVAL);
     // Both intervals fire at once; the greeting already covered that moment.
     ping.tick().await;
@@ -245,12 +276,15 @@ async fn run_relay<S>(
     while alive {
         let send = tokio::select! {
             incoming = stream.next() => match incoming {
-                Some(Ok(Message::Text(text))) => {
-                    with(shared, |shared| receive(shared, &text));
+                Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                Some(Ok(message)) => {
+                    last_heard = Instant::now();
+                    probe_deadline = None;
+                    if let Message::Text(text) = message {
+                        with(shared, |shared| receive(shared, &text));
+                    }
                     None
                 }
-                Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
-                Some(Ok(_)) => None,
             },
             message = outgoing.recv() => match message {
                 Ok(message) => Some(Message::text(message)),
@@ -262,7 +296,25 @@ async fn run_relay<S>(
                 Err(_) => break,
             },
             _ = renewal.tick() => with(shared, subscription).flatten().map(Message::text),
-            _ = ping.tick() => Some(Message::Ping(Default::default())),
+            changed = probe.changed() => match changed {
+                Ok(()) => {
+                    probe_deadline.get_or_insert(tokio::time::Instant::now() + PROBE_TIMEOUT);
+                    Some(Message::Ping(Default::default()))
+                }
+                Err(_) => break,
+            },
+            // Asked to prove itself and stayed silent: dead.
+            _ = tokio::time::sleep_until(
+                probe_deadline.unwrap_or_else(|| tokio::time::Instant::now() + RENEW_INTERVAL)
+            ), if probe_deadline.is_some() => break,
+            _ = ping.tick() => {
+                // Not even a pong for two rounds: the connection is dead,
+                // even if the computer has not noticed yet.
+                if last_heard.elapsed() > keepalive * 2 {
+                    break;
+                }
+                Some(Message::Ping(Default::default()))
+            }
         };
         if let Some(message) = send {
             alive = sink.send(message).await.is_ok();
@@ -387,7 +439,7 @@ mod tests {
         );
 
         let serialized = format!(
-            r#"[0,"{}",1790000000,4733,[["x","00112233aabbccdd"]],"AQID"]"#,
+            r#"[0,"{}",1790000000,9378,[["x","00112233aabbccdd"]],"AQID"]"#,
             event["pubkey"].as_str().unwrap()
         );
         let id: [u8; 32] = Sha256::digest(serialized.as_bytes()).into();

@@ -202,6 +202,7 @@ impl Node {
         self.shared.lan.broadcast(&frame.to_bytes(), None);
         self.shared.internet.post_bundle(&frame, &tag);
         self.shared.internet.renew_subscription();
+        self.shared.internet.probe();
         Ok(message)
     }
 
