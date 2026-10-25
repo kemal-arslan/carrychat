@@ -591,7 +591,9 @@ impl Engine {
             Kind::Leave => self.receive_leave(index, &message, now, &mut events)?,
             Kind::Session | Kind::Unknown(_) => {}
         }
+        // Group peers are not listed, so there is nothing to show of them.
         if self.contacts[index].session.is_established() != was_secure
+            && !self.contacts[index].hidden
             && !events
                 .iter()
                 .any(|event| matches!(event, Event::ContactChanged { .. }))

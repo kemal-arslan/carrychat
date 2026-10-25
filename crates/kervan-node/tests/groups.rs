@@ -314,11 +314,22 @@ fn only_the_admin_changes_the_members() {
 fn a_group_peer_who_writes_directly_becomes_a_request() {
     let mut mesh = Mesh::new(&["alice", "bob", "carol"]);
     mesh.create_group();
-    let bob_card = mesh.nodes[BOB].profile().card;
+    // Carol writes to Bob with the card the group gave her.
+    let member = mesh
+        .group(CAROL)
+        .members
+        .into_iter()
+        .find(|member| member.name == "bob")
+        .unwrap();
+    assert_eq!(member.card, mesh.nodes[BOB].profile().card);
     let bob = mesh.nodes[CAROL]
-        .add_contact(&bob_card, NOW + 20)
+        .add_contact(&member.card, NOW + 20)
         .unwrap()
         .0;
+    assert!(!bob.request);
+    let listed = mesh.group(CAROL).members;
+    let listed = listed.iter().find(|m| m.name == "bob").unwrap();
+    assert_eq!(listed.contact_id, Some(bob.id));
     let (_, frame) = mesh.nodes[CAROL]
         .send_text(bob.id, "Ben Carol, gruptan", NOW + 20)
         .unwrap();

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import QRCode from "qrcode";
-import { api, type Contact, type Group, type LanProblem, type Profile } from "./api";
+import { api, type Contact, type Group, type LanProblem, type Member, type Profile } from "./api";
 import { MAX_NAME_BYTES, utf8Length } from "./format";
 import { useI18n, type LanguageChoice } from "./i18n";
 import { notificationsEnabled, setNotificationsEnabled } from "./prefs";
@@ -412,11 +412,13 @@ export function MembersDialog({
   contacts,
   onClose,
   onChanged,
+  onMessage,
 }: {
   group: Group;
   contacts: Contact[];
   onClose: () => void;
   onChanged: (group: Group) => void;
+  onMessage: (member: Member) => Promise<void>;
 }) {
   const { t } = useI18n();
   const [adding, setAdding] = useState("");
@@ -447,6 +449,14 @@ export function MembersDialog({
               </span>
               <span className="fingerprint">{member.fingerprint}</span>
             </span>
+            {!member.me && (
+              <button
+                title={member.contactId === null ? t.messageMemberHint(member.name) : undefined}
+                onClick={() => onMessage(member).catch((failure) => setError(errorText(failure)))}
+              >
+                {t.messageMember}
+              </button>
+            )}
             {group.admin && group.member && !member.me && (
               <button onClick={() => change(() => api.removeGroupMember(group.id, member.fingerprint))}>
                 {t.remove}

@@ -140,6 +140,11 @@ const en = {
   you: "you",
   admin: "admin",
   remove: "Remove",
+  messageMember: "Message",
+  messageMemberHint: (name: string) =>
+    `Adds ${name} to your contacts with the card the group gave you. Your first message reaches them as a request.`,
+  memberAdded: (name: string) =>
+    `${name} is in your contacts now. Compare fingerprints with them when you can.`,
   addMember: "Add",
   chooseContact: "Add a contact…",
   nobodyToAdd: "No one else to add",
@@ -288,6 +293,10 @@ const tr: Strings = {
   you: "sen",
   admin: "yönetici",
   remove: "Çıkar",
+  messageMember: "Mesaj yaz",
+  messageMemberHint: (name) =>
+    `${name} kişisini grubun verdiği kartla kişilerine ekler. İlk mesajın ona istek olarak ulaşır.`,
+  memberAdded: (name) => `${name} artık kişilerinde. Fırsat bulunca parmak izlerinizi karşılaştırın.`,
   addMember: "Ekle",
   chooseContact: "Bir kişi ekle…",
   nobodyToAdd: "Eklenecek başka kimse yok",

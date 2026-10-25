@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type Contact, type Group, type GroupMessage, type Message, type Profile, type Status } from "./api";
+import {
+  api,
+  type Contact,
+  type Group,
+  type GroupMessage,
+  type Member,
+  type Message,
+  type Profile,
+  type Status,
+} from "./api";
 import { Chat } from "./Chat";
 import {
   AddContactDialog,
@@ -170,6 +179,20 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
 
   const contact = contacts.find((candidate) => candidate.id === selected) ?? null;
   const group = groups.find((candidate) => candidate.id === selectedGroup) ?? null;
+
+  /** Opens a direct conversation with a group member, adding them as a contact first if needed. */
+  async function messageMember(member: Member) {
+    let contactId = member.contactId;
+    if (contactId === null) {
+      const added = await api.addContact(member.card);
+      contactId = added.id;
+      show(t.memberAdded(added.name));
+      await refreshContacts();
+      refreshGroups();
+    }
+    setDialog(null);
+    selectContact(contactId);
+  }
 
   async function sendToGroup(text: string) {
     if (!group) return;
@@ -380,6 +403,7 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
             refreshGroups();
             refreshStatus();
           }}
+          onMessage={messageMember}
         />
       )}
       {dialog === "card" && <MyCardDialog profile={profile} onClose={() => setDialog(null)} />}

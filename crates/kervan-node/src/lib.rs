@@ -91,6 +91,9 @@ pub struct MemberView {
     pub admin: bool,
     /// Their contact id, if they are one of our contacts.
     pub contact_id: Option<i64>,
+    /// Their `kervan:` card, as the admin passed it on: adding it as a
+    /// contact lets us write to them directly.
+    pub card: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

@@ -32,6 +32,8 @@ export type Member = {
   admin: boolean;
   /** Their contact id, if they are one of our contacts. */
   contactId: number | null;
+  /** Their card as the group's admin passed it on, to add them as a contact. */
+  card: string;
 };
 
 export type Group = {
@@ -247,6 +249,7 @@ function previewApi(): Api {
     me: false,
     admin,
     contactId,
+    card: `kervan:${fingerprint.replaceAll(" ", "")}`,
   });
   const groups: Group[] = [
     {
@@ -323,6 +326,17 @@ function previewApi(): Api {
     },
     async addContact(card) {
       if (!card.trim().startsWith("kervan:")) throw new Error("invalid card prefix");
+      const fromGroup = groups.flatMap((group) => group.members).find((candidate) => candidate.card === card);
+      if (fromGroup) {
+        const added = contact(nextId++, fromGroup.name, fromGroup.fingerprint);
+        contacts.push(added);
+        groups.forEach((group) =>
+          group.members.forEach((candidate) => {
+            if (candidate.card === card) candidate.contactId = added.id;
+          }),
+        );
+        return added;
+      }
       const added = contact(nextId++, "Elif", "q3rd 7kpa mx2c vuhe 4tzn 6wyb fo");
       contacts.push(added);
       return added;

@@ -1,6 +1,7 @@
 //! `kervan`: a Kervan node on the command line. Useful as a relay on a
 //! computer without a screen, and for trying things out.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -296,6 +297,12 @@ async fn run_node(
             .and_then(|contacts| contacts.into_iter().find(|contact| contact.id == id))
             .map_or_else(|| format!("contact {id}"), |contact| contact.name)
     };
+    // A contact change is a new name or the start of forward secrecy.
+    let mut known: HashMap<i64, String> = node
+        .contacts()?
+        .into_iter()
+        .map(|contact| (contact.id, contact.name))
+        .collect();
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     let mut stdin_open = chat.is_some();
     loop {
@@ -312,8 +319,13 @@ async fn run_node(
                 Ok(Event::MessagesRead { contact_id, message_ids }) => {
                     println!("✓✓ {} read {} message(s)", names(contact_id), message_ids.len());
                 }
-                Ok(Event::ContactChanged { contact }) => println!("· contact {} is called {} now", contact.id, contact.name),
+                Ok(Event::ContactChanged { contact }) => match known.insert(contact.id, contact.name.clone()) {
+                    Some(old) if old != contact.name => println!("· {old} is called {} now", contact.name),
+                    _ if contact.secure => println!("· forward secrecy with {}", contact.name),
+                    _ => {}
+                },
                 Ok(Event::ContactRequest { contact }) => {
+                    known.insert(contact.id, contact.name.clone());
                     println!("? {} ({}) wants to message you.", contact.name, contact.fingerprint);
                     println!("  Accept with `kervan accept {}`, or `kervan decline {}`.", contact.id, contact.id);
                 }

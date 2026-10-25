@@ -556,6 +556,7 @@ impl Engine {
                         contact_id: contact
                             .filter(|contact| !contact.hidden && !contact.request)
                             .map(|contact| contact.id),
+                        card: card.to_text(),
                     }
                 })
                 .collect(),
