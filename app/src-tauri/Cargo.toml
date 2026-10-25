@@ -1,0 +1,23 @@
+[package]
+name = "kervan-app"
+description = "Kervan desktop app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "kervan_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+# Tauri 2.12 needs Rust 1.90. The workspace targets 1.85, so Cargo picks 2.11:
+# keep the @tauri-apps packages in package.json on the same minor versions.
+[dependencies]
+kervan-node = { path = "../../crates/kervan-node" }
+serde = { version = "1", features = ["derive"] }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"

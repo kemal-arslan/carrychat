@@ -1,0 +1,17 @@
+[package]
+name = "kervan-cli"
+description = "Command-line Kervan node, for headless relays and testing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "kervan"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "env"] }
+kervan-node = { path = "../kervan-node" }
+tokio = { version = "1", features = ["io-std", "io-util", "macros", "rt-multi-thread", "signal"] }

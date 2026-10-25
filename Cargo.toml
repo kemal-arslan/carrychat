@@ -1,6 +1,9 @@
 [workspace]
-resolver = "2"
-members = ["crates/kervan-proto"]
+resolver = "3"
+members = ["crates/kervan-proto", "crates/kervan-node", "crates/kervan-cli", "app/src-tauri"]
+# The desktop app needs system WebView libraries to build, so plain `cargo`
+# commands leave it out. Build it with `npm run tauri build` in app/.
+default-members = ["crates/kervan-proto", "crates/kervan-node", "crates/kervan-cli"]
 
 [workspace.package]
 version = "0.0.1"

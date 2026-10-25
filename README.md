@@ -6,7 +6,7 @@ Kervan is a messenger for computers that keeps working without the internet. It 
 
 [![CI](https://github.com/kemal-arslan/kervan/actions/workflows/ci.yml/badge.svg)](https://github.com/kemal-arslan/kervan/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/kemalarslan)
 
-> **Status: early.** The protocol (v0 draft), its reference implementation and its test vectors exist. The app does not yet. See the [roadmap](#roadmap).
+> **Status: early.** Kervan works today over the local network and by file, from a desktop app or the command line. LoRa radio and internet links come next. Nothing is packaged yet. See the [roadmap](#roadmap).
 
 ## Why
 
@@ -27,28 +27,67 @@ Kervan sends each message over the best link it has, and keeps it until one appe
 - **Store and forward.** Every computer keeps its own outgoing messages and carries other people's for up to 7 days, passing them on when it meets a new link.
 - **Nothing to learn in transit.** Devices that carry a message see only a tag that changes daily and differs per direction. Without one of the two keys, they cannot tell who it is from or for.
 - **Delivery receipts the network can check.** The recipient publishes a short proof that only the two contacts can produce, and every device that carries a copy deletes it.
-- **Contacts only.** You exchange cards in person, by QR code, and compare fingerprints. Nobody else can message you, so there is no spam.
+- **Contacts only.** You exchange cards with the people you want to reach and compare fingerprints. Nobody else can message you, so there is no spam.
 
 The full specification is in [docs/PROTOCOL.md](docs/PROTOCOL.md). [docs/test-vectors.json](docs/test-vectors.json) lets another implementation check itself byte for byte.
+
+## Try it
+
+You need Rust 1.85 or later and Node.js 20 or later.
+
+### Desktop app
+
+```bash
+cd app
+npm install
+npm run tauri dev
+```
+
+Create your identity, give your card (**My card**) to a contact and add theirs. Kervan computers on the same network find each other by themselves. If your network blocks that, use **Connect…** with the other computer's address. **Export file…** writes everything waiting to be delivered to a `.kervan` file that someone can carry to another Kervan computer and import there.
+
+`npm run dev` opens the interface in a browser with sample data, without building the app.
+
+### Command line
+
+```bash
+cargo install --path crates/kervan-cli
+kervan init Ayşe
+kervan card                                  # give this to your contacts
+kervan add kervan:…                          # add theirs
+kervan send Deniz "İyiyim, Kadıköy'deyim."
+kervan run                                   # deliver, receive and relay on the local network
+kervan export messages.kervan                # or carry everything on a USB stick
+```
+
+`kervan run` on a computer without a screen turns it into a relay: it carries other people's messages until they are delivered, without being able to read them.
 
 ## Roadmap
 
 1. **Protocol v0, reference implementation, test vectors** (done)
-2. Local network link, message store, desktop app (Tauri), USB export and import
+2. **Local network link, message store, desktop app, command line, USB export and import** (done)
 3. LoRa link through a Meshtastic radio over USB
 4. Internet link over Nostr, and gateways that let offline islands reach it
 5. Bridge to the bitchat Bluetooth mesh, mobile apps, HF radio
 
 ## Build
 
-Requires Rust 1.85 or later.
-
 ```bash
-cargo test
-cargo run -p kervan-proto --example gen_vectors
+cargo test                       # protocol, node and command line
+cd app && npm run tauri build    # desktop app installer
 ```
 
+On Linux the desktop app needs WebKitGTK. See the [Tauri prerequisites](https://tauri.app/start/prerequisites/).
+
+| Crate | What it is |
+| --- | --- |
+| [`kervan-proto`](crates/kervan-proto) | Wire format and cryptography, no I/O |
+| [`kervan-node`](crates/kervan-node) | Message store, forwarding, local network and file links |
+| [`kervan-cli`](crates/kervan-cli) | The `kervan` command |
+| [`app`](app) | The desktop app (Tauri and React) |
+
 ## Security
+
+Your secret keys are stored unencrypted in the app's data folder, which only your user account can read. Anyone with access to your account, or a copy of that folder, can read your messages and send as you.
 
 Kervan v0 has no forward secrecy. Anyone who obtains a device's secret key can decrypt the traffic of that device that they have recorded. LoRa transmissions also reveal that a radio is transmitting and from roughly where. [docs/PROTOCOL.md §10](docs/PROTOCOL.md#10-security) lists every known limitation. Until v1, do not rely on Kervan where being found out is dangerous.
 

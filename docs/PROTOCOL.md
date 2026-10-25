@@ -157,6 +157,8 @@ Each node keeps one store: its own outbox, plus the bundles it carries for other
 - Expired bundles are deleted. Bundles that claim to expire more than 8 days from now are refused.
 - Forwarding decrements the hop limit. A bundle whose hop limit is 0 is kept but not forwarded.
 - Bundles carried for others have a quota. When it is full, the bundle closest to expiry is evicted first.
+- A bundle is not sent back over the connection it arrived on. A tombstone is, because the node at the other end may be the sender waiting for it.
+- A node that adds a contact opens the bundles it already carries that turn out to be from that contact.
 - **Split horizon on LoRa.** A bundle that arrived over LoRa is not sent over LoRa again by the same node, because the Meshtastic mesh already floods it. It may be bridged to other links. Bundles that arrived over any other link may be sent over LoRa within the airtime budget, with the node's own bundles and tombstones first.
 
 ## 9. Transports (draft)
@@ -165,8 +167,27 @@ These mappings are fixed when each transport is built (see the roadmap in the RE
 
 ### 9.1 Local network
 
-- Discovery: a UDP multicast beacon carrying a random per-run session id and a TCP port. The beacon carries no identity.
-- Sync: over TCP, each frame prefixed with its `u16` length. On connect, both sides send `HAVE` (`0x10`, the bundle ids they hold) and answer with `WANT` (`0x11`, the ids they lack), then exchange bundle and tombstone frames.
+Implemented in `crates/kervan-node/src/lan.rs`.
+
+**Discovery.** Every 3 seconds a node sends a 16-byte beacon to the multicast group `239.255.74.74`, port `47474`:
+
+| Offset | Size | Field |
+| --- | --- | --- |
+| 0 | 6 | `"KRVN" \|\| 0x00 \|\| 0x01` (magic, version, beacon) |
+| 6 | 8 | session id, random per run |
+| 14 | 2 | TCP port, `u16` |
+
+The beacon carries no identity. On hearing a beacon from a node it is not connected to, the node with the smaller session id dials. The other node dials too after three beacons without a connection, in case its own beacons do not get through.
+
+**Sync.** Over TCP, every frame is prefixed with its `u16` length. Besides the frames of §7, three control frames exist:
+
+| Type | Layout |
+| --- | --- |
+| `0x10` HAVE | `type \|\| count (u16) \|\| bundle_id × count` |
+| `0x11` WANT | `type \|\| count (u16) \|\| bundle_id × count` |
+| `0x12` HELLO | `type \|\| session id (8)` |
+
+Both sides send HELLO first. A second connection between the same two nodes is closed. Then each side sends HAVE with the ids of the bundles it can pass on, and every tombstone it knows. The other side answers with WANT for the ids it has never seen, and receives those bundles. After that, new bundles and tombstones are pushed as they appear. An empty HAVE every 15 seconds keeps the connection alive, and a connection silent for 45 seconds is closed.
 
 ### 9.2 LoRa via Meshtastic
 
@@ -185,7 +206,7 @@ These mappings are fixed when each transport is built (see the roadmap in the RE
 
 ### 9.4 File
 
-A file is `"KRVN" || 0x00 || frames`, each frame prefixed with its `u16` length. Exporting writes the store's bundles and tombstones. Importing feeds every frame into the store, exactly as if it had arrived over any other link.
+Implemented in `crates/kervan-node/src/file.rs`, with the extension `.kervan`. A file is `"KRVN" || 0x00 || frames`, each frame prefixed with its `u16` length. Exporting writes the store's bundles and tombstones. Importing feeds every frame into the store, exactly as if it had arrived over any other link.
 
 ## 10. Security
 
