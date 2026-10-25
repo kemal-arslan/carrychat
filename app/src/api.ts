@@ -63,6 +63,9 @@ export type Channel = {
 
 export type SharedCard = { name: string; fingerprint: string; card: string };
 
+/** An author muted in a channel. */
+export type Muted = { author: string; nick: string };
+
 export type Post = {
   id: number;
   channelId: number;
@@ -165,6 +168,8 @@ export interface Api {
   sendPost(channelId: number, text: string): Promise<Post>;
   shareCard(channelId: number): Promise<Post>;
   muteAuthor(channelId: number, author: string): Promise<void>;
+  unmuteAuthor(channelId: number, author: string): Promise<void>;
+  mutedAuthors(channelId: number): Promise<Muted[]>;
   markChannelRead(channelId: number): Promise<void>;
   settings(): Promise<Settings>;
   setReadReceipts(on: boolean): Promise<void>;
@@ -223,6 +228,8 @@ function desktopApi(): Api {
     sendPost: (channelId, text) => call("send_post", { channelId, text }),
     shareCard: (channelId) => call("share_card", { channelId }),
     muteAuthor: (channelId, author) => call("mute_author", { channelId, author }),
+    unmuteAuthor: (channelId, author) => call("unmute_author", { channelId, author }),
+    mutedAuthors: (channelId) => call("muted_authors", { channelId }),
     markChannelRead: (channelId) => call("mark_channel_read", { channelId }),
     settings: () => call("settings"),
     setReadReceipts: (on) => call("set_read_receipts", { on }),
@@ -371,6 +378,7 @@ function previewApi(): Api {
     },
     { ...post(204, "gönüllü", "q4m27hxa", "Ne kadar çok o kadar iyi. Teşekkürler!", 600), read: false },
   ];
+  const muted: (Muted & { channelId: number })[] = [];
   const summarizeChannels = () =>
     channels.map((channel) => {
       const own = posts.filter((candidate) => candidate.channelId === channel.id);
@@ -529,7 +537,10 @@ function previewApi(): Api {
       return { ...channel };
     },
     async posts(channelId) {
-      return posts.filter((candidate) => candidate.channelId === channelId).map((candidate) => ({ ...candidate }));
+      const hidden = new Set(muted.filter((entry) => entry.channelId === channelId).map((entry) => entry.author));
+      return posts
+        .filter((candidate) => candidate.channelId === channelId && !hidden.has(candidate.author))
+        .map((candidate) => ({ ...candidate }));
     },
     async sendPost(channelId, text) {
       const channel = channels.find((candidate) => candidate.id === channelId)!;
@@ -549,9 +560,16 @@ function previewApi(): Api {
       return { ...sent };
     },
     async muteAuthor(channelId, author) {
-      for (let index = posts.length - 1; index >= 0; index--) {
-        if (posts[index].channelId === channelId && posts[index].author === author) posts.splice(index, 1);
-      }
+      const nick = posts.find((candidate) => candidate.author === author)?.nick ?? "";
+      muted.push({ channelId, author, nick });
+    },
+    async unmuteAuthor(channelId, author) {
+      const index = muted.findIndex((entry) => entry.channelId === channelId && entry.author === author);
+      if (index < 0) throw new Error("that author is not muted here");
+      muted.splice(index, 1);
+    },
+    async mutedAuthors(channelId) {
+      return muted.filter((entry) => entry.channelId === channelId).map(({ author, nick }) => ({ author, nick }));
     },
     async markChannelRead(channelId) {
       posts.filter((candidate) => candidate.channelId === channelId).forEach((candidate) => {

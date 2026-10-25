@@ -135,12 +135,27 @@ fn a_muted_author_is_neither_shown_nor_passed_on() {
     let (_, frame) = net.nodes[0]
         .send_post(alice, "yine reklam", NOW + 31)
         .unwrap();
+    let frame_again = frame.clone();
     // Only Bob hears Alice directly: he must not pass the post on.
     let handled = net.nodes[1].handle(frame, NOW + 60).unwrap();
     assert!(handled.relay.is_empty());
     assert!(handled.events.is_empty());
     assert!(net.received_since(&before).is_empty());
     assert!(net.nodes[1].mute_author(bob, "nobody").is_err());
+
+    // Unmuted, the posts Bob kept show again, and a dropped one is taken
+    // when it is offered again.
+    let muted = net.nodes[1].muted_authors(bob).unwrap();
+    assert_eq!(muted.len(), 1);
+    assert_eq!(muted[0].author, author);
+    assert_eq!(muted[0].nick, "spam");
+    net.nodes[1].unmute_author(bob, &author).unwrap();
+    assert!(net.nodes[1].muted_authors(bob).unwrap().is_empty());
+    assert_eq!(net.nodes[1].posts(bob).unwrap().len(), 1);
+    let again = net.nodes[1].handle(frame_again, NOW + 61).unwrap();
+    assert_eq!(again.events.len(), 1);
+    assert_eq!(net.nodes[1].posts(bob).unwrap().len(), 2);
+    assert!(net.nodes[1].unmute_author(bob, &author).is_err());
 }
 
 #[test]

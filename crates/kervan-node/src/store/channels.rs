@@ -238,6 +238,30 @@ impl Store {
         Ok(())
     }
 
+    pub fn unmute(&self, channel: i64, author: &[u8; 32]) -> Result<bool> {
+        Ok(self.conn.execute(
+            "DELETE FROM channel_muted WHERE channel_ref = ? AND author = ?",
+            params![channel, author],
+        )? == 1)
+    }
+
+    /// Muted authors of a channel, with the nickname of their latest post.
+    pub fn muted(&self, channel: i64) -> Result<Vec<([u8; 32], Option<String>)>> {
+        let rows: Vec<([u8; 32], Option<String>)> = self
+            .conn
+            .prepare(
+                "SELECT m.author, (
+                     SELECT nick FROM channel_posts p
+                     WHERE p.channel_ref = m.channel_ref AND p.author = m.author
+                     ORDER BY created_at DESC LIMIT 1
+                 )
+                 FROM channel_muted m WHERE m.channel_ref = ? ORDER BY m.rowid",
+            )?
+            .query_map([channel], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(rows)
+    }
+
     pub fn is_muted(&self, channel: i64, author: &[u8; 32]) -> Result<bool> {
         Ok(self
             .conn

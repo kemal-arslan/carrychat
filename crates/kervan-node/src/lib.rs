@@ -142,6 +142,16 @@ pub struct PostView {
     pub read: bool,
 }
 
+/// An author muted in a channel.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MutedView {
+    /// The short id their posts show.
+    pub author: String,
+    /// The nickname of their latest post we have.
+    pub nick: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SharedCardView {
@@ -451,6 +461,18 @@ impl Node {
     /// Mutes an author, by the short id their posts show.
     pub fn mute_author(&self, channel_id: i64, author: &str) -> Result<()> {
         self.shared.engine().mute_author(channel_id, author)
+    }
+
+    /// Shows a muted author's posts again. Posts dropped while they were
+    /// muted are asked for again from the internet relays.
+    pub fn unmute_author(&self, channel_id: i64, author: &str) -> Result<()> {
+        self.shared.engine().unmute_author(channel_id, author)?;
+        self.shared.internet.renew_subscription();
+        Ok(())
+    }
+
+    pub fn muted_authors(&self, channel_id: i64) -> Result<Vec<MutedView>> {
+        self.shared.engine().muted_authors(channel_id)
     }
 
     pub fn mark_channel_read(&self, channel_id: i64) -> Result<()> {

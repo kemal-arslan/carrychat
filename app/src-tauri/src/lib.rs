@@ -7,7 +7,7 @@ use std::sync::Mutex;
 
 use kervan_node::{
     ChannelView, ContactView, GroupMessageView, GroupView, ImportReport, InternetConfig, LanConfig,
-    MessageView, Node, PostView, Profile, Settings, Status,
+    MessageView, MutedView, Node, PostView, Profile, Settings, Status,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -282,6 +282,19 @@ fn mute_author(state: State<'_, AppState>, channel_id: i64, author: String) -> C
 }
 
 #[tauri::command]
+fn unmute_author(state: State<'_, AppState>, channel_id: i64, author: String) -> CommandResult<()> {
+    state
+        .node()?
+        .unmute_author(channel_id, &author)
+        .map_err(text)
+}
+
+#[tauri::command]
+fn muted_authors(state: State<'_, AppState>, channel_id: i64) -> CommandResult<Vec<MutedView>> {
+    state.node()?.muted_authors(channel_id).map_err(text)
+}
+
+#[tauri::command]
 fn mark_channel_read(state: State<'_, AppState>, channel_id: i64) -> CommandResult<()> {
     state.node()?.mark_channel_read(channel_id).map_err(text)
 }
@@ -375,6 +388,8 @@ pub fn run() {
             send_post,
             share_card,
             mute_author,
+            unmute_author,
+            muted_authors,
             mark_channel_read,
             status,
             export_file,

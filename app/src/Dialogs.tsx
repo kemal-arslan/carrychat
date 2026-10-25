@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import QRCode from "qrcode";
-import { api, type Channel, type Contact, type Group, type LanProblem, type Member, type Profile } from "./api";
+import {
+  api,
+  type Channel,
+  type Contact,
+  type Group,
+  type LanProblem,
+  type Member,
+  type Muted,
+  type Profile,
+} from "./api";
 import { MAX_NAME_BYTES, utf8Length } from "./format";
 import { useI18n, type LanguageChoice } from "./i18n";
 import { notificationsEnabled, setNotificationsEnabled } from "./prefs";
@@ -577,12 +586,14 @@ export function ChannelSettingsDialog({
   channel,
   onClose,
   onChanged,
+  onUnmuted,
   onShared,
   onLeft,
 }: {
   channel: Channel;
   onClose: () => void;
   onChanged: () => void;
+  onUnmuted: (nick: string) => void;
   onShared: () => void;
   onLeft: () => void;
 }) {
@@ -590,6 +601,11 @@ export function ChannelSettingsDialog({
   const [nick, setNick] = useState(channel.nick);
   const [error, setError] = useState<string | null>(null);
   const [confirmLeave, setConfirmLeave] = useState(false);
+  const [muted, setMuted] = useState<Muted[]>([]);
+
+  useEffect(() => {
+    api.mutedAuthors(channel.id).then(setMuted);
+  }, [channel.id]);
 
   async function run(action: () => Promise<unknown>, after: () => void) {
     setError(null);
@@ -613,6 +629,34 @@ export function ChannelSettingsDialog({
           {t.nickSave}
         </button>
       </div>
+      {muted.length > 0 && (
+        <>
+          <h3 className="settings-section">{t.mutedTitle}</h3>
+          <ul className="member-list">
+            {muted.map((entry) => (
+              <li key={entry.author}>
+                <span className="who">
+                  <span className="name">{entry.nick || "?"}</span>
+                  <span className="fingerprint">{entry.author}</span>
+                </span>
+                <button
+                  onClick={() =>
+                    run(
+                      () => api.unmuteAuthor(channel.id, entry.author),
+                      () => {
+                        setMuted((current) => current.filter((other) => other.author !== entry.author));
+                        onUnmuted(entry.nick || entry.author);
+                      },
+                    )
+                  }
+                >
+                  {t.unmute}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       <h3 className="settings-section">{t.shareCard}</h3>
       <p className="hint">{t.shareCardHint}</p>
       <button onClick={() => run(() => api.shareCard(channel.id), onShared)}>{t.shareCard}</button>

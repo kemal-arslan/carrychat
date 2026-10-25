@@ -11,7 +11,7 @@ use rand_core::OsRng;
 
 use super::{forwarded, Engine, Handled, Outcome};
 use crate::store::{StoredChannel, StoredPost};
-use crate::{ChannelView, Error, Event, PostView, Result, SharedCardView};
+use crate::{ChannelView, Error, Event, MutedView, PostView, Result, SharedCardView};
 
 /// Posts we send to one channel in a minute, at most.
 const MAX_POSTS_PER_MINUTE: usize = 10;
@@ -101,6 +101,34 @@ impl Engine {
             .find(|key| short_id(key) == author && key != &own)
             .ok_or(Error::Invalid("no such author in this channel"))?;
         self.store.mute(channel.id, &key)
+    }
+
+    /// Shows an author's posts again. Their posts that were dropped while
+    /// muted are taken the next time a link offers them.
+    pub fn unmute_author(&mut self, channel_id: i64, author: &str) -> Result<()> {
+        let channel = self.stored_channel(channel_id)?;
+        let key = self
+            .store
+            .muted(channel.id)?
+            .into_iter()
+            .map(|(key, _)| key)
+            .find(|key| short_id(key) == author)
+            .ok_or(Error::Invalid("that author is not muted here"))?;
+        self.store.unmute(channel.id, &key)?;
+        Ok(())
+    }
+
+    pub fn muted_authors(&self, channel_id: i64) -> Result<Vec<MutedView>> {
+        let channel = self.stored_channel(channel_id)?;
+        Ok(self
+            .store
+            .muted(channel.id)?
+            .into_iter()
+            .map(|(key, nick)| MutedView {
+                author: short_id(&key),
+                nick: nick.unwrap_or_default(),
+            })
+            .collect())
     }
 
     pub fn mark_channel_read(&mut self, channel_id: i64, now: u32) -> Result<()> {

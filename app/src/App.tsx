@@ -44,6 +44,8 @@ export default function App() {
   return <Main profile={profile} onProfile={setProfile} />;
 }
 
+type Notice = { text: string; action?: { label: string; run: () => void } };
+
 type DialogName =
   | "add"
   | "card"
@@ -68,7 +70,7 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
   const [posts, setPosts] = useState<Post[]>([]);
   const [status, setStatus] = useState<Status | null>(null);
   const [dialog, setDialog] = useState<DialogName | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
   const contactsRef = useRef(contacts);
@@ -89,9 +91,11 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
   const refreshChannels = useCallback(() => api.channels().then(setChannels), []);
   const refreshStatus = useCallback(() => api.status().then(setStatus), []);
 
-  const show = useCallback((text: string) => {
-    setNotice(text);
-    window.setTimeout(() => setNotice((current) => (current === text ? null : current)), 5000);
+  const show = useCallback((text: string, action?: Notice["action"]) => {
+    const next = { text, action };
+    setNotice(next);
+    // A notice with an action stays a little longer, to give time to use it.
+    window.setTimeout(() => setNotice((current) => (current === next ? null : current)), action ? 8000 : 5000);
   }, []);
 
   // Messages count as read only while someone is looking at them.
@@ -241,11 +245,23 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
 
   async function mute(post: Post) {
     if (!channel) return;
+    const channelId = channel.id;
     try {
-      await api.muteAuthor(channel.id, post.author);
+      await api.muteAuthor(channelId, post.author);
       setPosts((current) => current.filter((other) => other.author !== post.author));
-      show(t.muted(post.nick));
+      show(t.muted(post.nick), { label: t.undo, run: () => unmute(channelId, post.author, post.nick) });
       refreshChannels();
+    } catch (error) {
+      show(String(error));
+    }
+  }
+
+  async function unmute(channelId: number, author: string, nick: string) {
+    try {
+      await api.unmuteAuthor(channelId, author);
+      if (selectedChannelRef.current === channelId) api.posts(channelId).then(setPosts);
+      refreshChannels();
+      show(t.unmuted(nick));
     } catch (error) {
       show(String(error));
     }
@@ -537,6 +553,11 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
           channel={channel}
           onClose={() => setDialog(null)}
           onChanged={refreshChannels}
+          onUnmuted={(nick) => {
+            api.posts(channel.id).then(setPosts);
+            refreshChannels();
+            show(t.unmuted(nick));
+          }}
           onShared={() => {
             setDialog(null);
             show(t.cardShared);
@@ -583,7 +604,18 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
       )}
       {notice && (
         <div className="toast" role="status">
-          {notice}
+          {notice.text}
+          {notice.action && (
+            <button
+              className="toast-action"
+              onClick={() => {
+                notice.action!.run();
+                setNotice(null);
+              }}
+            >
+              {notice.action.label}
+            </button>
+          )}
         </div>
       )}
     </div>

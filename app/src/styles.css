@@ -858,3 +858,12 @@ button.danger-outline {
   background: var(--sidebar);
   color: var(--muted);
 }
+
+.toast-action {
+  margin-left: 12px;
+  padding: 2px 10px;
+  border-color: var(--on-night);
+  background: transparent;
+  color: var(--on-night);
+  font-weight: 600;
+}

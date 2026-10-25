@@ -189,6 +189,10 @@ const en = {
   addThisContact: "Add contact",
   mute: "Mute",
   muted: (nick: string) => `${nick} is muted in this channel.`,
+  undo: "Undo",
+  unmute: "Unmute",
+  unmuted: (nick: string) => `${nick} is shown again. Posts you missed come with the next sync.`,
+  mutedTitle: "Muted",
   groupChatEmpty: (name: string) =>
     `Nothing in ${name} yet. A message here is one bundle that every member opens, and members carry it on for one another.`,
 };
@@ -373,6 +377,10 @@ const tr: Strings = {
   addThisContact: "Kişi olarak ekle",
   mute: "Sustur",
   muted: (nick) => `${nick} bu kanalda susturuldu.`,
+  undo: "Geri al",
+  unmute: "Susturmayı kaldır",
+  unmuted: (nick) => `${nick} yeniden görünüyor. Kaçırdığın mesajlar bir sonraki eşitlemede gelir.`,
+  mutedTitle: "Susturulanlar",
   groupChatEmpty: (name) =>
     `${name} grubunda henüz bir şey yok. Buradaki her mesaj, bütün üyelerin açtığı tek bir pakettir ve üyeler onu birbirlerine taşır.`,
 };

@@ -150,6 +150,10 @@ enum ChannelCommand {
     Log { channel: String },
     /// Stop showing and passing on an author's posts, by the id in the log.
     Mute { channel: String, author: String },
+    /// Show a muted author's posts again.
+    Unmute { channel: String, author: String },
+    /// List the authors you muted in a channel.
+    Muted { channel: String },
 }
 
 #[tokio::main]
@@ -574,6 +578,20 @@ fn channel_command(node: &Node, command: ChannelCommand) -> AnyResult {
             let channel = find_channel(node, &channel)?;
             node.mute_author(channel.id, &author)?;
             println!("Muted {author} in #{}.", channel.name);
+        }
+        ChannelCommand::Unmute { channel, author } => {
+            let channel = find_channel(node, &channel)?;
+            node.unmute_author(channel.id, &author)?;
+            println!(
+                "{author} is not muted in #{} any more. Posts dropped meanwhile come with the next sync.",
+                channel.name
+            );
+        }
+        ChannelCommand::Muted { channel } => {
+            let channel = find_channel(node, &channel)?;
+            for muted in node.muted_authors(channel.id)? {
+                println!("{}  {}", muted.author, muted.nick);
+            }
         }
     }
     Ok(())
