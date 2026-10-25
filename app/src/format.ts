@@ -5,6 +5,8 @@ import type { Language } from "./i18n";
 export const PAIR_OVERHEAD = 104;
 /** A group message, with its signature. */
 export const GROUP_OVERHEAD = 135;
+/** A channel post, with its author key and signature, before the nickname. */
+export const CHANNEL_OVERHEAD = 164;
 const MAX_BUNDLE = 4096;
 const MESHTASTIC_MTU = 233;
 const FRAGMENT_HEADER = 11;

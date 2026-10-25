@@ -17,6 +17,38 @@
     "x25519_public": "0faa684ed28867b97f4a6a2dee5df8ce974e76b7018e3f22a1c4cf2678570f20",
     "x25519_secret": "2222222222222222222222222222222222222222222222222222222222222222"
   },
+  "channel": {
+    "author_key": "985e0af52a977664db4efbaa965437c92d7cb683c086b5f0e8c172878181bebc",
+    "author_seed": "13307e8f4d91a7a9cedf4bb2cdda6cd59af876513fab1ddbc8564404c6d77f3a",
+    "description": "Alice posts text and then her card in #Mahalle, which has no password.",
+    "k_ch": "f0767363748394e845c4f7c63f2f77aac6a0f74bbf9a29894f1fd24abf51684f",
+    "k_chid": "a81a8802288e7b34db0e41552f55102f6d57a30f31c5adaab088ea6ffffd1a87",
+    "k_chtag": "5dc5892336b5bae4d2a8213f9aed28b6849aec9ab83c8275a4e1797446c6cf94",
+    "name": "#Mahalle",
+    "nick": "Ayşe",
+    "normalized_name": "mahalle",
+    "password": "",
+    "posts": [
+      {
+        "body": "5375206461c49fc4b174c4b16dc4b1206f6b756c756e20c3b66ec3bc6e64652e",
+        "bundle": "00046ab28d00e52a902e2207074ddcf1efdd1f5249b5e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1f45332473e2b4193172c857f58fd82b3ed25f3c32651e6e71c840b1bd9ca213fe1d62b0d7f0dff66317d92af07e12dd2d2154eb1b7b07ab37e290b656d238039f1bd16fad6f03d108ec41c6120afc7aa0ccfad83086aeef8e8e53510129304a5afb7ffe2cbc52712a5ef2798046e1bfcd03633ccbf9c19cae3201f054ae98447b85c877123612af6c2ef92547c0ff168c9898c8c3950d4f8f6cf0b",
+        "created_at": 1790000000,
+        "expires_at": 1790086400,
+        "hop_limit": 4,
+        "kind": "text",
+        "nonce": "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1"
+      },
+      {
+        "body": "00d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b84305616c696365dd5442c26ec06a3b3d2a3bf74a1b88209b94c7ab1af72391b649923d5ec1ed01c664ebbb5db5e97316dc77498281f9348d883611f59950052e1b322f2fe1a205",
+        "bundle": "00046ab28d0057abb629fdcd717edcf1efdd1f5249b5e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e21000e40b8447f7653b30f13d65b281bb34dd891c1853d2102c7b19048f5582abd9b01bd8bb876807608c71e659bf4b3198c2f091400fa9533560bfc6a275c2c27bb1500713ad6a903dbf48948298a676170823815ea8bcc8c439672791ef64ebda6647d6ac646fc95a8521a932607f69e5c39cf3c742ce7c723f99e91a9731a50ef6a9b6b76967b0acdd4db0ad21ab024819d53f6101c1f02a809ced4c1507008d605ccf072a3c7a010a151bef53e40fa6002e32380a2ef90ffc519968dac1bc37d2a5535500fa63c080640e25f38e2930a682d3c75f0e0a2291850e4cf2e7ce0960808a298ee65734b4c0db0d39e494f5d38820c3c8c8005a1eccb627d058f3d206",
+        "created_at": 1790000030,
+        "expires_at": 1790086400,
+        "hop_limit": 4,
+        "kind": "card",
+        "nonce": "e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2"
+      }
+    ]
+  },
   "day": 20717,
   "description": "Kervan protocol v0 test vectors. Alice sends both messages to Bob. Byte strings are lowercase hex.",
   "group": {

@@ -8,6 +8,7 @@
 
 use data_encoding::HEXLOWER;
 use kervan_proto::bundle::{seal_with_nonce, Message, Tombstone};
+use kervan_proto::channel::{author_key, ChannelKeys, CHANNEL_HOP_LIMIT, CHANNEL_TTL_SECS};
 use kervan_proto::frame::{frames_for, Frame, MESHTASTIC_MTU};
 use kervan_proto::group::{GroupId, GroupState, ReceiverChain, SenderChain};
 use kervan_proto::identity::Identity;
@@ -73,6 +74,7 @@ pub fn vectors() -> Value {
         "introduction": introduction(&alice, &bob),
         "ratchet": ratchet(&alice, &bob),
         "group": group(&alice, &bob),
+        "channel": channel(&alice),
     })
 }
 
@@ -286,5 +288,53 @@ fn group(alice: &Identity, bob: &Identity) -> Value {
         "ed25519_secret": HEXLOWER.encode(&signing),
         "distribution": HEXLOWER.encode(&distribution.to_bytes()),
         "messages": messages,
+    })
+}
+
+/// Alice posts in the public channel #Mahalle: text, then her card (§5.8).
+fn channel(alice: &Identity) -> Value {
+    let (name, password) = ("#Mahalle", "");
+    let keys = ChannelKeys::derive(name, password).unwrap();
+    let seed = keys.author_seed(&alice.secret_bytes().0);
+    let expires_at = CREATED_AT + CHANNEL_TTL_SECS;
+    let nick = "Ayşe";
+    let posts: Vec<Value> = [
+        (
+            Message::text("Su dağıtımı okulun önünde.", CREATED_AT),
+            [0xe1; 24],
+        ),
+        (Message::card(&alice.card(), CREATED_AT + 30), [0xe2; 24]),
+    ]
+    .into_iter()
+    .map(|(message, nonce)| {
+        let bundle = keys
+            .seal_with_nonce(&seed, nick, &message, expires_at, CHANNEL_HOP_LIMIT, nonce)
+            .unwrap();
+        let post = keys.open(&bundle).unwrap();
+        assert_eq!(post.message, message);
+        json!({
+            "kind": if message.created_at == CREATED_AT { "text" } else { "card" },
+            "body": HEXLOWER.encode(&message.body),
+            "created_at": message.created_at,
+            "expires_at": expires_at,
+            "hop_limit": CHANNEL_HOP_LIMIT,
+            "nonce": HEXLOWER.encode(&nonce),
+            "bundle": HEXLOWER.encode(&bundle.to_bytes()),
+        })
+    })
+    .collect();
+    let derived = keys.to_bytes();
+    json!({
+        "description": "Alice posts text and then her card in #Mahalle, which has no password.",
+        "name": name,
+        "normalized_name": "mahalle",
+        "password": password,
+        "k_ch": HEXLOWER.encode(&derived[..32]),
+        "k_chtag": HEXLOWER.encode(&derived[32..64]),
+        "k_chid": HEXLOWER.encode(&derived[64..]),
+        "author_seed": HEXLOWER.encode(&seed),
+        "author_key": HEXLOWER.encode(&author_key(&seed)),
+        "nick": nick,
+        "posts": posts,
     })
 }

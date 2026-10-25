@@ -110,6 +110,47 @@ pub struct GroupMessageView {
     pub read: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelView {
+    pub id: i64,
+    /// The normalized name, without `#`.
+    pub name: String,
+    pub has_password: bool,
+    /// The name we post under.
+    pub nick: String,
+    pub last_message: Option<String>,
+    pub last_at: Option<u32>,
+    pub unread: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PostView {
+    pub id: i64,
+    pub channel_id: i64,
+    pub outgoing: bool,
+    pub nick: String,
+    /// A short id of the author's key in this channel, which tells apart
+    /// authors with the same nickname.
+    pub author: String,
+    /// The text, empty for a shared card.
+    pub body: String,
+    /// The author's contact card, if they shared it.
+    pub shared_card: Option<SharedCardView>,
+    pub created_at: u32,
+    pub read: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedCardView {
+    pub name: String,
+    pub fingerprint: String,
+    /// The `kervan:` card text, to add them as a contact.
+    pub card: String,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -171,6 +212,9 @@ pub enum Event {
     /// We joined or left a group, or its name or members changed.
     #[serde(rename_all = "camelCase")]
     GroupChanged { group: GroupView },
+    /// A post in one of our channels.
+    #[serde(rename_all = "camelCase")]
+    PostReceived { post: PostView },
     /// An internet relay connected or disconnected.
     #[serde(rename_all = "camelCase")]
     InternetChanged { relays: usize },
@@ -351,17 +395,66 @@ impl Node {
             .shared
             .engine()
             .send_group_text(group_id, text, now())?;
-        let Frame::Bundle(bundle) = &frame else {
-            unreachable!("sending makes a bundle");
-        };
-        self.shared.lan.broadcast(&frame.to_bytes(), None);
-        self.shared.internet.post_bundle(&frame, &bundle.tag);
-        self.shared.internet.probe();
+        self.shared.send_own_post(&frame);
         Ok(message)
     }
 
     pub fn mark_group_read(&self, group_id: i64) -> Result<()> {
         self.shared.engine().mark_group_read(group_id, now())
+    }
+
+    pub fn channels(&self) -> Result<Vec<ChannelView>> {
+        self.shared.engine().channels()
+    }
+
+    /// Joins a public channel, posting under `nick`.
+    pub fn join_channel(&self, name: &str, password: &str, nick: &str) -> Result<ChannelView> {
+        let (channel, opened) = self
+            .shared
+            .engine()
+            .join_channel(name, password, nick, now())?;
+        for handled in opened {
+            self.shared.dispatch(handled, None);
+        }
+        self.shared.internet.renew_subscription();
+        Ok(channel)
+    }
+
+    pub fn leave_channel(&self, channel_id: i64) -> Result<()> {
+        self.shared.engine().leave_channel(channel_id)?;
+        self.shared.internet.renew_subscription();
+        Ok(())
+    }
+
+    pub fn set_channel_nick(&self, channel_id: i64, nick: &str) -> Result<ChannelView> {
+        self.shared.engine().set_channel_nick(channel_id, nick)
+    }
+
+    pub fn posts(&self, channel_id: i64) -> Result<Vec<PostView>> {
+        self.shared.engine().posts(channel_id)
+    }
+
+    /// Posts text to a channel.
+    pub fn send_post(&self, channel_id: i64, text: &str) -> Result<PostView> {
+        let (post, frame) = self.shared.engine().send_post(channel_id, text, now())?;
+        self.shared.send_own_post(&frame);
+        Ok(post)
+    }
+
+    /// Posts our contact card to a channel, so readers can add us.
+    pub fn share_card(&self, channel_id: i64) -> Result<PostView> {
+        let (post, frame) = self.shared.engine().share_card(channel_id, now())?;
+        self.shared.send_own_post(&frame);
+        Ok(post)
+    }
+
+    /// Mutes an author, by the short id their posts show.
+    pub fn mute_author(&self, channel_id: i64, author: &str) -> Result<()> {
+        self.shared.engine().mute_author(channel_id, author)
+    }
+
+    pub fn mark_channel_read(&self, channel_id: i64) -> Result<()> {
+        self.shared.engine().mark_channel_read(channel_id, now())
     }
 
     pub fn status(&self) -> Result<Status> {
@@ -489,6 +582,16 @@ impl Shared {
         if self.engine().take_tags_changed() {
             self.internet.renew_subscription();
         }
+    }
+
+    /// Sends a new post of ours, or a group message, on every link.
+    fn send_own_post(&self, frame: &Frame) {
+        let Frame::Bundle(bundle) = frame else {
+            unreachable!("sending makes a bundle");
+        };
+        self.lan.broadcast(&frame.to_bytes(), None);
+        self.internet.post_bundle(frame, &bundle.tag);
+        self.internet.probe();
     }
 
     /// Sends our own new bundles on every link that is up.

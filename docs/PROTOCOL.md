@@ -10,7 +10,7 @@
 - Store and forward: a message may take days and several kinds of link to arrive.
 - Delivery receipts that anyone carrying a copy can verify, so copies are dropped as soon as the message has arrived.
 
-Not yet: public channels, messages from people who do not have your card, files, voice.
+Not yet: files, voice.
 
 ## 2. Notation
 
@@ -249,6 +249,42 @@ ciphertext = header_ct || sealed || signature
 
 **Size.** A group bundle adds 46 (header) + 4 (iteration) + 5 (plaintext header) + 16 (Poly1305 tag) + 64 (signature) = **135 bytes**, so up to **97 bytes** of text fit in one Meshtastic packet.
 
+### 5.8 Public channels
+
+A public channel is a conversation that anyone who knows its name can read and write, without cards or contacts. A channel may also have a password: then only those who know both can.
+
+**Names.** A channel name is trimmed, loses a leading `#`, and is lowercased with the Unicode default case mapping (no locale rules), after which a combining dot above (U+0307) that follows `i` is dropped, so `İ` becomes `i`. It must then be 1 to 32 bytes of UTF-8 made of letters, digits (Unicode Alphabetic and Numeric), `-` and `_`. `#Mahalle` and `mahalle` are the same channel.
+
+**Keys.**
+
+```
+prk     = HKDF-Extract(salt = "kervan/v1/channel", ikm = name || 0x00 || password)
+K_ch    = HKDF-Expand(prk, "enc", 32)
+K_chtag = HKDF-Expand(prk, "tag", 32)
+K_chid  = HKDF-Expand(prk, "id", 32)
+tag(d)  = HMAC(K_chtag, u32(d))[0..8]
+```
+
+`password` is UTF-8 and empty for a channel without one. Anyone who knows the name and password derives the same keys, so the tag tells members which bundles are the channel's and tells nobody else anything; it changes every day.
+
+**Authors.** Each author signs with an Ed25519 key of its own for that channel, so its posts in different channels cannot be linked to each other or to its card. The reference implementation derives it as `seed = HMAC(own Ed25519 secret, "kervan/v1/channel-key" || K_chid)`. Every post also carries a nickname of at most 20 bytes, chosen freely, so readers tell authors apart by the key, not the name.
+
+**Sealing.**
+
+```
+plaintext  = kind || u32(created_at) || pk (32) || u8(len(nick)) || nick || body
+bundle_id  = H("kervan/v1/channel" || nonce)[0..8]
+sealed     = XChaCha20-Poly1305-Encrypt(K_ch, nonce, plaintext, aad)
+signature  = Ed25519-Sign(sk, "kervan/v1/channel-signature" || aad || sealed)
+ciphertext = sealed || signature
+```
+
+`aad` is the one of §5.1 and the tag is `tag(day(created_at))`. The kind is text (`0x01`, the body is UTF-8) or card (`0x04`, the body is the author's contact card, shared so readers can add them). A channel bundle lives at most a day, `expires_at ≤ created_at + 86400`, and starts with a hop limit of 4, so a busy channel does not fill the network.
+
+**Receiving.** A member precomputes the tags of its channels over the tag window (§4.1). For a bundle whose tag matches, it decrypts, verifies the signature (strict Ed25519) with the `pk` inside, and checks the tag against `day(created_at)`, the channel lifetime and the bundle id. Like a group bundle it has no tombstone, and members carry it on for one another. A member may mute an author's key: it then neither shows nor passes on that author's posts. The reference implementation also refuses to send more than 10 posts a minute to one channel.
+
+**Size.** A channel bundle adds 46 (header) + 5 (plaintext header) + 33 (key and nickname length) + 16 (Poly1305 tag) + 64 (signature) = **164 bytes** plus the nickname, so with an 8-byte nickname up to **60 bytes** of text fit in one Meshtastic packet.
+
 ## 6. Tombstone
 
 A tombstone proves delivery. After opening a bundle, the recipient publishes `(bundle_id, ack_secret)`.
@@ -355,7 +391,8 @@ Implemented in `crates/kervan-node/src/file.rs`, with the extension `.kervan`. A
 - unlinkability for relays: without a pair key they cannot tell sender or recipient, or link a pair's traffic across days or directions,
 - delivery receipts that cannot be forged,
 - a closed inbox: only someone holding your card can write to you, and their first message is a request you accept or decline,
-- group messages that only current members can read and that no member can forge in another member's name (§5.7).
+- group messages that only current members can read and that no member can forge in another member's name (§5.7),
+- public channels whose posts cannot be linked to their authors' cards or across channels, and that nobody can forge in another author's name (§5.8).
 
 **v0 does not provide:**
 
@@ -364,6 +401,7 @@ Implemented in `crates/kervan-node/src/file.rs`, with the extension `.kervan`. A
 - **Radio metadata privacy.** A LoRa transmission reveals the transmitting Meshtastic node and, to direction-finding equipment, its location. Bundle sizes and timing are visible, because v0 does not pad.
 - **Replay protection on the network.** A recorded bundle can be injected again until it expires. Receivers drop duplicates, but replays still spend airtime.
 - **Fragment integrity at relays.** Relays cannot authenticate fragments, so a forged fragment spoils reassembly of that bundle until the timeout.
+- **Privacy in public channels.** Anyone who knows a channel's name, and its password if it has one, reads its posts, including posts they recorded before. A password is only as strong as it is hard to guess, since the keys come from it directly. Channel posts have no forward secrecy and no delivery receipts.
 - **Immediate removal from a group.** Members that have not yet seen a removal keep writing on chains the removed member holds. Group bundles also have no delivery receipts, and a group's admin and member list are visible to every member.
 - **Reliable time.** Devices without internet access may have wrong clocks. The tag window absorbs a day of drift, and expiry checks use local time.
 
@@ -387,6 +425,9 @@ Implemented in `crates/kervan-node/src/file.rs`, with the extension `.kervan`. A
 | Introduction overhead | 164 bytes plus the card |
 | Group bundle overhead | 135 bytes |
 | Members in a group | 16 at most, the admin included |
+| Channel bundle overhead | 164 bytes plus the nickname |
+| Channel bundle lifetime | 86400 s (1 day) at most, hop limit 4 |
+| Longest channel name and nickname | 32 and 20 bytes |
 | Default lifetime | 259200 s (3 days) |
 | Longest lifetime | 604800 s (7 days) |
 | Default hop limit | 8 |

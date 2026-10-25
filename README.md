@@ -24,6 +24,7 @@ Kervan sends each message over the best link it has, and keeps it until one appe
 - **Nothing to learn in transit.** Devices that carry a message see only a tag that changes daily and differs per direction. Without one of the two keys, they cannot tell who it is from or for.
 - **Forward secrecy.** Once both contacts have written, keys change with every reply: a Double Ratchet adapted to messages that arrive days late, twice or out of order. A key taken from a device later opens none of the messages before it.
 - **Groups of up to 16.** A group message is one bundle that every member opens, so it costs the same airtime for 3 people as for 16, and members carry it on for one another. Members need not know each other. Each member signs what it writes, so nobody can write in another's name, and a removed member reads nothing sent after the others hear of it. Up to 97 bytes of text fit one radio packet.
+- **Public channels.** Anyone who knows a channel's name, and its password if it has one, reads and writes there, without exchanging cards. Each author signs with a key for that channel only, so posts cannot be linked to their card or across channels, and nobody can post as someone else. Posts live a day and travel at most 4 hops; you can mute an author, and share your card when you want people to add you.
 - **Delivery receipts the network can check.** The recipient publishes a short proof that only the two contacts can produce, and every device that carries a copy deletes it.
 - **Only card holders can write.** To write to someone you need their card. Your first message carries your own card, signed, so they see a request with your fingerprint and accept or decline it. Nobody without your card can reach you.
 
@@ -41,7 +42,7 @@ npm install
 npm run tauri dev
 ```
 
-Create your identity and give your card (**My card**, also as a QR code) to the people you want to hear from, or add theirs with **Add contact**. Only one side needs the other's card: the first message introduces the sender, and the recipient accepts the request. The **+** next to **Groups** starts a group with contacts you have written to. Kervan computers on the same network find each other by themselves, and while there is internet, messages also go through public Nostr relays, so computers on different networks reach each other. If your network blocks that, use **Connect…** with the other computer's address. **Export file…** writes everything waiting to be delivered to a `.kervan` file that someone can carry to another Kervan computer and import there.
+Create your identity and give your card (**My card**, also as a QR code) to the people you want to hear from, or add theirs with **Add contact**. Only one side needs the other's card: the first message introduces the sender, and the recipient accepts the request. The **+** next to **Groups** starts a group with contacts you have written to, and the one next to **Channels** joins a public channel. Kervan computers on the same network find each other by themselves, and while there is internet, messages also go through public Nostr relays, so computers on different networks reach each other. If your network blocks that, use **Connect…** with the other computer's address. **Export file…** writes everything waiting to be delivered to a `.kervan` file that someone can carry to another Kervan computer and import there.
 
 `npm run dev` opens the interface in a browser with sample data, without building the app.
 
@@ -59,6 +60,9 @@ kervan export messages.kervan                # or carry everything on a USB stic
 kervan group create Mahalle Deniz Mehmet     # you become the group's admin
 kervan group send Mahalle "Su dağıtımı okulun önünde."
 kervan group log Mahalle                     # also: group list, add, remove, leave
+kervan channel join "#kadıköy" --nick Ayşe   # a public channel; --password for a closed one
+kervan channel send kadıköy "Moda'da çadır alanı kuruldu."
+kervan channel log kadıköy                   # also: channel list, share-card, mute, nick, leave
 kervan rename "Ayşe Yılmaz"                  # contacts get the new name
 kervan read-receipts off                     # stop telling contacts what you read
 kervan erase --yes                           # delete identity, contacts and messages

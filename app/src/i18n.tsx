@@ -157,6 +157,38 @@ const en = {
   groupSecure: "Members only",
   groupSecureHint:
     "One message reaches every member. Only members can read it, and no member can write in another's name.",
+  channels: "Channels",
+  joinChannel: "Join channel",
+  channelName: "Channel name",
+  channelPassword: "Password (optional)",
+  channelNick: "Your nickname here",
+  channelNameInvalid: "Use only letters, digits, - and _, up to 32 bytes.",
+  joinHint:
+    "Anyone who knows the name, and the password if there is one, reads and writes here. Your posts are signed with a key for this channel only, not with your card.",
+  join: "Join",
+  joinedChannel: (name: string) => `You joined #${name}.`,
+  postingAs: (nick: string) => `as ${nick}`,
+  channelPublic: "Public",
+  channelProtected: "Password",
+  channelPublicHint:
+    "Anyone who knows this channel reads it, also later. No forward secrecy, no delivery receipts; posts live a day and travel 4 hops.",
+  channelEmpty: (name: string) =>
+    `Nothing in #${name} yet. Anyone who knows this name can read what you post here, also later. Posts live a day.`,
+  nickSave: "Save",
+  shareCard: "Share my card",
+  shareCardHint:
+    "Readers can then add you as a contact. It links your posts in this channel to your card, and nothing else.",
+  cardShared: "Your card is shared in the channel.",
+  leaveChannel: "Leave channel…",
+  leaveChannelTitle: "Leave the channel",
+  leaveChannelHint: "Leaving forgets the posts here. You can join again any time.",
+  leaveChannelNow: "Leave and forget posts",
+  leftChannel: (name: string) => `You left #${name}.`,
+  sharedCard: (name: string) => `shared a card: ${name}`,
+  youSharedCard: "You shared your card",
+  addThisContact: "Add contact",
+  mute: "Mute",
+  muted: (nick: string) => `${nick} is muted in this channel.`,
   groupChatEmpty: (name: string) =>
     `Nothing in ${name} yet. A message here is one bundle that every member opens, and members carry it on for one another.`,
 };
@@ -309,6 +341,38 @@ const tr: Strings = {
   groupSecure: "Yalnızca üyeler",
   groupSecureHint:
     "Tek bir mesaj bütün üyelere ulaşır. Onu yalnızca üyeler okuyabilir ve hiçbir üye başkası adına yazamaz.",
+  channels: "Kanallar",
+  joinChannel: "Kanala katıl",
+  channelName: "Kanal adı",
+  channelPassword: "Parola (isteğe bağlı)",
+  channelNick: "Buradaki takma adın",
+  channelNameInvalid: "Yalnızca harf, rakam, - ve _ kullan, en fazla 32 bayt.",
+  joinHint:
+    "Adı, varsa parolasını da bilen herkes burada okuyup yazabilir. Mesajların kartınla değil, yalnızca bu kanala özel bir anahtarla imzalanır.",
+  join: "Katıl",
+  joinedChannel: (name) => `#${name} kanalına katıldın.`,
+  postingAs: (nick) => `${nick} olarak`,
+  channelPublic: "Herkese açık",
+  channelProtected: "Parolalı",
+  channelPublicHint:
+    "Bu kanalı bilen herkes okuyabilir, sonradan da. İleri gizlilik ve teslim bilgisi yok; mesajlar bir gün yaşar ve 4 adım gider.",
+  channelEmpty: (name) =>
+    `#${name} kanalında henüz bir şey yok. Bu adı bilen herkes burada yazdıklarını okuyabilir, sonradan da. Mesajlar bir gün yaşar.`,
+  nickSave: "Kaydet",
+  shareCard: "Kartımı paylaş",
+  shareCardHint:
+    "Okuyanlar seni kişi olarak ekleyebilir. Bu, yalnızca bu kanaldaki mesajlarını kartına bağlar, başka hiçbir şeyi değil.",
+  cardShared: "Kartın kanalda paylaşıldı.",
+  leaveChannel: "Kanaldan ayrıl…",
+  leaveChannelTitle: "Kanaldan ayrıl",
+  leaveChannelHint: "Ayrılınca buradaki mesajlar silinir. İstediğin zaman yeniden katılabilirsin.",
+  leaveChannelNow: "Ayrıl ve mesajları sil",
+  leftChannel: (name) => `#${name} kanalından ayrıldın.`,
+  sharedCard: (name) => `bir kart paylaştı: ${name}`,
+  youSharedCard: "Kartını paylaştın",
+  addThisContact: "Kişi olarak ekle",
+  mute: "Sustur",
+  muted: (nick) => `${nick} bu kanalda susturuldu.`,
   groupChatEmpty: (name) =>
     `${name} grubunda henüz bir şey yok. Buradaki her mesaj, bütün üyelerin açtığı tek bir pakettir ve üyeler onu birbirlerine taşır.`,
 };

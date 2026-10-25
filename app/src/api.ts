@@ -49,6 +49,34 @@ export type Group = {
   unread: number;
 };
 
+export type Channel = {
+  id: number;
+  /** Normalized, without "#". */
+  name: string;
+  hasPassword: boolean;
+  /** The name we post under. */
+  nick: string;
+  lastMessage: string | null;
+  lastAt: number | null;
+  unread: number;
+};
+
+export type SharedCard = { name: string; fingerprint: string; card: string };
+
+export type Post = {
+  id: number;
+  channelId: number;
+  outgoing: boolean;
+  nick: string;
+  /** A short id of the author's key, to tell apart authors with one nickname. */
+  author: string;
+  /** The text, empty for a shared card. */
+  body: string;
+  sharedCard: SharedCard | null;
+  createdAt: number;
+  read: boolean;
+};
+
 export type GroupMessage = {
   id: number;
   groupId: number;
@@ -105,7 +133,8 @@ export type NodeEvent =
   | { type: "localNetworkChanged"; problem: LanProblem | null }
   | { type: "internetChanged"; relays: number }
   | { type: "groupMessageReceived"; message: GroupMessage }
-  | { type: "groupChanged"; group: Group };
+  | { type: "groupChanged"; group: Group }
+  | { type: "postReceived"; post: Post };
 
 export interface Api {
   /** Whether this is the browser preview with sample data. */
@@ -128,6 +157,15 @@ export interface Api {
   leaveGroup(groupId: number): Promise<Group>;
   sendGroupMessage(groupId: number, text: string): Promise<GroupMessage>;
   markGroupRead(groupId: number): Promise<void>;
+  channels(): Promise<Channel[]>;
+  joinChannel(name: string, password: string, nick: string): Promise<Channel>;
+  leaveChannel(channelId: number): Promise<void>;
+  setChannelNick(channelId: number, nick: string): Promise<Channel>;
+  posts(channelId: number): Promise<Post[]>;
+  sendPost(channelId: number, text: string): Promise<Post>;
+  shareCard(channelId: number): Promise<Post>;
+  muteAuthor(channelId: number, author: string): Promise<void>;
+  markChannelRead(channelId: number): Promise<void>;
   settings(): Promise<Settings>;
   setReadReceipts(on: boolean): Promise<void>;
   status(): Promise<Status>;
@@ -177,6 +215,15 @@ function desktopApi(): Api {
     leaveGroup: (groupId) => call("leave_group", { groupId }),
     sendGroupMessage: (groupId, text) => call("send_group_message", { groupId, text }),
     markGroupRead: (groupId) => call("mark_group_read", { groupId }),
+    channels: () => call("channels"),
+    joinChannel: (name, password, nick) => call("join_channel", { name, password, nick }),
+    leaveChannel: (channelId) => call("leave_channel", { channelId }),
+    setChannelNick: (channelId, nick) => call("set_channel_nick", { channelId, nick }),
+    posts: (channelId) => call("posts", { channelId }),
+    sendPost: (channelId, text) => call("send_post", { channelId, text }),
+    shareCard: (channelId) => call("share_card", { channelId }),
+    muteAuthor: (channelId, author) => call("mute_author", { channelId, author }),
+    markChannelRead: (channelId) => call("mark_channel_read", { channelId }),
     settings: () => call("settings"),
     setReadReceipts: (on) => call("set_read_receipts", { on }),
     status: () => call("status"),
@@ -291,6 +338,48 @@ function previewApi(): Api {
         lastMessage: last?.body ?? null,
         lastAt: last?.createdAt ?? null,
         unread: own.filter((message) => !message.read).length,
+      };
+    });
+  const channels: Channel[] = [
+    {
+      id: 1,
+      name: "kadıköy",
+      hasPassword: false,
+      nick: "Kemal",
+      lastMessage: null,
+      lastAt: null,
+      unread: 0,
+    },
+  ];
+  const post = (id: number, nick: string | null, author: string, body: string, ago: number): Post => ({
+    id,
+    channelId: 1,
+    outgoing: nick === null,
+    nick: nick ?? "Kemal",
+    author,
+    body,
+    sharedCard: null,
+    createdAt: now() - ago,
+    read: true,
+  });
+  const posts: Post[] = [
+    post(201, "gönüllü", "q4m27hxa", "Moda'da çadır alanı kuruldu, battaniye lazım.", 5400),
+    post(202, null, "b3oiuvmj", "Ne kadar lazım? İki tane getirebilirim.", 5000),
+    {
+      ...post(203, "Selin", "x7tk2pdu", "", 3600),
+      sharedCard: { name: "Selin Kaya", fingerprint: "n5df 2kqa 7mvx oe3c wl4t zyrb ka", card: "kervan:selin" },
+    },
+    { ...post(204, "gönüllü", "q4m27hxa", "Ne kadar çok o kadar iyi. Teşekkürler!", 600), read: false },
+  ];
+  const summarizeChannels = () =>
+    channels.map((channel) => {
+      const own = posts.filter((candidate) => candidate.channelId === channel.id);
+      const last = own.filter((candidate) => !candidate.sharedCard).at(-1);
+      return {
+        ...channel,
+        lastMessage: last?.body ?? null,
+        lastAt: last?.createdAt ?? null,
+        unread: own.filter((candidate) => !candidate.read).length,
       };
     });
   const summarize = () =>
@@ -419,6 +508,54 @@ function previewApi(): Api {
     async markGroupRead(groupId) {
       groupMessages.filter((message) => message.groupId === groupId).forEach((message) => {
         message.read = true;
+      });
+    },
+    async channels() {
+      return summarizeChannels();
+    },
+    async joinChannel(name, password, nick) {
+      const normalized = name.trim().replace(/^#/, "").toLowerCase().replace(/i\u0307/g, "i");
+      if (!/^[\p{L}\p{N}_-]{1,32}$/u.test(normalized)) throw new Error("invalid channel name");
+      const joined = { id: nextId++, name: normalized, hasPassword: password !== "", nick, lastMessage: null, lastAt: null, unread: 0 };
+      channels.push(joined);
+      return joined;
+    },
+    async leaveChannel(channelId) {
+      channels.splice(channels.findIndex((candidate) => candidate.id === channelId), 1);
+    },
+    async setChannelNick(channelId, nick) {
+      const channel = channels.find((candidate) => candidate.id === channelId)!;
+      channel.nick = nick.trim();
+      return { ...channel };
+    },
+    async posts(channelId) {
+      return posts.filter((candidate) => candidate.channelId === channelId).map((candidate) => ({ ...candidate }));
+    },
+    async sendPost(channelId, text) {
+      const channel = channels.find((candidate) => candidate.id === channelId)!;
+      const sent = { ...post(nextId++, null, "b3oiuvmj", text.trim(), 0), channelId, nick: channel.nick };
+      posts.push(sent);
+      return { ...sent };
+    },
+    async shareCard(channelId) {
+      const channel = channels.find((candidate) => candidate.id === channelId)!;
+      const sent = {
+        ...post(nextId++, null, "b3oiuvmj", "", 0),
+        channelId,
+        nick: channel.nick,
+        sharedCard: { name: profile?.name ?? "", fingerprint: profile?.fingerprint ?? "", card: profile?.card ?? "" },
+      };
+      posts.push(sent);
+      return { ...sent };
+    },
+    async muteAuthor(channelId, author) {
+      for (let index = posts.length - 1; index >= 0; index--) {
+        if (posts[index].channelId === channelId && posts[index].author === author) posts.splice(index, 1);
+      }
+    },
+    async markChannelRead(channelId) {
+      posts.filter((candidate) => candidate.channelId === channelId).forEach((candidate) => {
+        candidate.read = true;
       });
     },
     async settings() {

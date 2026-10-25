@@ -9,8 +9,10 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::{MessageView, Result};
 
+mod channels;
 mod groups;
 
+pub use channels::{StoredChannel, StoredPost};
 pub use groups::{StoredGroup, StoredGroupMessage};
 
 /// Bundles carried for others, at most. Own bundles do not count.
@@ -121,6 +123,35 @@ const MIGRATIONS: &[&str] = &[
          read_at INTEGER
      );
      CREATE INDEX group_messages_by_group ON group_messages (group_ref, created_at);",
+    // Public channels (§5.8): their keys, posts, and authors we muted.
+    "CREATE TABLE channels (
+         id INTEGER PRIMARY KEY,
+         name TEXT NOT NULL,
+         channel_id BLOB NOT NULL UNIQUE,
+         keys BLOB NOT NULL,
+         has_password INTEGER NOT NULL,
+         nick TEXT NOT NULL,
+         joined_at INTEGER NOT NULL
+     );
+     CREATE TABLE channel_posts (
+         id INTEGER PRIMARY KEY,
+         channel_ref INTEGER NOT NULL REFERENCES channels (id),
+         author BLOB NOT NULL,
+         outgoing INTEGER NOT NULL,
+         nick TEXT NOT NULL,
+         card INTEGER NOT NULL,
+         bundle_id BLOB NOT NULL UNIQUE,
+         body TEXT NOT NULL,
+         created_at INTEGER NOT NULL,
+         received_at INTEGER,
+         read_at INTEGER
+     );
+     CREATE INDEX channel_posts_by_channel ON channel_posts (channel_ref, created_at);
+     CREATE TABLE channel_muted (
+         channel_ref INTEGER NOT NULL REFERENCES channels (id),
+         author BLOB NOT NULL,
+         PRIMARY KEY (channel_ref, author)
+     );",
 ];
 
 /// Skipped keys kept per contact, at most; the oldest go first.

@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use kervan_node::{
-    ContactView, GroupMessageView, GroupView, ImportReport, InternetConfig, LanConfig, MessageView,
-    Node, Profile, Settings, Status,
+    ChannelView, ContactView, GroupMessageView, GroupView, ImportReport, InternetConfig, LanConfig,
+    MessageView, Node, PostView, Profile, Settings, Status,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -224,6 +224,69 @@ fn mark_group_read(state: State<'_, AppState>, group_id: i64) -> CommandResult<(
 }
 
 #[tauri::command]
+fn channels(state: State<'_, AppState>) -> CommandResult<Vec<ChannelView>> {
+    state.node()?.channels().map_err(text)
+}
+
+#[tauri::command]
+fn join_channel(
+    state: State<'_, AppState>,
+    name: String,
+    password: String,
+    nick: String,
+) -> CommandResult<ChannelView> {
+    state
+        .node()?
+        .join_channel(&name, &password, &nick)
+        .map_err(text)
+}
+
+#[tauri::command]
+fn leave_channel(state: State<'_, AppState>, channel_id: i64) -> CommandResult<()> {
+    state.node()?.leave_channel(channel_id).map_err(text)
+}
+
+#[tauri::command]
+fn set_channel_nick(
+    state: State<'_, AppState>,
+    channel_id: i64,
+    nick: String,
+) -> CommandResult<ChannelView> {
+    state
+        .node()?
+        .set_channel_nick(channel_id, &nick)
+        .map_err(text)
+}
+
+#[tauri::command]
+fn posts(state: State<'_, AppState>, channel_id: i64) -> CommandResult<Vec<PostView>> {
+    state.node()?.posts(channel_id).map_err(text)
+}
+
+#[tauri::command]
+fn send_post(state: State<'_, AppState>, channel_id: i64, text: String) -> CommandResult<PostView> {
+    state
+        .node()?
+        .send_post(channel_id, &text)
+        .map_err(self::text)
+}
+
+#[tauri::command]
+fn share_card(state: State<'_, AppState>, channel_id: i64) -> CommandResult<PostView> {
+    state.node()?.share_card(channel_id).map_err(text)
+}
+
+#[tauri::command]
+fn mute_author(state: State<'_, AppState>, channel_id: i64, author: String) -> CommandResult<()> {
+    state.node()?.mute_author(channel_id, &author).map_err(text)
+}
+
+#[tauri::command]
+fn mark_channel_read(state: State<'_, AppState>, channel_id: i64) -> CommandResult<()> {
+    state.node()?.mark_channel_read(channel_id).map_err(text)
+}
+
+#[tauri::command]
 fn status(state: State<'_, AppState>) -> CommandResult<Status> {
     state.node()?.status().map_err(text)
 }
@@ -304,6 +367,15 @@ pub fn run() {
             leave_group,
             send_group_message,
             mark_group_read,
+            channels,
+            join_channel,
+            leave_channel,
+            set_channel_nick,
+            posts,
+            send_post,
+            share_card,
+            mute_author,
+            mark_channel_read,
             status,
             export_file,
             import_file,

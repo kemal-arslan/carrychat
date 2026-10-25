@@ -18,6 +18,7 @@ use rand_core::OsRng;
 use crate::store::Store;
 use crate::{ContactView, Error, Event, MessageView, Profile, Result, Settings};
 
+mod channels;
 mod groups;
 
 /// Bundles that claim to live longer than this from now are refused (§8).
@@ -79,6 +80,8 @@ pub struct Engine {
     tags_day: Option<u32>,
     /// Tags of group bundles, by the row of the chain they belong to.
     group_tags: HashMap<RecipientTag, i64>,
+    /// Tags of channel posts, by channel.
+    channel_tags: HashMap<RecipientTag, i64>,
     /// Whether the tags changed since the node last renewed its subscription.
     tags_changed: bool,
     reassembler: Reassembler,
@@ -140,6 +143,7 @@ impl Engine {
             tags: HashMap::new(),
             tags_day: None,
             group_tags: HashMap::new(),
+            channel_tags: HashMap::new(),
             tags_changed: false,
             reassembler: Reassembler::default(),
             own_out: Vec::new(),
@@ -351,6 +355,7 @@ impl Engine {
         let me = self.identity.dh_public();
         let mut tags: Vec<RecipientTag> = self.tags.keys().copied().collect();
         tags.extend(self.group_tags.keys());
+        tags.extend(self.channel_tags.keys());
         tags.extend(tag_window(now).map(|day| mailbox_tag(&me, day)));
         let waiting = self
             .store
@@ -501,6 +506,9 @@ impl Engine {
             }
         }
         if let Some(handled) = self.receive_group(&bundle, now, false)? {
+            return Ok(handled);
+        }
+        if let Some(handled) = self.receive_post(&bundle, now, false)? {
             return Ok(handled);
         }
         if let Some(handled) = self.introduce(&bundle, now)? {
@@ -875,7 +883,8 @@ impl Engine {
         Ok(self.store.has_bundle(id)?
             || self.store.has_tombstone(id)?
             || self.store.has_message(id)?
-            || self.store.has_group_message(id)?)
+            || self.store.has_group_message(id)?
+            || self.store.has_post(id)?)
     }
 
     fn contact_for_tag(&mut self, tag: &RecipientTag, now: u32) -> Option<usize> {
@@ -901,6 +910,12 @@ impl Engine {
         for (id, chain) in self.store.receiver_chains().unwrap_or_default() {
             for day in tag_window(now) {
                 self.group_tags.insert(chain.tag(day), id);
+            }
+        }
+        self.channel_tags.clear();
+        for channel in self.store.channels().unwrap_or_default() {
+            for day in tag_window(now) {
+                self.channel_tags.insert(channel.keys.tag(day), channel.id);
             }
         }
         self.tags_day = Some(today);

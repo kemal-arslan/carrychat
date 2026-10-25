@@ -6,6 +6,7 @@
 //! refer to it.
 
 pub mod bundle;
+pub mod channel;
 pub mod error;
 pub mod frame;
 pub mod group;

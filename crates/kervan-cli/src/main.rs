@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use kervan_node::{ContactView, Event, GroupView, InternetConfig, LanConfig, LanProblem, Node};
+use kervan_node::{
+    ChannelView, ContactView, Event, GroupView, InternetConfig, LanConfig, LanProblem, Node,
+};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 #[derive(Parser)]
@@ -51,6 +53,9 @@ enum Command {
     /// Groups: create one, change who is in it, write to it, read it.
     #[command(subcommand)]
     Group(GroupCommand),
+    /// Public channels: anyone who knows the name reads and writes.
+    #[command(subcommand)]
+    Channel(ChannelCommand),
     /// Tell contacts when you read their messages, or stop telling them.
     ReadReceipts {
         #[arg(value_parser = ["on", "off"])]
@@ -113,6 +118,38 @@ enum GroupCommand {
     },
     /// Show a group's messages and mark them read.
     Log { group: String },
+}
+
+#[derive(Subcommand)]
+enum ChannelCommand {
+    /// List the channels you are in.
+    List,
+    /// Join a channel. Posts are signed with a key for that channel only.
+    Join {
+        name: String,
+        /// Only those who know it read and write.
+        #[arg(long, default_value = "")]
+        password: String,
+        /// The name to post under. Your own name by default.
+        #[arg(long)]
+        nick: Option<String>,
+    },
+    /// Leave a channel and forget its posts.
+    Leave { channel: String },
+    /// Post under another name.
+    Nick { channel: String, nick: String },
+    /// Queue a post. It goes out like any other message.
+    Send {
+        channel: String,
+        #[arg(required = true, num_args = 1..)]
+        text: Vec<String>,
+    },
+    /// Post your contact card, so readers can add you.
+    ShareCard { channel: String },
+    /// Show a channel's posts and mark them read.
+    Log { channel: String },
+    /// Stop showing and passing on an author's posts, by the id in the log.
+    Mute { channel: String, author: String },
 }
 
 #[tokio::main]
@@ -221,6 +258,7 @@ async fn run(cli: Cli) -> AnyResult {
             println!("You are {} now. Contacts get the new name with the next `kervan run` or `kervan export`.", profile.name);
         }
         Command::Group(command) => group_command(&node, command)?,
+        Command::Channel(command) => channel_command(&node, command)?,
         Command::ReadReceipts { state } => {
             node.set_read_receipts(state == "on")?;
             println!("Read receipts are {state}.");
@@ -338,6 +376,20 @@ async fn run_node(
                     let sender = message.sender.unwrap_or_default();
                     println!("[{group}] {sender}: {}", message.body);
                 }
+                Ok(Event::PostReceived { post }) => {
+                    let channel = node
+                        .channels()
+                        .ok()
+                        .and_then(|channels| channels.into_iter().find(|channel| channel.id == post.channel_id))
+                        .map_or_else(|| format!("channel {}", post.channel_id), |channel| channel.name);
+                    match post.shared_card {
+                        Some(card) => println!(
+                            "[#{channel}] {} ({}) shared a card: {} {}",
+                            post.nick, post.author, card.name, card.fingerprint
+                        ),
+                        None => println!("[#{channel}] {} ({}): {}", post.nick, post.author, post.body),
+                    }
+                }
                 Ok(Event::GroupChanged { group }) => {
                     if group.member {
                         println!("· group {} has {} member(s)", group.name, group.members.len());
@@ -443,6 +495,103 @@ fn group_command(node: &Node, command: GroupCommand) -> AnyResult {
         }
     }
     Ok(())
+}
+
+fn channel_command(node: &Node, command: ChannelCommand) -> AnyResult {
+    match command {
+        ChannelCommand::List => {
+            for channel in node.channels()? {
+                let lock = if channel.has_password {
+                    "  (password)"
+                } else {
+                    ""
+                };
+                println!(
+                    "{:>3}  #{} as {}{lock}",
+                    channel.id, channel.name, channel.nick
+                );
+            }
+        }
+        ChannelCommand::Join {
+            name,
+            password,
+            nick,
+        } => {
+            let nick = nick.unwrap_or_else(|| node.profile().name);
+            let channel = node.join_channel(&name, &password, &nick)?;
+            println!(
+                "Joined #{} as {}. Anyone who knows the name{} reads what you post there.",
+                channel.name,
+                channel.nick,
+                if channel.has_password {
+                    " and password"
+                } else {
+                    ""
+                }
+            );
+        }
+        ChannelCommand::Leave { channel } => {
+            let channel = find_channel(node, &channel)?;
+            node.leave_channel(channel.id)?;
+            println!("Left #{}.", channel.name);
+        }
+        ChannelCommand::Nick { channel, nick } => {
+            let channel = find_channel(node, &channel)?;
+            let channel = node.set_channel_nick(channel.id, &nick)?;
+            println!("You post in #{} as {} now.", channel.name, channel.nick);
+        }
+        ChannelCommand::Send { channel, text } => {
+            let channel = find_channel(node, &channel)?;
+            node.send_post(channel.id, &text.join(" "))?;
+            println!(
+                "Queued for #{}. It leaves with the next `kervan run` or `kervan export`.",
+                channel.name
+            );
+        }
+        ChannelCommand::ShareCard { channel } => {
+            let channel = find_channel(node, &channel)?;
+            node.share_card(channel.id)?;
+            println!("Your card is queued for #{}.", channel.name);
+        }
+        ChannelCommand::Log { channel } => {
+            let channel = find_channel(node, &channel)?;
+            for post in node.posts(channel.id)? {
+                let who = if post.outgoing {
+                    "you".to_owned()
+                } else {
+                    format!("{} ({})", post.nick, post.author)
+                };
+                match post.shared_card {
+                    Some(card) => {
+                        println!("{who} shared a card: {} {}", card.name, card.fingerprint)
+                    }
+                    None => println!("{who}: {}", post.body),
+                }
+            }
+            node.mark_channel_read(channel.id)?;
+        }
+        ChannelCommand::Mute { channel, author } => {
+            let channel = find_channel(node, &channel)?;
+            node.mute_author(channel.id, &author)?;
+            println!("Muted {author} in #{}.", channel.name);
+        }
+    }
+    Ok(())
+}
+
+/// A channel by id or by name, with or without `#`.
+fn find_channel(node: &Node, query: &str) -> Result<ChannelView, Box<dyn std::error::Error>> {
+    let channels = node.channels()?;
+    if let Ok(id) = query.parse::<i64>() {
+        if let Some(channel) = channels.iter().find(|channel| channel.id == id) {
+            return Ok(channel.clone());
+        }
+    }
+    let name = kervan_proto::channel::normalize_name(query)?;
+    channels
+        .into_iter()
+        .find(|channel| channel.name == name)
+        .ok_or_else(|| format!("you are not in #{name}").into())
 }
 
 /// A group by id or by name, ignoring case.

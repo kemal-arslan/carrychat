@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import QRCode from "qrcode";
-import { api, type Contact, type Group, type LanProblem, type Member, type Profile } from "./api";
+import { api, type Channel, type Contact, type Group, type LanProblem, type Member, type Profile } from "./api";
 import { MAX_NAME_BYTES, utf8Length } from "./format";
 import { useI18n, type LanguageChoice } from "./i18n";
 import { notificationsEnabled, setNotificationsEnabled } from "./prefs";
@@ -503,6 +503,130 @@ export function MembersDialog({
               {t.leaveGroup}
             </button>
           )
+        )}
+        <button className="primary" onClick={onClose}>
+          {t.done}
+        </button>
+      </div>
+    </Dialog>
+  );
+}
+
+export function JoinChannelDialog({
+  defaultNick,
+  onClose,
+  onJoined,
+}: {
+  defaultNick: string;
+  onClose: () => void;
+  onJoined: (channel: Channel) => void;
+}) {
+  const { t } = useI18n();
+  const [name, setName] = useState("");
+  const [password, setPassword] = useState("");
+  const [nick, setNick] = useState(defaultNick);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    try {
+      onJoined(await api.joinChannel(name, password, nick));
+      onClose();
+    } catch (failure) {
+      const text = errorText(failure);
+      setError(text.includes("channel name") ? t.channelNameInvalid : text);
+    }
+  }
+
+  return (
+    <Dialog title={t.joinChannel} onClose={onClose}>
+      <form onSubmit={submit}>
+        <label htmlFor="channel-name">{t.channelName}</label>
+        <input
+          id="channel-name"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="#kadıköy"
+          autoFocus
+        />
+        <label htmlFor="channel-password">{t.channelPassword}</label>
+        <input
+          id="channel-password"
+          type="password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+        />
+        <label htmlFor="channel-nick">{t.channelNick}</label>
+        <input id="channel-nick" value={nick} onChange={(event) => setNick(event.target.value)} />
+        <p className={error ? "hint error" : "hint"}>{error ?? t.joinHint}</p>
+        <div className="dialog-actions">
+          <button type="button" onClick={onClose}>
+            {t.cancel}
+          </button>
+          <button className="primary" disabled={name.trim() === "" || nick.trim() === ""}>
+            {t.join}
+          </button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+export function ChannelSettingsDialog({
+  channel,
+  onClose,
+  onChanged,
+  onShared,
+  onLeft,
+}: {
+  channel: Channel;
+  onClose: () => void;
+  onChanged: () => void;
+  onShared: () => void;
+  onLeft: () => void;
+}) {
+  const { t } = useI18n();
+  const [nick, setNick] = useState(channel.nick);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmLeave, setConfirmLeave] = useState(false);
+
+  async function run(action: () => Promise<unknown>, after: () => void) {
+    setError(null);
+    try {
+      await action();
+      after();
+    } catch (failure) {
+      setError(errorText(failure));
+    }
+  }
+
+  return (
+    <Dialog title={`#${channel.name}`} onClose={onClose}>
+      <label htmlFor="settings-nick">{t.channelNick}</label>
+      <div className="inline-field">
+        <input id="settings-nick" value={nick} onChange={(event) => setNick(event.target.value)} />
+        <button
+          disabled={nick.trim() === "" || nick.trim() === channel.nick}
+          onClick={() => run(() => api.setChannelNick(channel.id, nick), onChanged)}
+        >
+          {t.nickSave}
+        </button>
+      </div>
+      <h3 className="settings-section">{t.shareCard}</h3>
+      <p className="hint">{t.shareCardHint}</p>
+      <button onClick={() => run(() => api.shareCard(channel.id), onShared)}>{t.shareCard}</button>
+      <h3 className="settings-section danger">{t.leaveChannelTitle}</h3>
+      <p className={error ? "hint error" : "hint"}>{error ?? t.leaveChannelHint}</p>
+      <div className="dialog-actions">
+        {confirmLeave ? (
+          <button className="danger" onClick={() => run(() => api.leaveChannel(channel.id), onLeft)}>
+            {t.leaveChannelNow}
+          </button>
+        ) : (
+          <button className="danger-outline" onClick={() => setConfirmLeave(true)}>
+            {t.leaveChannel}
+          </button>
         )}
         <button className="primary" onClick={onClose}>
           {t.done}

@@ -1,18 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
+  type Channel,
   type Contact,
   type Group,
   type GroupMessage,
   type Member,
   type Message,
+  type Post,
   type Profile,
   type Status,
 } from "./api";
+import { ChannelChat } from "./ChannelChat";
 import { Chat } from "./Chat";
 import {
   AddContactDialog,
+  ChannelSettingsDialog,
   ConnectDialog,
+  JoinChannelDialog,
   MembersDialog,
   MyCardDialog,
   NetworkDialog,
@@ -39,7 +44,16 @@ export default function App() {
   return <Main profile={profile} onProfile={setProfile} />;
 }
 
-type DialogName = "add" | "card" | "connect" | "network" | "settings" | "newGroup" | "members";
+type DialogName =
+  | "add"
+  | "card"
+  | "connect"
+  | "network"
+  | "settings"
+  | "newGroup"
+  | "members"
+  | "joinChannel"
+  | "channelSettings";
 
 function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: Profile) => void }) {
   const { t, language } = useI18n();
@@ -49,6 +63,9 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
   const [groups, setGroups] = useState<Group[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<number | null>(null);
   const [groupMessages, setGroupMessages] = useState<GroupMessage[]>([]);
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [selectedChannel, setSelectedChannel] = useState<number | null>(null);
+  const [posts, setPosts] = useState<Post[]>([]);
   const [status, setStatus] = useState<Status | null>(null);
   const [dialog, setDialog] = useState<DialogName | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -60,11 +77,16 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
   selectedGroupRef.current = selectedGroup;
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
+  const selectedChannelRef = useRef(selectedChannel);
+  selectedChannelRef.current = selectedChannel;
+  const channelsRef = useRef(channels);
+  channelsRef.current = channels;
   const tRef = useRef(t);
   tRef.current = t;
 
   const refreshContacts = useCallback(() => api.contacts().then(setContacts), []);
   const refreshGroups = useCallback(() => api.groups().then(setGroups), []);
+  const refreshChannels = useCallback(() => api.channels().then(setChannels), []);
   const refreshStatus = useCallback(() => api.status().then(setStatus), []);
 
   const show = useCallback((text: string) => {
@@ -79,21 +101,32 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
     const groupId = selectedGroupRef.current;
     if (contactId !== null) api.markRead(contactId).then(refreshContacts);
     if (groupId !== null) api.markGroupRead(groupId).then(refreshGroups);
-  }, [refreshContacts, refreshGroups]);
+    const channelId = selectedChannelRef.current;
+    if (channelId !== null) api.markChannelRead(channelId).then(refreshChannels);
+  }, [refreshContacts, refreshGroups, refreshChannels]);
 
   function selectContact(id: number) {
     setSelectedGroup(null);
+    setSelectedChannel(null);
     setSelected(id);
   }
 
   function selectGroup(id: number) {
     setSelected(null);
+    setSelectedChannel(null);
     setSelectedGroup(id);
+  }
+
+  function selectChannel(id: number) {
+    setSelected(null);
+    setSelectedGroup(null);
+    setSelectedChannel(id);
   }
 
   useEffect(() => {
     refreshContacts();
     refreshGroups();
+    refreshChannels();
     refreshStatus();
     // Carried bundles change without events, so the counts are polled too.
     const timer = window.setInterval(refreshStatus, 5000);
@@ -102,11 +135,19 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
       window.clearInterval(timer);
       window.removeEventListener("focus", markSelectedRead);
     };
-  }, [refreshContacts, refreshGroups, refreshStatus, markSelectedRead]);
+  }, [refreshContacts, refreshGroups, refreshChannels, refreshStatus, markSelectedRead]);
 
   useEffect(() => {
-    if (selected === null && selectedGroup === null && contacts.length > 0) setSelected(contacts[0].id);
-  }, [contacts, selected, selectedGroup]);
+    if (selected === null && selectedGroup === null && selectedChannel === null && contacts.length > 0) {
+      setSelected(contacts[0].id);
+    }
+  }, [contacts, selected, selectedGroup, selectedChannel]);
+
+  useEffect(() => {
+    if (selectedChannel === null) return;
+    api.posts(selectedChannel).then(setPosts);
+    markSelectedRead();
+  }, [selectedChannel, markSelectedRead]);
 
   useEffect(() => {
     if (selectedGroup === null) return;
@@ -169,16 +210,57 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
         } else if (event.type === "groupChanged") {
           refreshGroups();
           refreshContacts();
+        } else if (event.type === "postReceived") {
+          const { post } = event;
+          const open = post.channelId === selectedChannelRef.current;
+          if (open) setPosts((current) => [...current, post]);
+          if (open && document.hasFocus()) {
+            markSelectedRead();
+          } else {
+            refreshChannels();
+          }
         }
         refreshStatus();
       }),
       api.onError(show),
     ];
     return () => stops.forEach((stop) => stop.then((unlisten) => unlisten()));
-  }, [refreshContacts, refreshGroups, refreshStatus, show, markSelectedRead]);
+  }, [refreshContacts, refreshGroups, refreshChannels, refreshStatus, show, markSelectedRead]);
 
   const contact = contacts.find((candidate) => candidate.id === selected) ?? null;
   const group = groups.find((candidate) => candidate.id === selectedGroup) ?? null;
+  const channel = channels.find((candidate) => candidate.id === selectedChannel) ?? null;
+
+  async function sendToChannel(text: string) {
+    if (!channel) return;
+    const post = await api.sendPost(channel.id, text);
+    setPosts((current) => [...current, post]);
+    refreshChannels();
+    refreshStatus();
+  }
+
+  async function mute(post: Post) {
+    if (!channel) return;
+    try {
+      await api.muteAuthor(channel.id, post.author);
+      setPosts((current) => current.filter((other) => other.author !== post.author));
+      show(t.muted(post.nick));
+      refreshChannels();
+    } catch (error) {
+      show(String(error));
+    }
+  }
+
+  async function addSharedCard(card: string) {
+    try {
+      const added = await api.addContact(card);
+      show(t.memberAdded(added.name));
+      await refreshContacts();
+      selectContact(added.id);
+    } catch (error) {
+      show(String(error));
+    }
+  }
 
   /** Opens a direct conversation with a group member, adding them as a contact first if needed. */
   async function messageMember(member: Member) {
@@ -249,8 +331,10 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
       show(t.imported(report.received, report.delivered, report.carried, report.skipped));
       refreshContacts();
       refreshGroups();
+      refreshChannels();
       refreshStatus();
       if (selected !== null) api.messages(selected).then(setMessages);
+      if (selectedChannel !== null) api.posts(selectedChannel).then(setPosts);
       if (selectedGroup !== null) api.groupMessages(selectedGroup).then(setGroupMessages);
     } catch (error) {
       show(String(error));
@@ -304,6 +388,28 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
     );
   }
 
+  function channelRow(item: Channel) {
+    return (
+      <button
+        key={item.id}
+        className={item.id === selectedChannel ? "contact active" : "contact"}
+        onClick={() => selectChannel(item.id)}
+      >
+        <span className="avatar channel" aria-hidden>
+          #
+        </span>
+        <span className="who">
+          <span className="name">{item.name}</span>
+          <span className="preview">{item.lastMessage ?? t.postingAs(item.nick)}</span>
+        </span>
+        <span className="meta">
+          {item.lastAt !== null && <time>{shortTime(item.lastAt, language)}</time>}
+          {item.unread > 0 && item.id !== selectedChannel && <span className="badge">{item.unread}</span>}
+        </span>
+      </button>
+    );
+  }
+
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -339,6 +445,18 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
             </div>
           )}
           {groups.map(groupRow)}
+          <div className="section-row">
+            <h3 className="section-title">{t.channels}</h3>
+            <button
+              className="icon-button small"
+              onClick={() => setDialog("joinChannel")}
+              aria-label={t.joinChannel}
+              title={t.joinChannel}
+            >
+              +
+            </button>
+          </div>
+          {channels.map(channelRow)}
           {(requests.length > 0 || accepted.length > 0) && <h3 className="section-title">{t.contacts}</h3>}
           {accepted.map(contactRow)}
           {contacts.length === 0 && <p className="sidebar-empty">{t.sidebarEmpty}</p>}
@@ -352,7 +470,16 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
       </aside>
 
       <main className="conversation">
-        {group ? (
+        {channel ? (
+          <ChannelChat
+            channel={channel}
+            posts={posts}
+            onSend={sendToChannel}
+            onSettings={() => setDialog("channelSettings")}
+            onMute={mute}
+            onAddCard={addSharedCard}
+          />
+        ) : group ? (
           <GroupChat group={group} messages={groupMessages} onSend={sendToGroup} onMembers={() => setDialog("members")} />
         ) : contact ? (
           <Chat contact={contact} messages={messages} onSend={send} onAccept={accept} onDecline={decline} />
@@ -391,6 +518,37 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
             refreshGroups();
             selectGroup(created.id);
             show(t.groupCreated(created.name));
+          }}
+        />
+      )}
+      {dialog === "joinChannel" && (
+        <JoinChannelDialog
+          defaultNick={profile.name}
+          onClose={() => setDialog(null)}
+          onJoined={(joined) => {
+            refreshChannels();
+            selectChannel(joined.id);
+            show(t.joinedChannel(joined.name));
+          }}
+        />
+      )}
+      {dialog === "channelSettings" && channel && (
+        <ChannelSettingsDialog
+          channel={channel}
+          onClose={() => setDialog(null)}
+          onChanged={refreshChannels}
+          onShared={() => {
+            setDialog(null);
+            show(t.cardShared);
+            api.posts(channel.id).then(setPosts);
+            refreshStatus();
+          }}
+          onLeft={() => {
+            setDialog(null);
+            setSelectedChannel(null);
+            setPosts([]);
+            refreshChannels();
+            show(t.leftChannel(channel.name));
           }}
         />
       )}
