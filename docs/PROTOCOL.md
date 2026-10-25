@@ -1,0 +1,231 @@
+# Kervan protocol v0
+
+**Status: draft.** Breaking changes are expected until v1. The reference implementation is [`crates/kervan-proto`](../crates/kervan-proto), and [`test-vectors.json`](test-vectors.json) pins its output so other implementations can check themselves against it.
+
+## 1. Goals
+
+- Deliver short private messages between people who exchanged contact cards beforehand, over whatever link exists: a local network, a LoRa radio, the internet, or a USB stick carried by hand.
+- A normal text message fits in **one Meshtastic packet** (233 bytes).
+- Relays, couriers and internet servers carry opaque bytes. They cannot read a message, and cannot tell who it is from or for unless they hold one of the two keys.
+- Store and forward: a message may take days and several kinds of link to arrive.
+- Delivery receipts that anyone carrying a copy can verify, so copies are dropped as soon as the message has arrived.
+
+Not in v0: group chat, public channels, messages from strangers, files, voice, forward secrecy.
+
+## 2. Notation
+
+- `||` is concatenation. Integers are unsigned big-endian. `u32(x)` is a 4-byte integer.
+- `H(x)` is SHA-256, `HMAC(k, x)` is HMAC-SHA256, `x[a..b]` is bytes `a` up to but not including `b`.
+- Times are unix seconds as `u32`. `day(t) = floor(t / 86400)`.
+- Labels such as `"kervan/v0/card"` are ASCII bytes without a terminator.
+
+## 3. Identity
+
+Each user holds two independent key pairs:
+
+- an **Ed25519** signing key, which signs the contact card, and
+- an **X25519** key, used for pairwise key agreement.
+
+```
+fingerprint = H("kervan/v0/fingerprint" || ed25519_pk || x25519_pk)[0..16]
+```
+
+The fingerprint is shown as lowercase RFC 4648 base32 without padding, in groups of four (`abcd efgh ijkl mnop qrst uvwx yz`). Two people compare fingerprints to verify each other.
+
+### 3.1 Contact card
+
+| Offset | Size | Field |
+| --- | --- | --- |
+| 0 | 1 | version, `0x00` |
+| 1 | 32 | Ed25519 public key |
+| 33 | 32 | X25519 public key |
+| 65 | 1 | name length `N`, 0 to 32 |
+| 66 | N | name, UTF-8 |
+| 66+N | 64 | Ed25519 signature over `"kervan/v0/card" \|\| bytes[0..66+N]` |
+
+The text form is `kervan:` followed by the card in base64url without padding, short enough for a QR code. Receivers verify the signature (strict Ed25519 verification) and reject unknown versions.
+
+v0 has no contact discovery over the network. Cards are exchanged in person by QR code, or over a channel the two people already trust, and fingerprints are compared either way.
+
+## 4. Pair keys
+
+For a pair of contacts:
+
+```
+shared   = X25519(own_secret, peer_public)       abort if all-zero (non-contributory)
+(P1, P2) = the two X25519 public keys, sorted bytewise ascending
+prk      = HKDF-Extract(salt = "kervan/v0/pair", ikm = shared)
+K_enc    = HKDF-Expand(prk, "enc" || P1 || P2, 32)
+K_tag    = HKDF-Expand(prk, "tag" || P1 || P2, 32)
+K_ack    = HKDF-Expand(prk, "ack" || P1 || P2, 32)
+```
+
+Both contacts derive the same three keys. Nobody else can.
+
+### 4.1 Recipient tag
+
+```
+tag(recipient_pk, d) = HMAC(K_tag, recipient_pk || u32(d))[0..8]
+```
+
+`d` is the day the message was created. The tag tells the recipient which contact a bundle is from, so it knows which key to try, and tells nobody else anything. It changes every day and differs per direction, so an observer cannot link a pair's traffic across days, or the two directions of one conversation.
+
+A receiver precomputes the tags of every contact for the days `today − 7` to `today + 1`: seven days is the longest a bundle lives, and one day absorbs clock drift.
+
+## 5. Bundle
+
+A bundle is one sealed message. It is the unit that is stored, carried and forwarded.
+
+| Offset | Size | Field |
+| --- | --- | --- |
+| 0 | 1 | version, `0x00` |
+| 1 | 1 | hop limit |
+| 2 | 4 | expires at, `u32` |
+| 6 | 8 | bundle id |
+| 14 | 8 | recipient tag |
+| 22 | 24 | nonce |
+| 46 | n + 16 | ciphertext, then the 16-byte Poly1305 tag |
+
+A bundle is at most 4096 bytes.
+
+### 5.1 Sealing
+
+```
+nonce      = 24 random bytes, never reused under the same K_enc
+ack_secret = HMAC(K_ack, nonce)[0..16]
+bundle_id  = H("kervan/v0/ack" || ack_secret)[0..8]
+tag        = tag(recipient_pk, day(created_at))
+aad        = the 46-byte header without the hop limit byte: bytes[0..1] || bytes[2..46]
+ciphertext = XChaCha20-Poly1305-Encrypt(K_enc, nonce, plaintext, aad)
+```
+
+The hop limit is left out of the associated data so relays can decrement it. Every other header field is authenticated.
+
+`created_at < expires_at ≤ created_at + 604800` (7 days). The default lifetime is 3 days and the default hop limit is 8.
+
+### 5.2 Plaintext
+
+| Offset | Size | Field |
+| --- | --- | --- |
+| 0 | 1 | kind |
+| 1 | 4 | created at, `u32` |
+| 5 | rest | body |
+
+Kinds: `0x01` is text, UTF-8. All other values are reserved. A receiver that opens a bundle of an unknown kind ignores the body but still emits a tombstone, so the bundle stops circulating.
+
+### 5.3 Opening
+
+1. Look the tag up among the precomputed tags to find the contact and the day.
+2. Decrypt with that contact's `K_enc`. If decryption fails, the bundle is not ours or is corrupt.
+3. Check that `tag == tag(own_pk, day(created_at))`, that the lifetime rule in §5.1 holds, and that `bundle_id` is the one derived from the nonce. Reject the bundle if any check fails.
+4. Emit a tombstone (§6).
+
+### 5.4 Size budget
+
+Overhead is 46 (header) + 5 (plaintext header) + 16 (Poly1305 tag) = **67 bytes**. In one 233-byte Meshtastic packet with its 1-byte frame type (§7), the body can be up to **165 bytes**: 165 ASCII characters, fewer for text with letters such as ç, ğ, ı, ö, ş and ü, which take two bytes each in UTF-8.
+
+## 6. Tombstone
+
+A tombstone proves delivery. After opening a bundle, the recipient publishes `(bundle_id, ack_secret)`.
+
+Anyone holding the bundle checks `H("kervan/v0/ack" || ack_secret)[0..8] == bundle_id`, then deletes the bundle and stops forwarding it. The sender runs the same check and marks the message delivered. Only the two contacts know `K_ack`, so only they can produce `ack_secret` for a real bundle. Forging one means finding a preimage of a 64-bit truncated hash.
+
+- A node forwards a tombstone only for a bundle id it holds or has seen. Anyone can build a self-consistent tombstone for an id they made up, so tombstones for unknown ids are dropped.
+- A node remembers tombstoned ids until the bundle would have expired, so a late copy is not accepted again.
+
+A tombstone reveals that some bundle was delivered at about this time and place. A recipient that does not want that can delay the tombstone or skip it, and the bundle then circulates until it expires.
+
+## 7. Frames
+
+Transports move frames. A transport whose MTU fits a whole bundle (local network, internet, file) never fragments.
+
+| Type | Layout |
+| --- | --- |
+| `0x01` bundle | `type \|\| bundle` |
+| `0x02` fragment | `type \|\| bundle_id (8) \|\| index (1) \|\| count (1) \|\| chunk` |
+| `0x03` tombstone | `type \|\| hop_limit (1) \|\| bundle_id (8) \|\| ack_secret (16)`, 26 bytes |
+
+If `1 + len(bundle) > mtu`, the bundle bytes are split into chunks of `mtu − 11` bytes, from 2 to 32 of them. Receivers reassemble by bundle id with a timeout (10 minutes by default) and a cap on the number of incomplete bundles, then check that the reassembled bundle carries the same id as its fragments. Relays reassemble before forwarding, because they need the hop limit and the expiry.
+
+Frame types `0x10` to `0x1f` are reserved for transport-local control traffic (§9.1).
+
+## 8. Forwarding
+
+Each node keeps one store: its own outbox, plus the bundles it carries for others.
+
+- Duplicates are dropped by bundle id.
+- Expired bundles are deleted. Bundles that claim to expire more than 8 days from now are refused.
+- Forwarding decrements the hop limit. A bundle whose hop limit is 0 is kept but not forwarded.
+- Bundles carried for others have a quota. When it is full, the bundle closest to expiry is evicted first.
+- **Split horizon on LoRa.** A bundle that arrived over LoRa is not sent over LoRa again by the same node, because the Meshtastic mesh already floods it. It may be bridged to other links. Bundles that arrived over any other link may be sent over LoRa within the airtime budget, with the node's own bundles and tombstones first.
+
+## 9. Transports (draft)
+
+These mappings are fixed when each transport is built (see the roadmap in the README).
+
+### 9.1 Local network
+
+- Discovery: a UDP multicast beacon carrying a random per-run session id and a TCP port. The beacon carries no identity.
+- Sync: over TCP, each frame prefixed with its `u16` length. On connect, both sides send `HAVE` (`0x10`, the bundle ids they hold) and answer with `WANT` (`0x11`, the ids they lack), then exchange bundle and tombstone frames.
+
+### 9.2 LoRa via Meshtastic
+
+- The app talks to a Meshtastic node over USB serial (Bluetooth and TCP also work) with the Meshtastic client API.
+- Each frame is the payload of one Meshtastic `Data` packet sent to broadcast, MTU 233 bytes (`DATA_PAYLOAD_LEN`). During development it uses portnum `PRIVATE_APP` (256). A dedicated portnum will be requested once the format settles.
+- The Meshtastic mesh rebroadcasts packets itself, with a hop limit of up to 7, so Kervan nodes do not re-flood LoRa traffic (§8).
+- In the `EU_868` region Meshtastic uses 869.4–869.65 MHz, where the legal duty cycle limit is 10%, and every node in range shares that airtime. Kervan keeps its own airtime budget well below the limit and sends only bundles and tombstones over LoRa, never bulk data.
+
+### 9.3 Internet via Nostr
+
+- Each bundle is published as one Nostr event signed with a fresh one-time key. Its content is the bundle in base64url, with a tag `["x", hex(recipient_tag)]`. The event kind is still to be chosen, from the range relays store.
+- A recipient subscribes with `{"kinds": [K], "#x": [every current tag]}`.
+- Tombstones are events tagged `["b", hex(bundle_id)]`, whose content is the tombstone frame. Senders subscribe to the ids of their undelivered bundles.
+- Relays see tags (unlinkable across days), sizes, timing and the client's IP address.
+- A node with internet access publishes the bundles it carries for others (uplink). Fetching for nodes without internet access (downlink) is an open question (§11).
+
+### 9.4 File
+
+A file is `"KRVN" || 0x00 || frames`, each frame prefixed with its `u16` length. Exporting writes the store's bundles and tombstones. Importing feeds every frame into the store, exactly as if it had arrived over any other link.
+
+## 10. Security
+
+**v0 provides:**
+
+- confidentiality and integrity of message content end to end, whatever carried it,
+- unlinkability for relays: without a pair key they cannot tell sender or recipient, or link a pair's traffic across days or directions,
+- delivery receipts that cannot be forged,
+- a closed inbox: only contacts can send you anything, which also rules out spam from strangers.
+
+**v0 does not provide:**
+
+- **Forward secrecy.** Pair keys come from long-term keys. Whoever obtains a device's X25519 secret can decrypt all past and future traffic with every contact of that device that they have recorded, and can impersonate any of those contacts to it. A ratchet over live links is planned.
+- **Radio metadata privacy.** A LoRa transmission reveals the transmitting Meshtastic node and, to direction-finding equipment, its location. Bundle sizes and timing are visible, because v0 does not pad.
+- **Replay protection on the network.** A recorded bundle can be injected again until it expires. Receivers drop duplicates, but replays still spend airtime.
+- **Fragment integrity at relays.** Relays cannot authenticate fragments, so a forged fragment spoils reassembly of that bundle until the timeout.
+- **Reliable time.** Devices without internet access may have wrong clocks. The tag window absorbs a day of drift, and expiry checks use local time.
+
+## 11. Open questions
+
+1. Meshtastic channel: the default public channel (more relays, more contention for airtime) or a dedicated one.
+2. Downlink for nodes without internet access through a gateway, without telling the gateway who they are.
+3. Padding for LoRa frames: a smaller size leak against more airtime.
+4. Exchanging contacts at a distance.
+5. Group messages.
+6. A bridge to the bitchat Bluetooth mesh.
+7. HF radio. Amateur bands forbid encryption that hides a message's meaning, so HF would need a separate signed but unencrypted message kind, limited to messages the user explicitly marks as public.
+
+## 12. Constants
+
+| Name | Value |
+| --- | --- |
+| Protocol version | `0` |
+| Longest name | 32 bytes |
+| Longest bundle | 4096 bytes |
+| Bundle overhead | 67 bytes |
+| Default lifetime | 259200 s (3 days) |
+| Longest lifetime | 604800 s (7 days) |
+| Default hop limit | 8 |
+| Tag window | `today − 7` to `today + 1` |
+| Meshtastic MTU | 233 bytes |
+| Most fragments per bundle | 32 |
+| Reassembly timeout | 600 s |
