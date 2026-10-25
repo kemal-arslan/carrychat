@@ -4,13 +4,13 @@
 
 ## 1. Goals
 
-- Deliver short private messages between people who exchanged contact cards beforehand, over whatever link exists: a local network, a LoRa radio, the internet, or a USB stick carried by hand.
+- Deliver short private messages between two people as soon as one of them has the other's contact card, over whatever link exists: a local network, a LoRa radio, the internet, or a USB stick carried by hand.
 - A normal text message fits in **one Meshtastic packet** (233 bytes).
 - Relays, couriers and internet servers carry opaque bytes. They cannot read a message, and cannot tell who it is from or for unless they hold one of the two keys.
 - Store and forward: a message may take days and several kinds of link to arrive.
 - Delivery receipts that anyone carrying a copy can verify, so copies are dropped as soon as the message has arrived.
 
-Not in v0: group chat, public channels, messages from strangers, files, voice, forward secrecy.
+Not in v0: group chat, public channels, messages from people who do not have your card, files, voice, forward secrecy.
 
 ## 2. Notation
 
@@ -45,7 +45,7 @@ The fingerprint is shown as lowercase RFC 4648 base32 without padding, in groups
 
 The text form is `kervan:` followed by the card in base64url without padding, short enough for a QR code. Receivers verify the signature (strict Ed25519 verification) and reject unknown versions.
 
-v0 has no contact discovery over the network. Cards are exchanged in person by QR code, or over a channel the two people already trust, and fingerprints are compared either way.
+v0 has no contact discovery over the network. One person gives their card to the other, in person or over a channel they already trust. The first message then carries the sender's card the other way (§5.5). Fingerprints are compared either way.
 
 ## 4. Pair keys
 
@@ -111,7 +111,7 @@ The hop limit is left out of the associated data so relays can decrement it. Eve
 | 1 | 4 | created at, `u32` |
 | 5 | rest | body |
 
-Kinds: `0x01` is text, UTF-8. All other values are reserved. A receiver that opens a bundle of an unknown kind ignores the body but still emits a tombstone, so the bundle stops circulating.
+Kinds: `0x01` is text, UTF-8. `0x02` is an introduction and appears only inside one (§5.5). All other values are reserved. A receiver that opens a bundle of an unknown kind ignores the body but still emits a tombstone, so the bundle stops circulating.
 
 ### 5.3 Opening
 
@@ -123,6 +123,34 @@ Kinds: `0x01` is text, UTF-8. All other values are reserved. A receiver that ope
 ### 5.4 Size budget
 
 Overhead is 46 (header) + 5 (plaintext header) + 16 (Poly1305 tag) = **67 bytes**. In one 233-byte Meshtastic packet with its 1-byte frame type (§7), the body can be up to **165 bytes**: 165 ASCII characters, fewer for text with letters such as ç, ğ, ı, ö, ş and ü, which take two bytes each in UTF-8.
+
+### 5.5 Introductions
+
+An introduction is a first message to someone who does not have the sender's card yet. Only the sender needs the recipient's card. It is a bundle with the header of §5, except that its recipient tag is 8 random bytes, and its ciphertext field starts with a one-time public key:
+
+```
+e          = a fresh X25519 key pair, used once
+shared     = X25519(e_secret, recipient_pk)                abort if all-zero
+prk        = HKDF-Extract(salt = "kervan/v0/intro", ikm = shared)
+K_enc      = HKDF-Expand(prk, "enc" || e_pk || recipient_pk, 32)
+K_ack      = HKDF-Expand(prk, "ack" || e_pk || recipient_pk, 32)
+ack_secret = HMAC(K_ack, nonce)[0..16]
+bundle_id  = H("kervan/v0/ack" || ack_secret)[0..8]
+signature  = Ed25519-Sign(sender's signing key, "kervan/v0/intro-signature"
+               || e_pk || recipient_pk || nonce || u32(created_at) || text)
+plaintext  = 0x02 || u32(created_at) || u8(len(card)) || card || signature || text
+ciphertext = e_pk || XChaCha20-Poly1305-Encrypt(K_enc, nonce, plaintext, aad)
+```
+
+`card` is the sender's contact card (§3.1) and `aad` is the one of §5.1.
+
+**Receiving.** A node tries every bundle whose tag matches none of its contacts as an introduction: it computes `X25519(own_secret, e_pk)`, derives the keys and decrypts. If that works, it verifies the card's own signature, then `signature` with the card's Ed25519 key, then the lifetime rule and the bundle id. The card proves whose it is; the signature proves the sender holds that card's key, and ties the message to this recipient and this bundle, so it cannot be replayed to someone else. A node that opens an introduction emits a tombstone as for any bundle (§6).
+
+**Requests.** If the sender is not a contact yet, it becomes a *request*: the app shows the message with the sender's name and fingerprint, and the user accepts or declines. Accepting makes the sender a contact. Declining deletes the request and remembers the sender's key: later introductions from it are dropped, but still tombstoned so they stop circulating. Pair bundles (§5.1) that arrive from a requester before the request is answered are kept with it.
+
+**Sending.** A node sends introductions to a contact until it knows the contact has its card: a tombstone for one of its bundles to that contact came back, or a bundle from that contact arrived. From then on it sends pair bundles.
+
+A short introduction takes two Meshtastic packets: its overhead is 164 bytes plus the card, which is 130 bytes plus the sender's name.
 
 ## 6. Tombstone
 
@@ -215,11 +243,12 @@ Implemented in `crates/kervan-node/src/file.rs`, with the extension `.kervan`. A
 - confidentiality and integrity of message content end to end, whatever carried it,
 - unlinkability for relays: without a pair key they cannot tell sender or recipient, or link a pair's traffic across days or directions,
 - delivery receipts that cannot be forged,
-- a closed inbox: only contacts can send you anything, which also rules out spam from strangers.
+- a closed inbox: only someone holding your card can write to you, and their first message is a request you accept or decline.
 
 **v0 does not provide:**
 
-- **Forward secrecy.** Pair keys come from long-term keys. Whoever obtains a device's X25519 secret can decrypt all past and future traffic with every contact of that device that they have recorded, and can impersonate any of those contacts to it. A ratchet over live links is planned.
+- **Hidden introductions.** An introduction cannot be linked to its sender or recipient, but its size sets it apart from most pair bundles.
+- **Forward secrecy.** Pair keys come from long-term keys, and introductions are sealed to the recipient's long-term key. Whoever obtains a device's X25519 secret can decrypt all past and future traffic with every contact of that device that they have recorded, and can impersonate any of those contacts to it. A ratchet over live links is planned.
 - **Radio metadata privacy.** A LoRa transmission reveals the transmitting Meshtastic node and, to direction-finding equipment, its location. Bundle sizes and timing are visible, because v0 does not pad.
 - **Replay protection on the network.** A recorded bundle can be injected again until it expires. Receivers drop duplicates, but replays still spend airtime.
 - **Fragment integrity at relays.** Relays cannot authenticate fragments, so a forged fragment spoils reassembly of that bundle until the timeout.
@@ -243,6 +272,7 @@ Implemented in `crates/kervan-node/src/file.rs`, with the extension `.kervan`. A
 | Longest name | 32 bytes |
 | Longest bundle | 4096 bytes |
 | Bundle overhead | 67 bytes |
+| Introduction overhead | 164 bytes plus the card |
 | Default lifetime | 259200 s (3 days) |
 | Longest lifetime | 604800 s (7 days) |
 | Default hop limit | 8 |

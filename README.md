@@ -23,7 +23,7 @@ Kervan sends each message over the best link it has, and keeps it until one appe
 - **Store and forward.** Every computer keeps its own outgoing messages and carries other people's for up to 7 days, passing them on when it meets a new link.
 - **Nothing to learn in transit.** Devices that carry a message see only a tag that changes daily and differs per direction. Without one of the two keys, they cannot tell who it is from or for.
 - **Delivery receipts the network can check.** The recipient publishes a short proof that only the two contacts can produce, and every device that carries a copy deletes it.
-- **Contacts only.** You exchange cards with the people you want to reach and compare fingerprints. Nobody else can message you, so there is no spam.
+- **Only card holders can write.** To write to someone you need their card. Your first message carries your own card, signed, so they see a request with your fingerprint and accept or decline it. Nobody without your card can reach you.
 
 The full specification is in [docs/PROTOCOL.md](docs/PROTOCOL.md). [docs/test-vectors.json](docs/test-vectors.json) lets another implementation check itself byte for byte.
 
@@ -39,7 +39,7 @@ npm install
 npm run tauri dev
 ```
 
-Create your identity, give your card (**My card**) to a contact and add theirs. Kervan computers on the same network find each other by themselves. If your network blocks that, use **Connect…** with the other computer's address. **Export file…** writes everything waiting to be delivered to a `.kervan` file that someone can carry to another Kervan computer and import there.
+Create your identity and give your card (**My card**) to the people you want to hear from, or add theirs with **Add contact**. Only one side needs the other's card: the first message introduces the sender, and the recipient accepts the request. Kervan computers on the same network find each other by themselves. If your network blocks that, use **Connect…** with the other computer's address. **Export file…** writes everything waiting to be delivered to a `.kervan` file that someone can carry to another Kervan computer and import there.
 
 `npm run dev` opens the interface in a browser with sample data, without building the app.
 
@@ -49,7 +49,8 @@ Create your identity, give your card (**My card**) to a contact and add theirs. 
 cargo install --path crates/kervan-cli
 kervan init Ayşe
 kervan card                                  # give this to your contacts
-kervan add kervan:…                          # add theirs
+kervan add kervan:…                          # or add theirs: one side is enough
+kervan accept Deniz                          # accept someone who wrote to you first
 kervan send Deniz "İyiyim, Kadıköy'deyim."
 kervan run                                   # deliver, receive and relay on the local network
 kervan export messages.kervan                # or carry everything on a USB stick

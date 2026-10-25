@@ -9,6 +9,7 @@ use kervan_proto::bundle::{
 };
 use kervan_proto::frame::{Frame, Reassembler};
 use kervan_proto::identity::{ContactCard, Identity};
+use kervan_proto::intro::{open_introduction, seal_introduction};
 use kervan_proto::pair::{PairKeys, RecipientTag, TAG_WINDOW_FUTURE_DAYS, TAG_WINDOW_PAST_DAYS};
 use kervan_proto::{day_of, DAY_SECS};
 
@@ -56,6 +57,10 @@ struct Contact {
     id: i64,
     card: ContactCard,
     keys: PairKeys,
+    /// Wrote to us first and is waiting to be accepted (§5.5).
+    request: bool,
+    /// Has our card, so we can send pair bundles instead of introductions.
+    introduced: bool,
 }
 
 pub struct Engine {
@@ -99,9 +104,15 @@ impl Engine {
 
     fn with_identity(store: Store, identity: Identity) -> Result<Self> {
         let mut contacts = Vec::new();
-        for (id, card) in store.contacts()? {
-            let keys = PairKeys::derive(&identity, card.dh_key())?;
-            contacts.push(Contact { id, card, keys });
+        for stored in store.contacts()? {
+            let keys = PairKeys::derive(&identity, stored.card.dh_key())?;
+            contacts.push(Contact {
+                id: stored.id,
+                card: stored.card,
+                keys,
+                request: stored.request,
+                introduced: stored.introduced,
+            });
         }
         Ok(Self {
             store,
@@ -121,8 +132,9 @@ impl Engine {
         }
     }
 
-    /// Adds a contact from its card text. Bundles from them that this node was
-    /// already carrying are opened right away; their results are returned.
+    /// Adds a contact from its card text, or accepts it if it was a request.
+    /// Bundles from them that this node was already carrying are opened right
+    /// away; their results are returned.
     pub fn add_contact(
         &mut self,
         card_text: &str,
@@ -132,28 +144,46 @@ impl Engine {
         if card.dh_key() == &self.identity.dh_public() {
             return Err(Error::Invalid("that is your own card"));
         }
-        let id = self.store.insert_contact(&card, now)?;
+        self.store.unblock(card.dh_key().as_bytes())?;
+        let id = self.store.insert_contact(&card, now, false)?;
         if let Some(existing) = self.contacts.iter_mut().find(|contact| contact.id == id) {
             existing.card = card;
+            existing.request = false;
         } else {
             let keys = PairKeys::derive(&self.identity, card.dh_key())?;
-            self.contacts.push(Contact { id, card, keys });
+            self.contacts.push(Contact {
+                id,
+                card,
+                keys,
+                request: false,
+                introduced: false,
+            });
         }
         self.tags_day = None;
-
-        let mut opened = Vec::new();
-        for bundle in self.store.carried_bundles(now)? {
-            let Some(contact) = self.contact_for_tag(&bundle.tag, now) else {
-                continue;
-            };
-            if self.contacts[contact].id == id {
-                if let Some(handled) = self.deliver(contact, &bundle, now)? {
-                    self.store.delete_bundle(bundle.id)?;
-                    opened.push(handled);
-                }
-            }
-        }
+        let opened = self.open_carried_from(id, now)?;
         Ok((self.contact_view(id)?, opened))
+    }
+
+    /// Accepts a request: the sender becomes a contact and can be answered.
+    pub fn accept_contact(&mut self, contact_id: i64) -> Result<ContactView> {
+        let index = self.contact_index(contact_id)?;
+        self.store.accept_contact(contact_id)?;
+        self.contacts[index].request = false;
+        self.contact_view(contact_id)
+    }
+
+    /// Declines a request: deletes it with its messages and drops later
+    /// introductions from the same sender.
+    pub fn decline_contact(&mut self, contact_id: i64) -> Result<()> {
+        let index = self.contact_index(contact_id)?;
+        if !self.contacts[index].request {
+            return Err(Error::Invalid("only requests can be declined"));
+        }
+        let contact = self.contacts.remove(index);
+        self.store.block(contact.card.dh_key().as_bytes())?;
+        self.store.delete_contact(contact_id)?;
+        self.tags_day = None;
+        Ok(())
     }
 
     pub fn contacts(&self) -> Result<Vec<ContactView>> {
@@ -180,13 +210,29 @@ impl Engine {
             return Err(Error::Invalid("message is empty"));
         }
         let contact = &self.contacts[self.contact_index(contact_id)?];
-        let bundle = seal(
-            &contact.keys,
-            contact.card.dh_key(),
-            &Message::text(text, now),
-            now + DEFAULT_TTL_SECS,
-            DEFAULT_HOP_LIMIT,
-        )?;
+        if contact.request {
+            return Err(Error::Invalid("accept the request before you reply"));
+        }
+        let expires_at = now + DEFAULT_TTL_SECS;
+        // Until the contact has our card, every message carries it (§5.5).
+        let bundle = if contact.introduced {
+            seal(
+                &contact.keys,
+                contact.card.dh_key(),
+                &Message::text(text, now),
+                expires_at,
+                DEFAULT_HOP_LIMIT,
+            )?
+        } else {
+            seal_introduction(
+                &self.identity,
+                contact.card.dh_key(),
+                text,
+                now,
+                expires_at,
+                DEFAULT_HOP_LIMIT,
+            )?
+        };
         self.store.insert_bundle(&bundle, true, now)?;
         let message = self
             .store
@@ -291,6 +337,9 @@ impl Engine {
                 return Ok(handled);
             }
         }
+        if let Some(handled) = self.introduce(&bundle, now)? {
+            return Ok(handled);
+        }
         self.store.insert_bundle(&bundle, false, now)?;
         Ok(Handled {
             outcome: Outcome::Carried,
@@ -301,11 +350,16 @@ impl Engine {
 
     /// Opens a bundle for us and records it. Returns `None` if it does not
     /// open, in which case it is carried like anybody else's (§5.3).
-    fn deliver(&mut self, contact: usize, bundle: &Bundle, now: u32) -> Result<Option<Handled>> {
-        let contact = &self.contacts[contact];
-        let Ok(message) = open(&contact.keys, &self.identity.dh_public(), bundle) else {
+    fn deliver(&mut self, index: usize, bundle: &Bundle, now: u32) -> Result<Option<Handled>> {
+        let Ok(message) = open(
+            &self.contacts[index].keys,
+            &self.identity.dh_public(),
+            bundle,
+        ) else {
             return Ok(None);
         };
+        self.mark_introduced(index)?;
+        let contact = &self.contacts[index];
         let tombstone = Tombstone::for_bundle(&contact.keys, bundle);
         self.store.insert_tombstone(&tombstone, bundle.expires_at)?;
 
@@ -333,6 +387,106 @@ impl Engine {
         }))
     }
 
+    /// Opens a bundle as an introduction to us (§5.5). The sender becomes a
+    /// request unless they are a contact already. Returns `None` if it is not
+    /// one.
+    fn introduce(&mut self, bundle: &Bundle, now: u32) -> Result<Option<Handled>> {
+        let Ok(intro) = open_introduction(&self.identity, bundle) else {
+            return Ok(None);
+        };
+        self.store
+            .insert_tombstone(&intro.tombstone, bundle.expires_at)?;
+        let relay = vec![Frame::Tombstone {
+            hop_limit: DEFAULT_HOP_LIMIT,
+            tombstone: intro.tombstone,
+        }];
+        let sender = intro.card.dh_key();
+        if sender == &self.identity.dh_public() || self.store.is_blocked(sender.as_bytes())? {
+            return Ok(Some(Handled {
+                outcome: Outcome::Dropped,
+                relay,
+                events: Vec::new(),
+            }));
+        }
+
+        let existing = self
+            .contacts
+            .iter()
+            .position(|contact| contact.card.dh_key() == sender);
+        let index = match existing {
+            Some(index) => index,
+            None => {
+                let id = self.store.insert_contact(&intro.card, now, true)?;
+                let keys = PairKeys::derive(&self.identity, sender)?;
+                self.contacts.push(Contact {
+                    id,
+                    card: intro.card.clone(),
+                    keys,
+                    request: true,
+                    introduced: false,
+                });
+                self.tags_day = None;
+                self.contacts.len() - 1
+            }
+        };
+        self.mark_introduced(index)?;
+        let contact_id = self.contacts[index].id;
+
+        let mut events = Vec::new();
+        if let Some(message) = self.store.insert_message(
+            contact_id,
+            false,
+            bundle.id,
+            &intro.text,
+            intro.created_at,
+            Some(now),
+        )? {
+            events.push(Event::MessageReceived { message });
+        }
+        if existing.is_none() {
+            events.push(Event::ContactRequest {
+                contact: self.contact_view(contact_id)?,
+            });
+        }
+        let mut handled = Handled {
+            outcome: Outcome::Received,
+            relay,
+            events,
+        };
+        for opened in self.open_carried_from(contact_id, now)? {
+            handled.relay.extend(opened.relay);
+            handled.events.extend(opened.events);
+        }
+        Ok(Some(handled))
+    }
+
+    /// Opens the carried bundles that turn out to be from this contact.
+    fn open_carried_from(&mut self, contact_id: i64, now: u32) -> Result<Vec<Handled>> {
+        let mut opened = Vec::new();
+        for bundle in self.store.carried_bundles(now)? {
+            let Some(index) = self.contact_for_tag(&bundle.tag, now) else {
+                continue;
+            };
+            if self.contacts[index].id == contact_id {
+                if let Some(handled) = self.deliver(index, &bundle, now)? {
+                    self.store.delete_bundle(bundle.id)?;
+                    opened.push(handled);
+                }
+            }
+        }
+        Ok(opened)
+    }
+
+    /// Notes that a contact has our card: a bundle from them arrived, or one
+    /// of ours was delivered to them.
+    fn mark_introduced(&mut self, index: usize) -> Result<()> {
+        if !self.contacts[index].introduced {
+            self.store.set_introduced(self.contacts[index].id)?;
+            self.contacts[index].introduced = true;
+        }
+        Ok(())
+    }
+
     fn handle_tombstone(
         &mut self,
         hop_limit: u8,
@@ -354,6 +508,11 @@ impl Engine {
         self.store.delete_bundle(tombstone.id)?;
         let keep_until = held.map_or(now + MAX_FUTURE_EXPIRY_SECS, |bundle| bundle.expires_at);
         self.store.insert_tombstone(&tombstone, keep_until)?;
+        if let Some((contact_id, _)) = delivered {
+            if let Ok(index) = self.contact_index(contact_id) {
+                self.mark_introduced(index)?;
+            }
+        }
 
         let relay = match hop_limit.checked_sub(1) {
             Some(hop_limit) => vec![Frame::Tombstone {
@@ -419,6 +578,7 @@ impl Engine {
             fingerprint: contact.card.fingerprint().to_string(),
             last_message: last.as_ref().map(|(body, _)| body.clone()),
             last_at: last.map(|(_, at)| at),
+            request: contact.request,
         })
     }
 }

@@ -63,6 +63,10 @@ impl Identity {
         &self.dh
     }
 
+    pub(crate) fn sign(&self, message: &[u8]) -> Signature {
+        self.signing.sign(message)
+    }
+
     pub fn fingerprint(&self) -> Fingerprint {
         Fingerprint::of(&self.signing.verifying_key(), &self.dh_public())
     }

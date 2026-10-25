@@ -6,9 +6,11 @@ type Props = {
   contact: Contact;
   messages: Message[];
   onSend: (text: string) => Promise<void>;
+  onAccept: () => void;
+  onDecline: () => void;
 };
 
-export function Chat({ contact, messages, onSend }: Props) {
+export function Chat({ contact, messages, onSend, onAccept, onDecline }: Props) {
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -78,29 +80,45 @@ export function Chat({ contact, messages, onSend }: Props) {
         ))}
       </ol>
 
-      <div className="composer">
-        <textarea
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder={`Message ${contact.name}`}
-          rows={2}
-          aria-label="Message"
-        />
-        <div className="composer-row">
-          <span className={tooLong ? "meter error" : bytes > ONE_PACKET_BYTES ? "meter warn" : "meter"}>
-            {error ??
-              (tooLong
-                ? `Too long: ${bytes} of ${MAX_MESSAGE_BYTES} bytes`
-                : bytes === 0
-                  ? "Enter sends, Shift+Enter starts a new line"
-                  : `${bytes} bytes · ${radioPackets(bytes) === 1 ? "fits one radio packet" : `${radioPackets(bytes)} radio packets`}`)}
-          </span>
-          <button className="primary" onClick={send} disabled={bytes === 0 || tooLong || sending}>
-            Send
-          </button>
+      {contact.request ? (
+        <div className="request-bar">
+          <p>
+            <strong>{contact.name}</strong> has your card and wrote to you first. Check this fingerprint with them
+            before you accept:
+          </p>
+          <p className="fingerprint large">{contact.fingerprint}</p>
+          <div className="dialog-actions">
+            <button onClick={onDecline}>Decline</button>
+            <button className="primary" onClick={onAccept}>
+              Accept and reply
+            </button>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="composer">
+          <textarea
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder={`Message ${contact.name}`}
+            rows={2}
+            aria-label="Message"
+          />
+          <div className="composer-row">
+            <span className={tooLong ? "meter error" : bytes > ONE_PACKET_BYTES ? "meter warn" : "meter"}>
+              {error ??
+                (tooLong
+                  ? `Too long: ${bytes} of ${MAX_MESSAGE_BYTES} bytes`
+                  : bytes === 0
+                    ? "Enter sends, Shift+Enter starts a new line"
+                    : `${bytes} bytes · ${radioPackets(bytes) === 1 ? "fits one radio packet" : `${radioPackets(bytes)} radio packets`}`)}
+            </span>
+            <button className="primary" onClick={send} disabled={bytes === 0 || tooLong || sending}>
+              Send
+            </button>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

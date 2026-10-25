@@ -4,24 +4,39 @@ import { plural } from "./format";
 type Props = {
   status: Status | null;
   preview: boolean;
+  onNetworkHelp: () => void;
   onConnect: () => void;
   onImport: () => void;
   onExport: () => void;
 };
 
-export function StatusBar({ status, preview, onConnect, onImport, onExport }: Props) {
-  const link = !status || status.lanPort === null ? "off" : status.lanPeers > 0 ? "up" : "waiting";
+export function StatusBar({ status, preview, onNetworkHelp, onConnect, onImport, onExport }: Props) {
+  const link =
+    !status || status.lanPort === null
+      ? "off"
+      : status.lanProblem
+        ? status.lanProblem.kind
+        : status.lanPeers > 0
+          ? "up"
+          : "waiting";
   const label = {
     off: "Local network: off",
     waiting: "Local network: looking for other computers",
     up: `Local network: ${plural(status?.lanPeers ?? 0, "computer", "computers")} nearby`,
+    blocked: "Local network: blocked by macOS",
+    failed: "Local network: not working",
   }[link];
 
   return (
     <footer className="status">
-      <span className={`link ${link}`}>
+      <span className={`link ${link}`} title={status?.lanProblem?.detail}>
         <span className="dot" aria-hidden />
         {label}
+        {(link === "blocked" || link === "failed") && (
+          <button className="link-action" onClick={onNetworkHelp}>
+            {link === "blocked" ? "Fix…" : "Details…"}
+          </button>
+        )}
       </span>
       {status && (
         <>

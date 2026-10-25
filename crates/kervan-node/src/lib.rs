@@ -18,7 +18,7 @@ use tokio::sync::broadcast;
 
 use crate::engine::{Engine, Handled, Outcome};
 pub use crate::error::{Error, Result};
-pub use crate::lan::LanConfig;
+pub use crate::lan::{LanConfig, LanProblem};
 use crate::store::Store;
 
 const DATABASE_FILE: &str = "kervan.db";
@@ -32,7 +32,7 @@ pub struct Profile {
     pub card: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContactView {
     pub id: i64,
@@ -40,6 +40,8 @@ pub struct ContactView {
     pub fingerprint: String,
     pub last_message: Option<String>,
     pub last_at: Option<u32>,
+    /// Wrote first and waits to be accepted or declined.
+    pub request: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -59,6 +61,8 @@ pub struct MessageView {
 pub struct Status {
     pub lan_peers: usize,
     pub lan_port: Option<u16>,
+    /// Why the local network link is not working, if it is not.
+    pub lan_problem: Option<LanProblem>,
     /// Own messages not delivered yet.
     pub outbox: usize,
     /// Bundles carried for other people.
@@ -83,6 +87,12 @@ pub enum Event {
     MessageDelivered { contact_id: i64, message_id: i64 },
     #[serde(rename_all = "camelCase")]
     PeersChanged { count: usize },
+    /// Someone who has our card wrote to us for the first time.
+    #[serde(rename_all = "camelCase")]
+    ContactRequest { contact: ContactView },
+    /// The local network link started or stopped working.
+    #[serde(rename_all = "camelCase")]
+    LocalNetworkChanged { problem: Option<LanProblem> },
 }
 
 #[derive(Clone)]
@@ -139,6 +149,16 @@ impl Node {
         Ok(contact)
     }
 
+    /// Accepts a request: its sender becomes a contact.
+    pub fn accept_contact(&self, contact_id: i64) -> Result<ContactView> {
+        self.shared.engine().accept_contact(contact_id)
+    }
+
+    /// Declines a request and ignores its sender from now on.
+    pub fn decline_contact(&self, contact_id: i64) -> Result<()> {
+        self.shared.engine().decline_contact(contact_id)
+    }
+
     pub fn contacts(&self) -> Result<Vec<ContactView>> {
         self.shared.engine().contacts()
     }
@@ -160,6 +180,7 @@ impl Node {
         Ok(Status {
             lan_peers: self.shared.lan.peer_count(),
             lan_port: self.shared.lan.port(),
+            lan_problem: self.shared.lan.problem(),
             outbox,
             carried,
         })

@@ -78,7 +78,7 @@ impl Bundle {
     }
 
     /// The header without the hop limit (§5.1).
-    fn aad(&self) -> [u8; HEADER_LEN - 1] {
+    pub(crate) fn aad(&self) -> [u8; HEADER_LEN - 1] {
         let mut aad = [0; HEADER_LEN - 1];
         aad[0] = VERSION;
         aad[1..5].copy_from_slice(&self.expires_at.to_be_bytes());
@@ -251,7 +251,7 @@ fn cipher(keys: &PairKeys) -> XChaCha20Poly1305 {
     XChaCha20Poly1305::new(keys.enc_key().into())
 }
 
-fn check_lifetime(created_at: u32, expires_at: u32) -> Result<()> {
+pub(crate) fn check_lifetime(created_at: u32, expires_at: u32) -> Result<()> {
     if expires_at <= created_at || expires_at - created_at > MAX_TTL_SECS {
         return Err(Error::Invalid("expiry"));
     }

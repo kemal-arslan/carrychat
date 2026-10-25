@@ -150,7 +150,9 @@ async fn queued_messages_sync_when_peers_connect_and_new_ones_flow_live() {
         unreachable!()
     };
     assert_eq!(message.body, "Ulaştı!");
-    assert_eq!(alice.node.status().unwrap().lan_peers, 1);
+    let status = alice.node.status().unwrap();
+    assert_eq!(status.lan_peers, 1);
+    assert_eq!(status.lan_problem, None);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -206,4 +208,5 @@ async fn nodes_find_each_other_by_multicast() {
         matches!(event, Event::PeersChanged { count: 1 })
     })
     .await;
+    assert_eq!(alice.node.status().unwrap().lan_problem, None);
 }

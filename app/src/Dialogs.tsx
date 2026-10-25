@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { api, type Contact, type Profile } from "./api";
+import { api, type Contact, type LanProblem, type Profile } from "./api";
 
 function Dialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -60,7 +60,7 @@ export function AddContactDialog({ onClose, onAdded }: { onClose: () => void; on
           autoFocus
         />
         <p className={error ? "hint error" : "hint"}>
-          {error ?? "Paste the card they gave you. It starts with kervan:"}
+          {error ?? "Paste the card they gave you. It starts with kervan:. They don't need yours: your first message carries it."}
         </p>
         <div className="dialog-actions">
           <button type="button" onClick={onClose}>
@@ -85,7 +85,10 @@ export function MyCardDialog({ profile, onClose }: { profile: Profile; onClose: 
 
   return (
     <Dialog title="My card" onClose={onClose}>
-      <p>Give this card to the people you want to reach, and add theirs.</p>
+      <p>
+        Give this card to the people you want to hear from. They can write to you right away, and you see their first
+        message as a request.
+      </p>
       <textarea className="mono" rows={5} readOnly value={profile.card} onFocus={(event) => event.target.select()} />
       <p className="hint">Your fingerprint. Read it out to your contacts so they can check your card:</p>
       <p className="fingerprint large">{profile.fingerprint}</p>
@@ -157,6 +160,59 @@ export function ConnectDialog({
           </button>
         </div>
       </form>
+    </Dialog>
+  );
+}
+
+export function NetworkDialog({ problem, onClose }: { problem: LanProblem; onClose: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+
+  async function openSettings() {
+    try {
+      await api.openNetworkSettings();
+    } catch (failure) {
+      setError(String(failure).replace(/^Error: /, ""));
+    }
+  }
+
+  if (problem.kind === "failed") {
+    return (
+      <Dialog title="The local network is not working" onClose={onClose}>
+        <p>Kervan could not reach another computer on this network:</p>
+        <p className="mono problem-detail">{problem.detail}</p>
+        <p className="hint">
+          Check that both computers are on the same network and that the other computer's firewall lets Kervan
+          accept connections. Guest networks often keep computers from reaching each other.
+        </p>
+        <div className="dialog-actions">
+          <button className="primary" onClick={onClose} autoFocus>
+            Close
+          </button>
+        </div>
+      </Dialog>
+    );
+  }
+
+  return (
+    <Dialog title="Let Kervan use the local network" onClose={onClose}>
+      <p>macOS is not letting Kervan reach other computers on this network, so messages cannot leave this Mac.</p>
+      <ol className="steps">
+        <li>
+          Open <strong>System Settings → Privacy &amp; Security → Local Network</strong>.
+        </li>
+        <li>
+          Turn on <strong>Kervan</strong>.
+        </li>
+        <li>If this still shows as blocked after a few seconds, quit Kervan and open it again.</li>
+      </ol>
+      <p className="mono problem-detail">{problem.detail}</p>
+      {error && <p className="hint error">{error}</p>}
+      <div className="dialog-actions">
+        <button onClick={onClose}>Close</button>
+        <button className="primary" onClick={openSettings} autoFocus>
+          Open System Settings
+        </button>
+      </div>
     </Dialog>
   );
 }

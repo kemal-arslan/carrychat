@@ -86,6 +86,16 @@ fn add_contact(state: State<'_, AppState>, card: String) -> CommandResult<Contac
 }
 
 #[tauri::command]
+fn accept_contact(state: State<'_, AppState>, contact_id: i64) -> CommandResult<ContactView> {
+    state.node()?.accept_contact(contact_id).map_err(text)
+}
+
+#[tauri::command]
+fn decline_contact(state: State<'_, AppState>, contact_id: i64) -> CommandResult<()> {
+    state.node()?.decline_contact(contact_id).map_err(text)
+}
+
+#[tauri::command]
 fn messages(state: State<'_, AppState>, contact_id: i64) -> CommandResult<Vec<MessageView>> {
     state.node()?.messages(contact_id).map_err(text)
 }
@@ -126,6 +136,20 @@ async fn connect_peer(state: State<'_, AppState>, address: String) -> CommandRes
     state.node()?.connect(addr).await.map_err(text)
 }
 
+/// Opens the Local Network list in System Settings, where macOS keeps the
+/// permission the local network link needs.
+#[tauri::command]
+fn open_network_settings() -> CommandResult<()> {
+    if !cfg!(target_os = "macos") {
+        return Err("This setting only exists on macOS".to_owned());
+    }
+    std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork")
+        .spawn()
+        .map(|_| ())
+        .map_err(text)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -151,12 +175,15 @@ pub fn run() {
             create_profile,
             contacts,
             add_contact,
+            accept_contact,
+            decline_contact,
             messages,
             send_message,
             status,
             export_file,
             import_file,
             connect_peer,
+            open_network_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kervan");

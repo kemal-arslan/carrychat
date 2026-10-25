@@ -9,6 +9,7 @@ pub mod bundle;
 pub mod error;
 pub mod frame;
 pub mod identity;
+pub mod intro;
 pub mod pair;
 
 pub use error::{Error, Result};

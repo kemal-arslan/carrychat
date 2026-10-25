@@ -246,6 +246,29 @@ label {
   text-align: center;
 }
 
+.section-title {
+  margin: 10px 8px 4px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.request-bar {
+  padding: 16px 24px;
+  border-top: 1px solid var(--line);
+  background: var(--sidebar);
+}
+
+.request-bar .fingerprint.large {
+  margin-top: 10px;
+}
+
+.request-bar .dialog-actions {
+  margin-top: 14px;
+}
+
 .sidebar-empty {
   color: var(--muted);
   padding: 12px 8px;
@@ -430,6 +453,26 @@ label {
   background: var(--amber);
 }
 
+.link.blocked,
+.link.failed {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.link.blocked .dot,
+.link.failed .dot {
+  background: var(--danger);
+}
+
+.link-action {
+  margin-left: 4px;
+  padding: 2px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
 .preview-tag {
   color: var(--amber);
 }
@@ -512,6 +555,24 @@ dialog p + p {
   background: var(--amber-soft);
   color: var(--text);
   text-align: center;
+}
+
+.steps {
+  margin: 12px 0;
+  padding-left: 20px;
+}
+
+.steps li + li {
+  margin-top: 6px;
+}
+
+.problem-detail {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--sidebar);
+  color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .dialog-actions {

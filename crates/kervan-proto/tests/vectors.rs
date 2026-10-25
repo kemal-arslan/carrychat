@@ -8,6 +8,7 @@ use data_encoding::HEXLOWER;
 use kervan_proto::bundle::{open, Bundle, Kind, Tombstone};
 use kervan_proto::frame::{Frame, Reassembler};
 use kervan_proto::identity::{ContactCard, Identity};
+use kervan_proto::intro::open_introduction;
 use kervan_proto::pair::PairKeys;
 use serde_json::Value;
 
@@ -65,4 +66,24 @@ fn bob_opens_the_stored_bundles() {
         }
         assert_eq!(received, Some(bundle));
     }
+}
+
+#[test]
+fn bob_opens_the_stored_introduction() {
+    let vectors = stored();
+    let bob = Identity::from_secret_bytes(
+        &hex(&vectors["bob"]["ed25519_secret"]).try_into().unwrap(),
+        &hex(&vectors["bob"]["x25519_secret"]).try_into().unwrap(),
+        "bob",
+    )
+    .unwrap();
+    let stored = &vectors["introduction"];
+    let bundle = Bundle::from_bytes(&hex(&stored["bundle"])).unwrap();
+    let intro = open_introduction(&bob, &bundle).unwrap();
+    assert_eq!(
+        intro.card.to_text(),
+        vectors["alice"]["card"].as_str().unwrap()
+    );
+    assert_eq!(intro.text, stored["text"].as_str().unwrap());
+    assert!(intro.tombstone.verify());
 }

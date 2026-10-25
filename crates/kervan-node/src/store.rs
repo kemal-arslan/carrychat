@@ -50,6 +50,22 @@ CREATE TABLE IF NOT EXISTS tombstones (
 );
 ";
 
+/// Changes to the schema since the first release, applied in order. The
+/// index of the last one applied is kept in `PRAGMA user_version`.
+const MIGRATIONS: &[&str] = &[
+    // Requests and introductions (§5.5).
+    "ALTER TABLE contacts ADD COLUMN request INTEGER NOT NULL DEFAULT 0;
+     ALTER TABLE contacts ADD COLUMN introduced INTEGER NOT NULL DEFAULT 0;
+     CREATE TABLE blocked (dh_key BLOB PRIMARY KEY);",
+];
+
+pub struct StoredContact {
+    pub id: i64,
+    pub card: ContactCard,
+    pub request: bool,
+    pub introduced: bool,
+}
+
 pub struct Store {
     conn: Connection,
 }
@@ -68,6 +84,13 @@ impl Store {
     fn init(conn: Connection) -> Result<Self> {
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.execute_batch(SCHEMA)?;
+        let applied: usize = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        for (index, migration) in MIGRATIONS.iter().enumerate().skip(applied) {
+            conn.execute_batch(&format!(
+                "BEGIN; {migration} PRAGMA user_version = {}; COMMIT;",
+                index + 1
+            ))?;
+        }
         Ok(Self { conn })
     }
 
@@ -90,11 +113,15 @@ impl Store {
     }
 
     /// Adds a contact, or returns the id it already has.
-    pub fn insert_contact(&self, card: &ContactCard, now: u32) -> Result<i64> {
+    /// Adds a contact, or returns the id it already has. Adding someone as a
+    /// contact also accepts them if they were a request.
+    pub fn insert_contact(&self, card: &ContactCard, now: u32, request: bool) -> Result<i64> {
         self.conn.execute(
-            "INSERT INTO contacts (card, dh_key, added_at) VALUES (?, ?, ?)
-             ON CONFLICT (dh_key) DO UPDATE SET card = excluded.card",
-            params![card.to_bytes(), card.dh_key().as_bytes(), now],
+            "INSERT INTO contacts (card, dh_key, added_at, request) VALUES (?, ?, ?, ?)
+             ON CONFLICT (dh_key) DO UPDATE SET
+                 card = excluded.card,
+                 request = MIN(contacts.request, excluded.request)",
+            params![card.to_bytes(), card.dh_key().as_bytes(), now, request],
         )?;
         Ok(self.conn.query_row(
             "SELECT id FROM contacts WHERE dh_key = ?",
@@ -103,19 +130,74 @@ impl Store {
         )?)
     }
 
-    pub fn contacts(&self) -> Result<Vec<(i64, ContactCard)>> {
+    pub fn contacts(&self) -> Result<Vec<StoredContact>> {
         let mut statement = self
             .conn
-            .prepare("SELECT id, card FROM contacts ORDER BY id")?;
+            .prepare("SELECT id, card, request, introduced FROM contacts ORDER BY id")?;
         let rows = statement.query_map([], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, Vec<u8>>(1)?,
+                row.get::<_, bool>(2)?,
+                row.get::<_, bool>(3)?,
+            ))
         })?;
         let mut contacts = Vec::new();
         for row in rows {
-            let (id, bytes) = row?;
-            contacts.push((id, ContactCard::from_bytes(&bytes)?));
+            let (id, card, request, introduced) = row?;
+            contacts.push(StoredContact {
+                id,
+                card: ContactCard::from_bytes(&card)?,
+                request,
+                introduced,
+            });
         }
         Ok(contacts)
+    }
+
+    pub fn accept_contact(&self, id: i64) -> Result<()> {
+        self.conn
+            .execute("UPDATE contacts SET request = 0 WHERE id = ?", [id])?;
+        Ok(())
+    }
+
+    pub fn set_introduced(&self, id: i64) -> Result<()> {
+        self.conn
+            .execute("UPDATE contacts SET introduced = 1 WHERE id = ?", [id])?;
+        Ok(())
+    }
+
+    /// Deletes a contact with its messages.
+    pub fn delete_contact(&self, id: i64) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM messages WHERE contact_id = ?", [id])?;
+        self.conn
+            .execute("DELETE FROM contacts WHERE id = ?", [id])?;
+        Ok(())
+    }
+
+    pub fn block(&self, dh_key: &[u8; 32]) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO blocked (dh_key) VALUES (?)",
+            [dh_key],
+        )?;
+        Ok(())
+    }
+
+    pub fn unblock(&self, dh_key: &[u8; 32]) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM blocked WHERE dh_key = ?", [dh_key])?;
+        Ok(())
+    }
+
+    pub fn is_blocked(&self, dh_key: &[u8; 32]) -> Result<bool> {
+        Ok(self
+            .conn
+            .query_row("SELECT 1 FROM blocked WHERE dh_key = ?", [dh_key], |_| {
+                Ok(())
+            })
+            .optional()?
+            .is_some())
     }
 
     /// Records a message. Returns `None` if it is already recorded.
@@ -330,5 +412,41 @@ impl Store {
             .query_row(sql, [id.0], |_| Ok(()))
             .optional()?
             .is_some())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kervan_proto::identity::Identity;
+
+    #[test]
+    fn a_database_from_the_first_release_is_migrated() {
+        let dir = std::env::temp_dir().join(format!("kervan-migration-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("old.db");
+        let _ = std::fs::remove_file(&path);
+        let card = Identity::generate("Deniz").unwrap().card();
+        {
+            let old = Connection::open(&path).unwrap();
+            old.execute_batch(SCHEMA).unwrap();
+            old.execute(
+                "INSERT INTO contacts (card, dh_key, added_at) VALUES (?, ?, 1)",
+                params![card.to_bytes(), card.dh_key().as_bytes()],
+            )
+            .unwrap();
+        }
+
+        let store = Store::open(&path).unwrap();
+        let contacts = store.contacts().unwrap();
+        assert_eq!(contacts.len(), 1);
+        assert!(!contacts[0].request);
+        assert!(!contacts[0].introduced);
+        assert!(!store.is_blocked(card.dh_key().as_bytes()).unwrap());
+        drop(store);
+
+        // Opening again applies nothing twice.
+        Store::open(&path).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

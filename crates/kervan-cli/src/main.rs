@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use kervan_node::{ContactView, Event, LanConfig, Node};
+use kervan_node::{ContactView, Event, LanConfig, LanProblem, Node};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 #[derive(Parser)]
@@ -31,8 +31,12 @@ enum Command {
     Card,
     /// Add a contact from their card.
     Add { card: String },
-    /// List contacts.
+    /// List contacts and requests.
     Contacts,
+    /// Accept a request from someone who wrote to you first.
+    Accept { contact: String },
+    /// Decline a request and ignore its sender from now on.
+    Decline { contact: String },
     /// Queue a message. It goes out the next time `kervan run` finds a link.
     Send {
         contact: String,
@@ -101,8 +105,9 @@ async fn run(cli: Cli) -> AnyResult {
         }
         Command::Contacts => {
             for contact in node.contacts()? {
+                let request = if contact.request { "  (request)" } else { "" };
                 println!(
-                    "{:>3}  {:<32}  {}",
+                    "{:>3}  {:<32}  {}{request}",
                     contact.id, contact.name, contact.fingerprint
                 );
             }
@@ -112,6 +117,19 @@ async fn run(cli: Cli) -> AnyResult {
             node.send_text(contact.id, &text.join(" "))?;
             println!(
                 "Queued for {}. It leaves with the next `kervan run` or `kervan export`.",
+                contact.name
+            );
+        }
+        Command::Accept { contact } => {
+            let contact = find_contact(&node, &contact)?;
+            node.accept_contact(contact.id)?;
+            println!("{} is a contact now. You can reply.", contact.name);
+        }
+        Command::Decline { contact } => {
+            let contact = find_contact(&node, &contact)?;
+            node.decline_contact(contact.id)?;
+            println!(
+                "Declined {}. Their messages are deleted and new ones are ignored.",
                 contact.name
             );
         }
@@ -199,6 +217,18 @@ async fn run_node(
                     println!("✓ delivered to {}", names(contact_id));
                 }
                 Ok(Event::PeersChanged { count }) => println!("· {count} node(s) nearby"),
+                Ok(Event::ContactRequest { contact }) => {
+                    println!("? {} ({}) wants to message you.", contact.name, contact.fingerprint);
+                    println!("  Accept with `kervan accept {}`, or `kervan decline {}`.", contact.id, contact.id);
+                }
+                Ok(Event::LocalNetworkChanged { problem: None }) => println!("· local network works"),
+                Ok(Event::LocalNetworkChanged { problem: Some(LanProblem::Blocked { detail }) }) => {
+                    eprintln!("! macOS is blocking local network access ({detail}).");
+                    eprintln!("  Allow your terminal app in System Settings → Privacy & Security → Local Network.");
+                }
+                Ok(Event::LocalNetworkChanged { problem: Some(LanProblem::Failed { detail }) }) => {
+                    eprintln!("! local network: {detail}");
+                }
                 Err(_) => {}
             },
             line = lines.next_line(), if stdin_open => match (line, &chat) {

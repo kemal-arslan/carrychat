@@ -5,11 +5,12 @@ use std::collections::{HashMap, HashSet};
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use kervan_proto::bundle::BundleId;
 use kervan_proto::frame::Frame;
 use rand_core::{OsRng, RngCore};
+use serde::Serialize;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::tcp::OwnedWriteHalf;
@@ -33,6 +34,11 @@ const MAX_IDS_PER_FRAME: usize = 8000;
 /// The node with the smaller session id dials. The other one dials too after
 /// this many beacons without a connection, in case its beacons do not arrive.
 const PATIENCE_BEACONS: u32 = 3;
+/// Beacons that may fail in a row before the discovery socket is replaced,
+/// for example after the computer switched networks.
+const MAX_BEACON_FAILURES: u32 = 3;
+/// How long a failed connection to a discovered node keeps showing as a problem.
+const DIAL_PROBLEM_TTL: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug)]
 pub struct LanConfig {
@@ -52,6 +58,60 @@ impl Default for LanConfig {
     }
 }
 
+/// Why the local network link is not working, for the status bar.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum LanProblem {
+    /// The operating system does not let Kervan use the local network. On
+    /// macOS this is the Local Network permission in Privacy & Security.
+    Blocked { detail: String },
+    /// Something else failed, such as a firewall refusing a connection.
+    Failed { detail: String },
+}
+
+impl LanProblem {
+    fn from_error(context: String, error: &io::Error) -> Self {
+        let detail = format!("{context}: {error}");
+        if blocked_by_os(error) {
+            Self::Blocked { detail }
+        } else {
+            Self::Failed { detail }
+        }
+    }
+}
+
+/// Without the Local Network permission, macOS answers "no route to host" or
+/// "operation not permitted" to everything sent on the local network.
+fn blocked_by_os(error: &io::Error) -> bool {
+    cfg!(target_os = "macos")
+        && matches!(
+            error.kind(),
+            io::ErrorKind::HostUnreachable | io::ErrorKind::PermissionDenied
+        )
+}
+
+#[derive(Default)]
+struct Problems {
+    beacon: Option<LanProblem>,
+    dial: Option<(LanProblem, Instant)>,
+}
+
+impl Problems {
+    fn current(&self) -> Option<LanProblem> {
+        self.beacon.clone().or_else(|| {
+            self.dial
+                .as_ref()
+                .filter(|(_, at)| at.elapsed() < DIAL_PROBLEM_TTL)
+                .map(|(problem, _)| problem.clone())
+        })
+    }
+}
+
+enum Source {
+    Beacon,
+    Dial,
+}
+
 type Outbox = mpsc::UnboundedSender<Vec<u8>>;
 
 pub(crate) struct Lan {
@@ -60,6 +120,7 @@ pub(crate) struct Lan {
     peers: Mutex<HashMap<u64, Outbox>>,
     dialing: Mutex<HashSet<u64>>,
     patience: Mutex<HashMap<u64, u32>>,
+    problems: Mutex<Problems>,
 }
 
 impl Lan {
@@ -70,7 +131,12 @@ impl Lan {
             peers: Mutex::default(),
             dialing: Mutex::default(),
             patience: Mutex::default(),
+            problems: Mutex::default(),
         }
+    }
+
+    pub(crate) fn problem(&self) -> Option<LanProblem> {
+        lock(&self.problems).current()
     }
 
     pub(crate) fn port(&self) -> Option<u16> {
@@ -134,25 +200,58 @@ pub(crate) async fn start(shared: &Arc<Shared>, config: LanConfig) -> Result<u16
     }
     tokio::spawn(accept_loop(Arc::downgrade(shared), listener));
     if let Some(group) = config.discovery {
-        let socket = multicast_socket(group)?;
-        tokio::spawn(discovery_loop(Arc::downgrade(shared), socket, group, port));
+        tokio::spawn(discovery_loop(Arc::downgrade(shared), group, port));
     }
     Ok(port)
 }
 
+/// Connects to a node. `expected` is the session id of a node found by
+/// discovery: failures to reach those show in the status bar, while failures
+/// of connections the user asked for are reported to the user directly.
 pub(crate) async fn dial(
     shared: &Arc<Shared>,
     addr: SocketAddr,
     expected: Option<u64>,
 ) -> Result<()> {
-    let connected = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(addr)).await;
+    let connected = match tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(addr)).await {
+        Ok(connected) => connected,
+        Err(_) => Err(io::Error::from(io::ErrorKind::TimedOut)),
+    };
     match connected {
-        Ok(Ok(stream)) => {
+        Ok(stream) => {
+            report(shared, Source::Dial, None);
             tokio::spawn(run_connection(shared.clone(), stream, expected));
             Ok(())
         }
-        Ok(Err(error)) => Err(error.into()),
-        Err(_) => Err(io::Error::from(io::ErrorKind::TimedOut).into()),
+        Err(error) => {
+            if expected.is_some() {
+                let context = format!("Found {addr} but could not connect");
+                report(
+                    shared,
+                    Source::Dial,
+                    Some(LanProblem::from_error(context, &error)),
+                );
+            }
+            Err(error.into())
+        }
+    }
+}
+
+/// Records how a beacon or connection went, and tells apps when the problem
+/// to show changes.
+fn report(shared: &Shared, source: Source, problem: Option<LanProblem>) {
+    let changed = {
+        let mut problems = lock(&shared.lan.problems);
+        let before = problems.current();
+        match source {
+            Source::Beacon => problems.beacon = problem,
+            Source::Dial => problems.dial = problem.map(|problem| (problem, Instant::now())),
+        }
+        let after = problems.current();
+        (before != after).then_some(after)
+    };
+    if let Some(problem) = changed {
+        shared.emit(Event::LocalNetworkChanged { problem });
     }
 }
 
@@ -171,28 +270,71 @@ async fn accept_loop(shared: Weak<Shared>, listener: TcpListener) {
     }
 }
 
-async fn discovery_loop(shared: Weak<Shared>, socket: UdpSocket, group: SocketAddrV4, port: u16) {
+async fn discovery_loop(shared: Weak<Shared>, group: SocketAddrV4, port: u16) {
+    enum Step {
+        Beacon,
+        Heard(usize, SocketAddr),
+        Nothing,
+    }
+
     let Some(session) = shared.upgrade().map(|shared| shared.lan.session) else {
         return;
     };
     let mut beacon = BEACON_PREFIX.to_vec();
     beacon.extend_from_slice(&session.to_be_bytes());
     beacon.extend_from_slice(&port.to_be_bytes());
+    let report_beacon = |problem: Option<LanProblem>| {
+        if let Some(shared) = shared.upgrade() {
+            report(&shared, Source::Beacon, problem);
+        }
+    };
 
+    let mut socket = None;
+    let mut failures = 0;
     let mut tick = tokio::time::interval(BEACON_INTERVAL);
     let mut buffer = [0; 64];
     loop {
-        tokio::select! {
-            _ = tick.tick() => {
-                if shared.strong_count() == 0 {
-                    return;
-                }
-                let _ = socket.send_to(&beacon, group).await;
+        if shared.strong_count() == 0 {
+            return;
+        }
+        let Some(current) = &socket else {
+            tick.tick().await;
+            match multicast_socket(group) {
+                Ok(created) => socket = Some(created),
+                Err(error) => report_beacon(Some(LanProblem::from_error(
+                    "Could not join the discovery group".to_owned(),
+                    &error,
+                ))),
             }
-            received = socket.recv_from(&mut buffer) => {
-                let Ok((len, from)) = received else {
-                    continue;
-                };
+            continue;
+        };
+
+        let step = tokio::select! {
+            _ = tick.tick() => Step::Beacon,
+            received = current.recv_from(&mut buffer) => match received {
+                Ok((len, from)) => Step::Heard(len, from),
+                Err(_) => Step::Nothing,
+            },
+        };
+        match step {
+            Step::Beacon => match current.send_to(&beacon, group).await {
+                Ok(_) => {
+                    failures = 0;
+                    report_beacon(None);
+                }
+                Err(error) => {
+                    report_beacon(Some(LanProblem::from_error(
+                        "Could not announce this computer".to_owned(),
+                        &error,
+                    )));
+                    failures += 1;
+                    if failures >= MAX_BEACON_FAILURES {
+                        failures = 0;
+                        socket = None;
+                    }
+                }
+            },
+            Step::Heard(len, from) => {
                 let Some((peer, peer_port)) = parse_beacon(&buffer[..len]) else {
                     continue;
                 };
@@ -208,6 +350,7 @@ async fn discovery_loop(shared: Weak<Shared>, socket: UdpSocket, group: SocketAd
                     });
                 }
             }
+            Step::Nothing => {}
         }
     }
 }
@@ -380,4 +523,52 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn os_error(code: i32) -> io::Error {
+        io::Error::from_raw_os_error(code)
+    }
+
+    #[test]
+    fn macos_refusals_read_as_blocked() {
+        // EHOSTUNREACH and EPERM, as macOS returns them without the permission.
+        let unreachable = LanProblem::from_error("Could not announce".to_owned(), &os_error(65));
+        let refused = LanProblem::from_error(
+            "Found 10.0.0.2:1 but could not connect".to_owned(),
+            &os_error(1),
+        );
+        let other = LanProblem::from_error(
+            "x".to_owned(),
+            &io::Error::from(io::ErrorKind::ConnectionRefused),
+        );
+        if cfg!(target_os = "macos") {
+            assert!(matches!(unreachable, LanProblem::Blocked { .. }));
+            assert!(matches!(refused, LanProblem::Blocked { .. }));
+        }
+        assert!(matches!(other, LanProblem::Failed { .. }));
+    }
+
+    #[test]
+    fn beacon_problems_win_and_dial_problems_fade() {
+        let blocked = LanProblem::Blocked {
+            detail: "beacon".to_owned(),
+        };
+        let failed = LanProblem::Failed {
+            detail: "dial".to_owned(),
+        };
+        let mut problems = Problems {
+            beacon: None,
+            dial: Some((failed.clone(), Instant::now())),
+        };
+        assert_eq!(problems.current(), Some(failed.clone()));
+        problems.beacon = Some(blocked.clone());
+        assert_eq!(problems.current(), Some(blocked));
+        problems.beacon = None;
+        problems.dial = Some((failed, Instant::now() - DIAL_PROBLEM_TTL));
+        assert_eq!(problems.current(), None);
+    }
 }

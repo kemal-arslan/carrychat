@@ -14,6 +14,8 @@ export type Contact = {
   fingerprint: string;
   lastMessage: string | null;
   lastAt: number | null;
+  /** Wrote first and waits to be accepted or declined. */
+  request: boolean;
 };
 
 export type Message = {
@@ -25,9 +27,13 @@ export type Message = {
   delivered: boolean;
 };
 
+/** Why the local network link is not working. `blocked`: macOS denies the Local Network permission. */
+export type LanProblem = { kind: "blocked" | "failed"; detail: string };
+
 export type Status = {
   lanPeers: number;
   lanPort: number | null;
+  lanProblem: LanProblem | null;
   outbox: number;
   carried: number;
 };
@@ -42,7 +48,9 @@ export type ImportReport = {
 export type NodeEvent =
   | { type: "messageReceived"; message: Message }
   | { type: "messageDelivered"; contactId: number; messageId: number }
-  | { type: "peersChanged"; count: number };
+  | { type: "peersChanged"; count: number }
+  | { type: "contactRequest"; contact: Contact }
+  | { type: "localNetworkChanged"; problem: LanProblem | null };
 
 export interface Api {
   /** Whether this is the browser preview with sample data. */
@@ -51,6 +59,8 @@ export interface Api {
   createProfile(name: string): Promise<Profile>;
   contacts(): Promise<Contact[]>;
   addContact(card: string): Promise<Contact>;
+  acceptContact(contactId: number): Promise<Contact>;
+  declineContact(contactId: number): Promise<void>;
   messages(contactId: number): Promise<Message[]>;
   sendMessage(contactId: number, text: string): Promise<Message>;
   status(): Promise<Status>;
@@ -59,6 +69,8 @@ export interface Api {
   /** Asks which file, then imports it. Returns null if cancelled. */
   importFile(): Promise<ImportReport | null>;
   connectPeer(address: string): Promise<void>;
+  /** Opens the Local Network permission in macOS System Settings. */
+  openNetworkSettings(): Promise<void>;
   onEvent(handler: (event: NodeEvent) => void): Promise<() => void>;
   onError(handler: (message: string) => void): Promise<() => void>;
 }
@@ -80,6 +92,8 @@ function desktopApi(): Api {
     createProfile: (name) => call("create_profile", { name }),
     contacts: () => call("contacts"),
     addContact: (card) => call("add_contact", { card }),
+    acceptContact: (contactId) => call("accept_contact", { contactId }),
+    declineContact: (contactId) => call("decline_contact", { contactId }),
     messages: (contactId) => call("messages", { contactId }),
     sendMessage: (contactId, text) => call("send_message", { contactId, text }),
     status: () => call("status"),
@@ -93,6 +107,7 @@ function desktopApi(): Api {
       return path ? call<ImportReport>("import_file", { path }) : null;
     },
     connectPeer: (address) => call("connect_peer", { address }),
+    openNetworkSettings: () => call("open_network_settings"),
     onEvent: (handler) => listen<NodeEvent>("kervan-event", (event) => handler(event.payload)),
     onError: (handler) => listen<string>("kervan-error", (event) => handler(event.payload)),
   };
@@ -105,8 +120,9 @@ function previewApi(): Api {
   let profile: Profile | null = null;
   let nextId = 10;
   const contacts: Contact[] = [
-    { id: 1, name: "Deniz", fingerprint: "7jgi 54zm 2zkd yent vzen s3pg lq", lastMessage: null, lastAt: null },
-    { id: 2, name: "Ayşe", fingerprint: "gp6m vxkt dnvv lqmw ewpx qfox be", lastMessage: null, lastAt: null },
+    { id: 1, name: "Deniz", fingerprint: "7jgi 54zm 2zkd yent vzen s3pg lq", lastMessage: null, lastAt: null, request: false },
+    { id: 2, name: "Ayşe", fingerprint: "gp6m vxkt dnvv lqmw ewpx qfox be", lastMessage: null, lastAt: null, request: false },
+    { id: 3, name: "Mehmet", fingerprint: "fwtj 6jv4 jq4d zgfb o2vz bv72 kq", lastMessage: null, lastAt: null, request: true },
   ];
   const messages: Message[] = [
     { id: 1, contactId: 1, outgoing: false, body: "Elektrik geldi mi sizde?", createdAt: now() - 5400, delivered: false },
@@ -114,6 +130,7 @@ function previewApi(): Api {
     { id: 3, contactId: 1, outgoing: false, body: "Var, yarın sabah okulun önünde dağıtım olacak.", createdAt: now() - 4900, delivered: false },
     { id: 4, contactId: 1, outgoing: true, body: "Tamam, oraya gelirim. Annem de yanımda.", createdAt: now() - 600, delivered: false },
     { id: 5, contactId: 2, outgoing: true, body: "İyiyim, Kadıköy'deyim.", createdAt: now() - 86400, delivered: true },
+    { id: 6, contactId: 3, outgoing: false, body: "Merhaba, ben Mehmet. Kartını Deniz'den aldım.", createdAt: now() - 300, delivered: false },
   ];
   const summarize = () =>
     contacts.map((contact) => {
@@ -138,9 +155,17 @@ function previewApi(): Api {
     },
     async addContact(card) {
       if (!card.trim().startsWith("kervan:")) throw new Error("invalid card prefix");
-      const contact = { id: nextId++, name: "Mehmet", fingerprint: "fwtj 6jv4 jq4d zgfb o2vz bv72 kq", lastMessage: null, lastAt: null };
+      const contact = { id: nextId++, name: "Elif", fingerprint: "q3rd 7kpa mx2c vuhe 4tzn 6wyb fo", lastMessage: null, lastAt: null, request: false };
       contacts.push(contact);
       return contact;
+    },
+    async acceptContact(contactId) {
+      const contact = contacts.find((candidate) => candidate.id === contactId)!;
+      contact.request = false;
+      return contact;
+    },
+    async declineContact(contactId) {
+      contacts.splice(contacts.findIndex((candidate) => candidate.id === contactId), 1);
     },
     async messages(contactId) {
       return messages.filter((message) => message.contactId === contactId);
@@ -155,7 +180,21 @@ function previewApi(): Api {
       return message;
     },
     async status() {
-      return { lanPeers: 1, lanPort: 49333, outbox: messages.filter((m) => m.outgoing && !m.delivered).length, carried: 3 };
+      // ?lan=blocked or ?lan=failed shows the local network warnings.
+      const problem = new URLSearchParams(location.search).get("lan");
+      const lanProblem: LanProblem | null =
+        problem === "blocked"
+          ? { kind: "blocked", detail: "Could not announce this computer: No route to host (os error 65)" }
+          : problem === "failed"
+            ? { kind: "failed", detail: "Found 192.168.1.5:55007 but could not connect: Connection refused (os error 61)" }
+            : null;
+      return {
+        lanPeers: lanProblem ? 0 : 1,
+        lanPort: 49333,
+        lanProblem,
+        outbox: messages.filter((m) => m.outgoing && !m.delivered).length,
+        carried: 3,
+      };
     },
     async exportFile() {
       return 4;
@@ -164,6 +203,7 @@ function previewApi(): Api {
       return { received: 1, delivered: 1, carried: 2, skipped: 0 };
     },
     async connectPeer() {},
+    async openNetworkSettings() {},
     async onEvent(handler) {
       listeners.push(handler);
       return () => listeners.splice(listeners.indexOf(handler), 1);

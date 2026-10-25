@@ -10,6 +10,7 @@ use data_encoding::HEXLOWER;
 use kervan_proto::bundle::{seal_with_nonce, Message, Tombstone};
 use kervan_proto::frame::{frames_for, Frame, MESHTASTIC_MTU};
 use kervan_proto::identity::Identity;
+use kervan_proto::intro::seal_introduction_with;
 use kervan_proto::pair::PairKeys;
 use kervan_proto::{day_of, DAY_SECS};
 use serde_json::{json, Value};
@@ -66,6 +67,7 @@ pub fn vectors() -> Value {
         },
         "day": day_of(CREATED_AT),
         "messages": messages,
+        "introduction": introduction(&alice, &bob),
     })
 }
 
@@ -84,4 +86,40 @@ fn identity_json(identity: &Identity, signing: [u8; 32], dh: [u8; 32]) -> Value 
 
 fn main() {
     println!("{}", serde_json::to_string_pretty(&vectors()).unwrap());
+}
+
+/// Alice writes to Bob, who does not have her card yet (§5.5).
+fn introduction(alice: &Identity, bob: &Identity) -> Value {
+    let text = "Merhaba Bob, ben Alice. Kartım bu mesajın içinde.";
+    let (ephemeral, nonce, tag) = ([0x55; 32], [0x66; 24], [0x77; 8]);
+    let expires_at = CREATED_AT + 3 * DAY_SECS;
+    let bundle = seal_introduction_with(
+        alice,
+        &bob.dh_public(),
+        text,
+        CREATED_AT,
+        expires_at,
+        8,
+        ephemeral,
+        nonce,
+        tag,
+    )
+    .unwrap();
+    let frames: Vec<String> = frames_for(&bundle, MESHTASTIC_MTU)
+        .unwrap()
+        .iter()
+        .map(|frame| HEXLOWER.encode(&frame.to_bytes()))
+        .collect();
+    json!({
+        "text": text,
+        "created_at": CREATED_AT,
+        "expires_at": expires_at,
+        "hop_limit": 8,
+        "ephemeral_secret": HEXLOWER.encode(&ephemeral),
+        "nonce": HEXLOWER.encode(&nonce),
+        "tag": HEXLOWER.encode(&tag),
+        "bundle_id": HEXLOWER.encode(&bundle.id.0),
+        "bundle": HEXLOWER.encode(&bundle.to_bytes()),
+        "meshtastic_frames": frames,
+    })
 }
