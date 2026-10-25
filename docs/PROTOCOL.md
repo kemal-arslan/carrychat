@@ -10,7 +10,7 @@
 - Store and forward: a message may take days and several kinds of link to arrive.
 - Delivery receipts that anyone carrying a copy can verify, so copies are dropped as soon as the message has arrived.
 
-Not yet: files, voice.
+Not yet: video, and files over LoRa.
 
 ## 2. Notation
 
@@ -123,6 +123,7 @@ The hop limit is left out of the associated data so relays can decrement it. Eve
 | `0x06` group | A group state (§5.7), from the group's admin. |
 | `0x07` sender key | A member's sender chain for a group (§5.7). |
 | `0x08` leave | A group id (16 bytes): the sender leaves that group (§5.7). |
+| `0x09` file | A file offer (§5.9): what a file is, and the key to its chunks. Also in groups and channels. |
 
 All other values are reserved. A receiver that opens a bundle of an unknown kind ignores the body but still emits a tombstone, so the bundle stops circulating.
 
@@ -239,7 +240,7 @@ signature  = Ed25519-Sign(sk, "kervan/v1/group-signature" || aad || header_ct ||
 ciphertext = header_ct || sealed || signature
 ```
 
-`aad` is the one of §5.1 and the plaintext that of §5.2. Version 1 sends only text (kind `0x01`) in groups. The tag changes daily and differs per chain, so carriers can tell neither which group a bundle belongs to nor which member sent it.
+`aad` is the one of §5.1 and the plaintext that of §5.2. Version 1 sends text (kind `0x01`) and files (kind `0x09`, §5.9) in groups. The tag changes daily and differs per chain, so carriers can tell neither which group a bundle belongs to nor which member sent it.
 
 **Receiving.** A member precomputes the tags of every chain it holds over the tag window (§4.1). For a bundle whose tag matches, it verifies the signature (strict Ed25519) with the chain's `pk`, decrypts the header, and takes the message key for iteration `i`: a stored skipped key, or the chain derived forward, storing the keys of the iterations it passes, at most 1000. It then decrypts and checks the tag against `day(created_at)`, the lifetime rule of §5.1 and the bundle id. Changes are kept only if every step succeeds, and each key opens one message. The bundle is accepted only if the chain belongs to someone the node currently counts as a member. A node opens the bundles it carries again when it learns a new chain or member, as it does for a new contact (§8).
 
@@ -279,11 +280,42 @@ signature  = Ed25519-Sign(sk, "kervan/v1/channel-signature" || aad || sealed)
 ciphertext = sealed || signature
 ```
 
-`aad` is the one of §5.1 and the tag is `tag(day(created_at))`. The kind is text (`0x01`, the body is UTF-8) or card (`0x04`, the body is the author's contact card, shared so readers can add them). A channel bundle lives at most a day, `expires_at ≤ created_at + 86400`, and starts with a hop limit of 4, so a busy channel does not fill the network.
+`aad` is the one of §5.1 and the tag is `tag(day(created_at))`. The kind is text (`0x01`, the body is UTF-8), card (`0x04`, the body is the author's contact card, shared so readers can add them) or file (`0x09`, an offer, §5.9). A channel bundle lives at most a day, `expires_at ≤ created_at + 86400`, and starts with a hop limit of 4, so a busy channel does not fill the network.
 
 **Receiving.** A member precomputes the tags of its channels over the tag window (§4.1). For a bundle whose tag matches, it decrypts, verifies the signature (strict Ed25519) with the `pk` inside, and checks the tag against `day(created_at)`, the channel lifetime and the bundle id. Like a group bundle it has no tombstone, and members carry it on for one another. A member may mute an author's key: it then neither shows nor passes on that author's posts. The reference implementation also refuses to send more than 10 posts a minute to one channel.
 
 **Size.** A channel bundle adds 46 (header) + 5 (plaintext header) + 33 (key and nickname length) + 16 (Poly1305 tag) + 64 (signature) = **164 bytes** plus the nickname, so with an 8-byte nickname up to **60 bytes** of text fit in one Meshtastic packet.
+
+### 5.9 Files
+
+A photo or a voice message is too large for a bundle. It travels as chunks, sealed once with a key of its own, and the key travels in an ordinary message of kind `0x09` to a contact, a group or a channel. A group or channel gets one set of chunks for all its members.
+
+**Offer.** The body of a file message is
+
+```
+u8(len(mime)) || mime || u32(size) || K_f (32) || H(file) (32)
+```
+
+`mime` is the media type, such as `image/jpeg` or `audio/mp4`, `size` the file's length, at most 1 MiB, and `K_f` 32 random bytes chosen for this file.
+
+**Chunks.** The file is cut into chunks of 4000 bytes, the last one shorter, so it has `n = ceil(size / 4000)` chunks. Chunk `i` is a bundle with the header of §5:
+
+```
+prk        = HKDF-Extract(salt = "kervan/v1/file", ikm = K_f)
+K_fenc     = HKDF-Expand(prk, "enc", 32)
+K_ftag     = HKDF-Expand(prk, "tag", 32)
+K_fack     = HKDF-Expand(prk, "ack", 32)
+tag        = HMAC(K_ftag, u32(i))[0..8]
+ack_secret = HMAC(K_fack, nonce)[0..16]
+bundle_id  = H("kervan/v0/ack" || ack_secret)[0..8]
+ciphertext = XChaCha20-Poly1305-Encrypt(K_fenc, nonce, file[4000·i .. 4000·(i+1)], aad)
+```
+
+`aad` is the one of §5.1, so the tag binds the chunk to its place. The chunks expire with the message that offers them and start with its hop limit. They travel in chunk frames (§7), which never go over LoRa: a 1 MiB file would take hours of airtime.
+
+**Receiving.** A node that opens an offer computes the tags of its chunks and takes the chunk bundles that match them, from any link and in any order, including chunks it was already carrying. Once it has all `n`, it joins them and checks the length and `H(file)`; a file that fails is dropped. In a conversation between two contacts, the recipient publishes the tombstone of every chunk it takes (§6), so carriers drop it. In a group or channel it does not, and members carry the chunks on for one another, as they do group bundles.
+
+**Carrying.** Nodes keep the chunks they carry for others under a quota of their own, separate from that of messages, so files never push out messages. Over the internet (§9.3) a node posts its chunks to each relay at a measured pace, so a photo stays within the relays' rate limits.
 
 ## 6. Tombstone
 
@@ -305,6 +337,7 @@ Transports move frames. A transport whose MTU fits a whole bundle (local network
 | `0x01` bundle | `type \|\| bundle` |
 | `0x02` fragment | `type \|\| bundle_id (8) \|\| index (1) \|\| count (1) \|\| chunk` |
 | `0x03` tombstone | `type \|\| hop_limit (1) \|\| bundle_id (8) \|\| ack_secret (16)`, 26 bytes |
+| `0x04` chunk | `type \|\| bundle`, a file chunk (§5.9). Never sent over LoRa. |
 
 If `1 + len(bundle) > mtu`, the bundle bytes are split into chunks of `mtu − 11` bytes, from 2 to 32 of them. Receivers reassemble by bundle id with a timeout (10 minutes by default) and a cap on the number of incomplete bundles, then check that the reassembled bundle carries the same id as its fragments. Relays reassemble before forwarding, because they need the hop limit and the expiry.
 
@@ -428,6 +461,7 @@ Implemented in `crates/kervan-node/src/file.rs`, with the extension `.kervan`. A
 | Channel bundle overhead | 164 bytes plus the nickname |
 | Channel bundle lifetime | 86400 s (1 day) at most, hop limit 4 |
 | Longest channel name and nickname | 32 and 20 bytes |
+| Longest file | 1048576 bytes (1 MiB), in chunks of 4000 bytes |
 | Default lifetime | 259200 s (3 days) |
 | Longest lifetime | 604800 s (7 days) |
 | Default hop limit | 8 |

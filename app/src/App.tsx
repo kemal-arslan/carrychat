@@ -3,6 +3,7 @@ import {
   api,
   type Channel,
   type Contact,
+  type FileView,
   type Group,
   type GroupMessage,
   type Member,
@@ -214,6 +215,13 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
         } else if (event.type === "groupChanged") {
           refreshGroups();
           refreshContacts();
+        } else if (event.type === "fileChanged") {
+          const { file } = event;
+          const update = <T extends { file: FileView | null }>(items: T[]) =>
+            items.map((item) => (item.file?.id === file.id ? { ...item, file } : item));
+          setMessages(update);
+          setGroupMessages(update);
+          setPosts(update);
         } else if (event.type === "postReceived") {
           const { post } = event;
           const open = post.channelId === selectedChannelRef.current;
@@ -234,6 +242,24 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
   const contact = contacts.find((candidate) => candidate.id === selected) ?? null;
   const group = groups.find((candidate) => candidate.id === selectedGroup) ?? null;
   const channel = channels.find((candidate) => candidate.id === selectedChannel) ?? null;
+
+  /** Sends a photo or voice message to whatever is open. */
+  async function sendFile(mime: string, bytes: Uint8Array) {
+    if (channel) {
+      const post = (await api.sendFile({ kind: "channel", id: channel.id }, mime, bytes)) as Post;
+      setPosts((current) => [...current, post]);
+      refreshChannels();
+    } else if (group) {
+      const message = (await api.sendFile({ kind: "group", id: group.id }, mime, bytes)) as GroupMessage;
+      setGroupMessages((current) => [...current, message]);
+      refreshGroups();
+    } else if (contact) {
+      const message = (await api.sendFile({ kind: "contact", id: contact.id }, mime, bytes)) as Message;
+      setMessages((current) => [...current, message]);
+      refreshContacts();
+    }
+    refreshStatus();
+  }
 
   async function sendToChannel(text: string) {
     if (!channel) return;
@@ -372,7 +398,7 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
         </span>
         <span className="who">
           <span className="name">{item.name}</span>
-          <span className="preview">{item.lastMessage ?? t.noMessagesYet}</span>
+          <span className="preview">{item.lastMessage === null ? t.noMessagesYet : item.lastMessage || t.file}</span>
         </span>
         <span className="meta">
           {item.lastAt !== null && <time>{shortTime(item.lastAt, language)}</time>}
@@ -394,7 +420,9 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
         </span>
         <span className="who">
           <span className="name">{item.name}</span>
-          <span className="preview">{item.lastMessage ?? t.membersCount(item.members.length)}</span>
+          <span className="preview">
+            {item.lastMessage === null ? t.membersCount(item.members.length) : item.lastMessage || t.file}
+          </span>
         </span>
         <span className="meta">
           {item.lastAt !== null && <time>{shortTime(item.lastAt, language)}</time>}
@@ -416,7 +444,7 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
         </span>
         <span className="who">
           <span className="name">{item.name}</span>
-          <span className="preview">{item.lastMessage ?? t.postingAs(item.nick)}</span>
+          <span className="preview">{item.lastMessage === null ? t.postingAs(item.nick) : item.lastMessage || t.file}</span>
         </span>
         <span className="meta">
           {item.lastAt !== null && <time>{shortTime(item.lastAt, language)}</time>}
@@ -491,14 +519,28 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
             channel={channel}
             posts={posts}
             onSend={sendToChannel}
+            onSendFile={sendFile}
             onSettings={() => setDialog("channelSettings")}
             onMute={mute}
             onAddCard={addSharedCard}
           />
         ) : group ? (
-          <GroupChat group={group} messages={groupMessages} onSend={sendToGroup} onMembers={() => setDialog("members")} />
+          <GroupChat
+            group={group}
+            messages={groupMessages}
+            onSend={sendToGroup}
+            onSendFile={sendFile}
+            onMembers={() => setDialog("members")}
+          />
         ) : contact ? (
-          <Chat contact={contact} messages={messages} onSend={send} onAccept={accept} onDecline={decline} />
+          <Chat
+            contact={contact}
+            messages={messages}
+            onSend={send}
+            onSendFile={sendFile}
+            onAccept={accept}
+            onDecline={decline}
+          />
         ) : (
           <div className="placeholder">
             <Logo size={56} />

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Channel, Post } from "./api";
 import { Composer } from "./Composer";
+import { FileBubble } from "./FileBubble";
 import { CHANNEL_OVERHEAD, fullTime, shortTime, utf8Length } from "./format";
 import { useI18n } from "./i18n";
 
@@ -8,12 +9,13 @@ type Props = {
   channel: Channel;
   posts: Post[];
   onSend: (text: string) => Promise<void>;
+  onSendFile: (mime: string, bytes: Uint8Array) => Promise<void>;
   onSettings: () => void;
   onMute: (post: Post) => void;
   onAddCard: (card: string) => void;
 };
 
-export function ChannelChat({ channel, posts, onSend, onSettings, onMute, onAddCard }: Props) {
+export function ChannelChat({ channel, posts, onSend, onSendFile, onSettings, onMute, onAddCard }: Props) {
   const { t, language } = useI18n();
   const list = useRef<HTMLOListElement>(null);
 
@@ -51,7 +53,10 @@ export function ChannelChat({ channel, posts, onSend, onSettings, onMute, onAddC
                 )}
               </div>
             ) : (
-              <p>{post.body}</p>
+              <>
+                {post.file && <FileBubble file={post.file} />}
+                {post.body && <p>{post.body}</p>}
+              </>
             )}
             <footer>
               <time title={fullTime(post.createdAt, language)}>{shortTime(post.createdAt, language)}</time>
@@ -70,6 +75,7 @@ export function ChannelChat({ channel, posts, onSend, onSettings, onMute, onAddC
         overhead={CHANNEL_OVERHEAD + utf8Length(channel.nick)}
         conversation={`channel-${channel.id}`}
         onSend={onSend}
+        onSendFile={onSendFile}
       />
     </section>
   );

@@ -23,7 +23,7 @@ fn alice_and_bob() -> (Engine, Engine, i64) {
 
 fn hop_limit(frame: &Frame) -> u8 {
     match frame {
-        Frame::Bundle(bundle) => bundle.hop_limit,
+        Frame::Bundle(bundle) | Frame::Chunk(bundle) => bundle.hop_limit,
         Frame::Tombstone { hop_limit, .. } => *hop_limit,
         Frame::Fragment(_) => panic!("unexpected fragment"),
     }

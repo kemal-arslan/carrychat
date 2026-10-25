@@ -5,6 +5,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+use data_encoding::BASE64;
 use kervan_node::{
     ChannelView, ContactView, GroupMessageView, GroupView, ImportReport, InternetConfig, LanConfig,
     MessageView, MutedView, Node, PostView, Profile, Settings, Status,
@@ -299,6 +300,59 @@ fn mark_channel_read(state: State<'_, AppState>, channel_id: i64) -> CommandResu
     state.node()?.mark_channel_read(channel_id).map_err(text)
 }
 
+/// Where a file goes: a contact, a group or a channel.
+#[derive(serde::Deserialize)]
+#[serde(tag = "kind", content = "id", rename_all = "camelCase")]
+enum FileTarget {
+    Contact(i64),
+    Group(i64),
+    Channel(i64),
+}
+
+/// Sends a file, given in base64. Returns the message, group message or
+/// post that offers it.
+#[tauri::command]
+fn send_file(
+    state: State<'_, AppState>,
+    target: FileTarget,
+    mime: String,
+    data: String,
+) -> CommandResult<serde_json::Value> {
+    let data = BASE64.decode(data.as_bytes()).map_err(text)?;
+    let node = state.node()?;
+    let sent = match target {
+        FileTarget::Contact(id) => {
+            serde_json::to_value(node.send_file(id, &mime, &data).map_err(text)?)
+        }
+        FileTarget::Group(id) => {
+            serde_json::to_value(node.send_group_file(id, &mime, &data).map_err(text)?)
+        }
+        FileTarget::Channel(id) => {
+            serde_json::to_value(node.send_channel_file(id, &mime, &data).map_err(text)?)
+        }
+    };
+    sent.map_err(text)
+}
+
+/// A file that arrived, in base64, or `None` while parts are missing.
+#[tauri::command]
+fn file_data(state: State<'_, AppState>, file_id: i64) -> CommandResult<Option<FileData>> {
+    Ok(state
+        .node()?
+        .file_data(file_id)
+        .map_err(text)?
+        .map(|(mime, data)| FileData {
+            mime,
+            data: BASE64.encode(&data),
+        }))
+}
+
+#[derive(serde::Serialize)]
+struct FileData {
+    mime: String,
+    data: String,
+}
+
 #[tauri::command]
 fn status(state: State<'_, AppState>) -> CommandResult<Status> {
     state.node()?.status().map_err(text)
@@ -391,6 +445,8 @@ pub fn run() {
             unmute_author,
             muted_authors,
             mark_channel_read,
+            send_file,
+            file_data,
             status,
             export_file,
             import_file,

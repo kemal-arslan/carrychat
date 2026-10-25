@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Group, GroupMessage } from "./api";
 import { Composer } from "./Composer";
+import { FileBubble } from "./FileBubble";
 import { GROUP_OVERHEAD, fullTime, shortTime } from "./format";
 import { useI18n } from "./i18n";
 
@@ -8,10 +9,11 @@ type Props = {
   group: Group;
   messages: GroupMessage[];
   onSend: (text: string) => Promise<void>;
+  onSendFile: (mime: string, bytes: Uint8Array) => Promise<void>;
   onMembers: () => void;
 };
 
-export function GroupChat({ group, messages, onSend, onMembers }: Props) {
+export function GroupChat({ group, messages, onSend, onSendFile, onMembers }: Props) {
   const { t, language } = useI18n();
   const list = useRef<HTMLOListElement>(null);
 
@@ -36,7 +38,8 @@ export function GroupChat({ group, messages, onSend, onMembers }: Props) {
         {messages.map((message) => (
           <li key={message.id} className={message.outgoing ? "bubble outgoing" : "bubble incoming"}>
             {message.sender && <span className="sender">{message.sender}</span>}
-            <p>{message.body}</p>
+            {message.file && <FileBubble file={message.file} />}
+            {message.body && <p>{message.body}</p>}
             <footer>
               <time title={fullTime(message.createdAt, language)}>{shortTime(message.createdAt, language)}</time>
             </footer>
@@ -50,6 +53,7 @@ export function GroupChat({ group, messages, onSend, onMembers }: Props) {
           overhead={GROUP_OVERHEAD}
           conversation={`group-${group.id}`}
           onSend={onSend}
+          onSendFile={onSendFile}
         />
       ) : (
         <div className="request-bar">

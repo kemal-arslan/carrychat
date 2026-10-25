@@ -2286,8 +2286,10 @@ dependencies = [
 name = "kervan-app"
 version = "0.0.1"
 dependencies = [
+ "data-encoding",
  "kervan-node",
  "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

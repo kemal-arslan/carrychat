@@ -78,7 +78,22 @@ export type Post = {
   sharedCard: SharedCard | null;
   createdAt: number;
   read: boolean;
+  file: FileView | null;
 };
+
+/** A photo or voice message offered in a message, and how much of it is here. */
+export type FileView = {
+  id: number;
+  mime: string;
+  size: number;
+  chunks: number;
+  received: number;
+  ready: boolean;
+  /** After this, missing parts will not come any more. */
+  expiresAt: number;
+};
+
+export type FileTarget = { kind: "contact" | "group" | "channel"; id: number };
 
 export type GroupMessage = {
   id: number;
@@ -89,6 +104,7 @@ export type GroupMessage = {
   body: string;
   createdAt: number;
   read: boolean;
+  file: FileView | null;
 };
 
 export type Message = {
@@ -100,6 +116,7 @@ export type Message = {
   delivered: boolean;
   /** Outgoing: they read it. Incoming: we read it. */
   read: boolean;
+  file: FileView | null;
 };
 
 export type Settings = { readReceipts: boolean };
@@ -137,7 +154,8 @@ export type NodeEvent =
   | { type: "internetChanged"; relays: number }
   | { type: "groupMessageReceived"; message: GroupMessage }
   | { type: "groupChanged"; group: Group }
-  | { type: "postReceived"; post: Post };
+  | { type: "postReceived"; post: Post }
+  | { type: "fileChanged"; file: FileView };
 
 export interface Api {
   /** Whether this is the browser preview with sample data. */
@@ -171,6 +189,10 @@ export interface Api {
   unmuteAuthor(channelId: number, author: string): Promise<void>;
   mutedAuthors(channelId: number): Promise<Muted[]>;
   markChannelRead(channelId: number): Promise<void>;
+  /** Sends a photo or voice message; returns the message that offers it. */
+  sendFile(target: FileTarget, mime: string, bytes: Uint8Array): Promise<Message | GroupMessage | Post>;
+  /** An object URL for a file that is all here, or null. */
+  fileUrl(fileId: number): Promise<string | null>;
   settings(): Promise<Settings>;
   setReadReceipts(on: boolean): Promise<void>;
   status(): Promise<Status>;
@@ -190,6 +212,24 @@ export interface Api {
 }
 
 const FILE_FILTERS = [{ name: "Kervan", extensions: ["kervan"] }];
+
+/** Object URLs of files that arrived, made once each. */
+const fileUrls = new Map<number, string>();
+
+function toBase64(bytes: Uint8Array): string {
+  let text = "";
+  for (let start = 0; start < bytes.length; start += 0x8000) {
+    text += String.fromCharCode(...bytes.subarray(start, start + 0x8000));
+  }
+  return btoa(text);
+}
+
+function fromBase64(text: string): Uint8Array<ArrayBuffer> {
+  const raw = atob(text);
+  const bytes = new Uint8Array(raw.length);
+  for (let index = 0; index < raw.length; index++) bytes[index] = raw.charCodeAt(index);
+  return bytes;
+}
 
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   try {
@@ -231,6 +271,16 @@ function desktopApi(): Api {
     unmuteAuthor: (channelId, author) => call("unmute_author", { channelId, author }),
     mutedAuthors: (channelId) => call("muted_authors", { channelId }),
     markChannelRead: (channelId) => call("mark_channel_read", { channelId }),
+    sendFile: (target, mime, bytes) => call("send_file", { target, mime, data: toBase64(bytes) }),
+    async fileUrl(fileId) {
+      const cached = fileUrls.get(fileId);
+      if (cached) return cached;
+      const file = await call<{ mime: string; data: string } | null>("file_data", { fileId });
+      if (!file) return null;
+      const url = URL.createObjectURL(new Blob([fromBase64(file.data)], { type: file.mime }));
+      fileUrls.set(fileId, url);
+      return url;
+    },
     settings: () => call("settings"),
     setReadReceipts: (on) => call("set_read_receipts", { on }),
     status: () => call("status"),
@@ -287,6 +337,7 @@ function previewApi(): Api {
     createdAt: now() - ago,
     delivered: outgoing && done,
     read: done,
+    file: null,
   });
   const messages: Message[] = [
     message(1, 1, false, "Elektrik geldi mi sizde?", 5400),
@@ -330,12 +381,22 @@ function previewApi(): Api {
     body,
     createdAt: now() - ago,
     read: true,
+    file: null,
   });
   const groupMessages: GroupMessage[] = [
     groupMessage(101, "Kerem", "Okulun önünde su dağıtımı var, saat 10'da.", 7200),
     groupMessage(102, null, "Teşekkürler, Deniz'le birlikte geliriz.", 7000),
     { ...groupMessage(103, "Ayşe", "Bizim sokakta elektrik geldi.", 900), read: false },
+    { ...groupMessage(104, "Kerem", "", 700), file: sampleFile(901, 40, 40) },
+    { ...groupMessage(105, "Deniz", "", 120), read: false, file: sampleFile(902, 40, 12) },
   ];
+  function sampleFile(id: number, chunks: number, received: number): FileView {
+    if (received === chunks) {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="420"><rect width="640" height="420" fill="#c97c14"/><circle cx="470" cy="120" r="60" fill="#f6e3c4"/><path d="M0 420 L210 190 L330 320 L430 230 L640 420 Z" fill="#1e3440"/></svg>`;
+      fileUrls.set(id, URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" })));
+    }
+    return { id, mime: "image/jpeg", size: 160_000, chunks, received, ready: received === chunks, expiresAt: now() + 86400 };
+  }
   const summarizeGroups = () =>
     groups.map((group) => {
       const own = groupMessages.filter((message) => message.groupId === group.id);
@@ -368,6 +429,7 @@ function previewApi(): Api {
     sharedCard: null,
     createdAt: now() - ago,
     read: true,
+    file: null,
   });
   const posts: Post[] = [
     post(201, "gönüllü", "q4m27hxa", "Moda'da çadır alanı kuruldu, battaniye lazım.", 5400),
@@ -570,6 +632,37 @@ function previewApi(): Api {
     },
     async mutedAuthors(channelId) {
       return muted.filter((entry) => entry.channelId === channelId).map(({ author, nick }) => ({ author, nick }));
+    },
+    async sendFile(target, mime, bytes) {
+      const id = nextId++;
+      const url = URL.createObjectURL(new Blob([bytes.slice()], { type: mime }));
+      fileUrls.set(id, url);
+      const file: FileView = {
+        id,
+        mime,
+        size: bytes.length,
+        chunks: Math.ceil(bytes.length / 4000),
+        received: Math.ceil(bytes.length / 4000),
+        ready: true,
+        expiresAt: now() + 3 * 86400,
+      };
+      if (target.kind === "contact") {
+        const sent = { ...message(nextId++, target.id, true, "", 0, false), file };
+        messages.push(sent);
+        return sent;
+      }
+      if (target.kind === "group") {
+        const sent = { ...groupMessage(nextId++, null, "", 0), groupId: target.id, file };
+        groupMessages.push(sent);
+        return sent;
+      }
+      const channel = channels.find((candidate) => candidate.id === target.id)!;
+      const sent = { ...post(nextId++, null, "b3oiuvmj", "", 0), channelId: target.id, nick: channel.nick, file };
+      posts.push(sent);
+      return sent;
+    },
+    async fileUrl(fileId) {
+      return fileUrls.get(fileId) ?? null;
     },
     async markChannelRead(channelId) {
       posts.filter((candidate) => candidate.channelId === channelId).forEach((candidate) => {

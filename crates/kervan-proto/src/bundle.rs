@@ -27,6 +27,7 @@ const KIND_SESSION: u8 = 0x05;
 const KIND_GROUP: u8 = 0x06;
 const KIND_SENDER_KEY: u8 = 0x07;
 const KIND_LEAVE: u8 = 0x08;
+const KIND_FILE: u8 = 0x09;
 /// Bundle ids in one read receipt, at most.
 pub const MAX_READ_IDS: usize = 64;
 
@@ -62,8 +63,9 @@ impl Bundle {
     }
 
     /// Parses the bundle structure. Only the recipient can check the rest.
+    /// The last chunk of a file (§5.9) may hold a single byte.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        if bytes.len() < HEADER_LEN + MESSAGE_HEADER_LEN + AEAD_TAG_LEN {
+        if bytes.len() < HEADER_LEN + 1 + AEAD_TAG_LEN {
             return Err(Error::Truncated);
         }
         if bytes.len() > MAX_BUNDLE_LEN {
@@ -113,6 +115,8 @@ pub enum Kind {
     SenderKey,
     /// The sender leaves a group (§5.7).
     Leave,
+    /// A file offer: the chunks' key and what they make up (§5.9).
+    File,
     /// A kind this version does not know. The body is kept but not shown.
     Unknown(u8),
 }
@@ -127,6 +131,7 @@ impl Kind {
             Kind::Group => KIND_GROUP,
             Kind::SenderKey => KIND_SENDER_KEY,
             Kind::Leave => KIND_LEAVE,
+            Kind::File => KIND_FILE,
             Kind::Unknown(byte) => byte,
         }
     }
@@ -140,6 +145,7 @@ impl Kind {
             KIND_GROUP => Kind::Group,
             KIND_SENDER_KEY => Kind::SenderKey,
             KIND_LEAVE => Kind::Leave,
+            KIND_FILE => Kind::File,
             other => Kind::Unknown(other),
         }
     }

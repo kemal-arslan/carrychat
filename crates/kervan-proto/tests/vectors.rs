@@ -61,7 +61,7 @@ fn bob_opens_the_stored_bundles() {
                 Frame::Fragment(fragment) => {
                     received = reassembler.push(fragment, 0).unwrap().or(received)
                 }
-                Frame::Tombstone { .. } => panic!("unexpected tombstone"),
+                Frame::Tombstone { .. } | Frame::Chunk(_) => panic!("unexpected frame"),
             }
         }
         assert_eq!(received, Some(bundle));

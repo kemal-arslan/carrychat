@@ -11,7 +11,7 @@ use kervan_proto::ratchet::Session;
 use rand_core::OsRng;
 
 use super::{forwarded, Contact, Engine, Handled, Outcome};
-use crate::store::{StoredGroup, StoredGroupMessage};
+use crate::store::{FileTable, StoredGroup, StoredGroupMessage};
 use crate::{Error, Event, GroupMessageView, GroupView, MemberView, Result};
 
 impl Engine {
@@ -25,12 +25,11 @@ impl Engine {
 
     pub fn group_messages(&self, group_id: i64) -> Result<Vec<GroupMessageView>> {
         let group = self.stored_group(group_id)?;
-        Ok(self
-            .store
+        self.store
             .group_messages(group.id)?
             .into_iter()
             .map(|message| self.group_message_view(&group, message))
-            .collect())
+            .collect()
     }
 
     /// Creates a group with us as its admin. The members get its state and
@@ -137,6 +136,17 @@ impl Engine {
         if text.is_empty() {
             return Err(Error::Invalid("message is empty"));
         }
+        self.send_group_message(group_id, &Message::text(text, now), text, now)
+    }
+
+    /// Seals a message on our chain and records it with `body` to show.
+    pub(super) fn send_group_message(
+        &mut self,
+        group_id: i64,
+        message: &Message,
+        body: &str,
+        now: u32,
+    ) -> Result<(GroupMessageView, Frame)> {
         let group = self.stored_group(group_id)?;
         if !group.member {
             return Err(Error::Invalid("you are no longer in this group"));
@@ -146,7 +156,7 @@ impl Engine {
             .own_chain(&group.group_id)?
             .ok_or(Error::Invalid("no sender chain for this group"))?;
         let bundle = chain.seal(
-            &Message::text(text, now),
+            message,
             now + DEFAULT_TTL_SECS,
             DEFAULT_HOP_LIMIT,
             &mut OsRng,
@@ -155,16 +165,17 @@ impl Engine {
         self.store.insert_bundle(&bundle, true, now)?;
         let id = self
             .store
-            .insert_group_message(group.id, None, bundle.id, text, now, None)?
+            .insert_group_message(group.id, None, bundle.id, body, now, None)?
             .ok_or(Error::Invalid("message already exists"))?;
         let message = GroupMessageView {
             id,
             group_id: group.id,
             outgoing: true,
             sender: None,
-            body: text.to_owned(),
+            body: body.to_owned(),
             created_at: now,
             read: true,
+            file: None,
         };
         let frame = forwarded(&bundle).expect("a new bundle has hops left");
         Ok((message, frame))
@@ -304,8 +315,24 @@ impl Engine {
             .store_group_skipped_keys(chain_id, &opened.skipped, now)?;
 
         let mut events = Vec::new();
-        if opened.message.kind == Kind::Text {
-            let body = String::from_utf8_lossy(&opened.message.body).into_owned();
+        let mut reopened = Vec::new();
+        let (body, file) = match opened.message.kind {
+            Kind::Text => (
+                Some(String::from_utf8_lossy(&opened.message.body).into_owned()),
+                None,
+            ),
+            Kind::File => {
+                match self.take_offer(&opened.message.body, false, bundle.expires_at, now)? {
+                    Some((file, taken)) => {
+                        reopened = taken;
+                        (Some(String::new()), Some(file))
+                    }
+                    None => (None, None),
+                }
+            }
+            _ => (None, None),
+        };
+        if let Some(body) = body {
             if let Some(id) = self.store.insert_group_message(
                 group.id,
                 Some(&sender),
@@ -314,6 +341,9 @@ impl Engine {
                 opened.message.created_at,
                 Some(now),
             )? {
+                if let Some(file) = file {
+                    self.store.attach_file(FileTable::GroupMessages, id, file)?;
+                }
                 events.push(Event::GroupMessageReceived {
                     message: GroupMessageView {
                         id,
@@ -323,9 +353,16 @@ impl Engine {
                         body,
                         created_at: opened.message.created_at,
                         read: false,
+                        file: match file {
+                            Some(file) => self.file_view(file)?,
+                            None => None,
+                        },
                     },
                 });
             }
+        }
+        for taken in reopened {
+            events.extend(taken.events);
         }
         // Members carry a group bundle on for one another (§5.7).
         let relay = if carried {
@@ -570,8 +607,8 @@ impl Engine {
         &self,
         group: &StoredGroup,
         message: StoredGroupMessage,
-    ) -> GroupMessageView {
-        GroupMessageView {
+    ) -> Result<GroupMessageView> {
+        Ok(GroupMessageView {
             id: message.id,
             group_id: group.id,
             outgoing: message.sender.is_none(),
@@ -579,7 +616,8 @@ impl Engine {
             body: message.body,
             created_at: message.created_at,
             read: message.read,
-        }
+            file: self.attached(FileTable::GroupMessages, message.id)?,
+        })
     }
 
     /// A member's name: ours, as we know them as a contact, or as the

@@ -42,6 +42,9 @@ const MAX_RETRY: Duration = Duration::from_secs(60);
 /// How long a relay has to answer after a message is sent before the
 /// connection is taken as dead.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+/// Time between two file chunks sent to one relay, so a photo does not run
+/// into the relay's rate limit.
+const CHUNK_GAP: Duration = Duration::from_millis(60);
 
 #[derive(Clone, Debug)]
 pub struct InternetConfig {
@@ -67,6 +70,8 @@ impl Default for InternetConfig {
 pub(crate) struct Internet {
     /// Messages for every connected relay.
     outgoing: broadcast::Sender<String>,
+    /// File chunks to post, which each connection sends at a measured pace.
+    chunks: broadcast::Sender<String>,
     /// Bumped when the subscription should be renewed.
     renew: watch::Sender<u64>,
     /// Bumped to make every connection prove it is alive.
@@ -81,6 +86,7 @@ impl Internet {
     pub(crate) fn new() -> Self {
         Self {
             outgoing: broadcast::channel(1024).0,
+            chunks: broadcast::channel(8192).0,
             renew: watch::channel(0).0,
             probe: watch::channel(0).0,
             connected: AtomicUsize::new(0),
@@ -111,18 +117,19 @@ impl Internet {
         self.probe.send_modify(|count| *count += 1);
     }
 
-    /// Posts a bundle frame under `tag` to every connected relay.
+    /// Posts a bundle or chunk frame under `tag` to every connected relay.
     pub(crate) fn post_bundle(&self, frame: &Frame, tag: &RecipientTag) {
-        let (Some(secret), Frame::Bundle(bundle)) = (self.secret.get(), frame) else {
+        let Some(secret) = self.secret.get() else {
             return;
         };
-        let event = signed_event(
-            secret,
-            bundle.expires_at.saturating_sub(MAX_TTL_SECS),
-            vec![vec!["x".to_owned(), HEXLOWER.encode(tag)]],
-            BASE64URL_NOPAD.encode(&frame.to_bytes()),
-        );
-        let _ = self.outgoing.send(json!(["EVENT", event]).to_string());
+        let Some(event) = bundle_event(secret, frame, tag) else {
+            return;
+        };
+        let queue = match frame {
+            Frame::Chunk(_) => &self.chunks,
+            _ => &self.outgoing,
+        };
+        let _ = queue.send(event);
     }
 
     pub(crate) fn post_tombstone(&self, frame: &Frame) {
@@ -145,7 +152,9 @@ impl Internet {
         for frame in &handled.relay {
             match (handled.outcome, frame) {
                 (Outcome::Received, Frame::Tombstone { .. }) => self.post_tombstone(frame),
-                (Outcome::Carried, Frame::Bundle(bundle)) => self.post_bundle(frame, &bundle.tag),
+                (Outcome::Carried, Frame::Bundle(bundle) | Frame::Chunk(bundle)) => {
+                    self.post_bundle(frame, &bundle.tag)
+                }
                 _ => {}
             }
         }
@@ -161,6 +170,20 @@ pub(crate) fn start(shared: &Arc<Shared>, config: InternetConfig) -> Result<()> 
         tokio::spawn(relay_loop(Arc::downgrade(shared), relay, config.keepalive));
     }
     Ok(())
+}
+
+/// The `EVENT` message that posts a bundle or chunk frame under `tag`.
+fn bundle_event(secret: &[u8; 32], frame: &Frame, tag: &RecipientTag) -> Option<String> {
+    let (Frame::Bundle(bundle) | Frame::Chunk(bundle)) = frame else {
+        return None;
+    };
+    let event = signed_event(
+        secret,
+        bundle.expires_at.saturating_sub(MAX_TTL_SECS),
+        vec![vec!["x".to_owned(), HEXLOWER.encode(tag)]],
+        BASE64URL_NOPAD.encode(&frame.to_bytes()),
+    );
+    Some(json!(["EVENT", event]).to_string())
 }
 
 /// A Nostr event (NIP-01) signed with a one-time key derived from `secret`
@@ -204,13 +227,16 @@ pub fn signed_event(
 async fn relay_loop(shared: Weak<Shared>, url: String, keepalive: Duration) {
     let mut retry = FIRST_RETRY;
     loop {
-        let Some((mut outgoing, mut renew, mut probe)) = shared.upgrade().map(|shared| {
-            (
-                shared.internet.outgoing.subscribe(),
-                shared.internet.renew.subscribe(),
-                shared.internet.probe.subscribe(),
-            )
-        }) else {
+        let Some((mut outgoing, mut chunks, mut renew, mut probe)) =
+            shared.upgrade().map(|shared| {
+                (
+                    shared.internet.outgoing.subscribe(),
+                    shared.internet.chunks.subscribe(),
+                    shared.internet.renew.subscribe(),
+                    shared.internet.probe.subscribe(),
+                )
+            })
+        else {
             return;
         };
         let connected = tokio::time::timeout(
@@ -224,6 +250,7 @@ async fn relay_loop(shared: Weak<Shared>, url: String, keepalive: Duration) {
                 &shared,
                 socket,
                 &mut outgoing,
+                &mut chunks,
                 &mut renew,
                 &mut probe,
                 keepalive,
@@ -239,6 +266,7 @@ async fn run_relay<S>(
     shared: &Weak<Shared>,
     socket: S,
     outgoing: &mut broadcast::Receiver<String>,
+    chunks: &mut broadcast::Receiver<String>,
     renew: &mut watch::Receiver<u64>,
     probe: &mut watch::Receiver<u64>,
     keepalive: Duration,
@@ -248,7 +276,7 @@ async fn run_relay<S>(
         + Unpin,
 {
     let (mut sink, mut stream) = socket.split();
-    let Some(greeting) = with(shared, |shared| {
+    let Some((greeting, own_chunks)) = with(shared, |shared| {
         shared.internet.connected.fetch_add(1, Ordering::Relaxed);
         shared.emit(Event::InternetChanged {
             relays: shared.internet.connected(),
@@ -265,6 +293,10 @@ async fn run_relay<S>(
             break;
         }
     }
+    // Chunks wait their turn here, one sent every CHUNK_GAP.
+    let mut pending: std::collections::VecDeque<String> = own_chunks.into();
+    let mut pace = tokio::time::interval(CHUNK_GAP);
+    pace.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut ping = tokio::time::interval(keepalive);
     let mut last_heard = Instant::now();
     // A probe asked for before or during the greeting still counts.
@@ -291,6 +323,16 @@ async fn run_relay<S>(
                 Err(broadcast::error::RecvError::Lagged(_)) => None,
                 Err(broadcast::error::RecvError::Closed) => break,
             },
+            chunk = chunks.recv() => match chunk {
+                Ok(chunk) => {
+                    pending.push_back(chunk);
+                    None
+                }
+                // Missed chunks go out again on the next connection.
+                Err(broadcast::error::RecvError::Lagged(_)) => None,
+                Err(broadcast::error::RecvError::Closed) => break,
+            },
+            _ = pace.tick(), if !pending.is_empty() => pending.pop_front().map(Message::text),
             changed = renew.changed() => match changed {
                 Ok(()) => with(shared, subscription).flatten().map(Message::text),
                 Err(_) => break,
@@ -330,23 +372,22 @@ async fn run_relay<S>(
 }
 
 /// What a node sends a relay it just reached: its subscription, its own
-/// bundles still waiting for a receipt, and recent receipts it gave.
-fn greeting(shared: &Shared) -> Vec<String> {
+/// bundles still waiting for a receipt, and recent receipts it gave. Its own
+/// file chunks come apart, to be sent at a measured pace.
+fn greeting(shared: &Shared) -> (Vec<String>, Vec<String>) {
     let mut messages: Vec<String> = subscription(shared).into_iter().collect();
+    let mut chunks = Vec::new();
     let engine = shared.engine();
     let secret = shared.internet.secret.get().copied();
     let Some(secret) = secret else {
-        return messages;
+        return (messages, chunks);
     };
     for (frame, tag) in engine.outbox(now()).unwrap_or_default() {
-        if let Frame::Bundle(bundle) = &frame {
-            let event = signed_event(
-                &secret,
-                bundle.expires_at.saturating_sub(MAX_TTL_SECS),
-                vec![vec!["x".to_owned(), HEXLOWER.encode(&tag)]],
-                BASE64URL_NOPAD.encode(&frame.to_bytes()),
-            );
-            messages.push(json!(["EVENT", event]).to_string());
+        if let Some(event) = bundle_event(&secret, &frame, &tag) {
+            match frame {
+                Frame::Chunk(_) => chunks.push(event),
+                _ => messages.push(event),
+            }
         }
     }
     for frame in engine.received_tombstones().unwrap_or_default() {
@@ -360,7 +401,7 @@ fn greeting(shared: &Shared) -> Vec<String> {
             messages.push(json!(["EVENT", event]).to_string());
         }
     }
-    messages
+    (messages, chunks)
 }
 
 fn subscription(shared: &Shared) -> Option<String> {

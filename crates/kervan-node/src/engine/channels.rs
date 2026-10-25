@@ -10,8 +10,8 @@ use kervan_proto::identity::ContactCard;
 use rand_core::OsRng;
 
 use super::{forwarded, Engine, Handled, Outcome};
-use crate::store::{StoredChannel, StoredPost};
-use crate::{ChannelView, Error, Event, MutedView, PostView, Result, SharedCardView};
+use crate::store::{FileTable, StoredChannel, StoredPost};
+use crate::{ChannelView, Error, Event, FileView, MutedView, PostView, Result, SharedCardView};
 
 /// Posts we send to one channel in a minute, at most.
 const MAX_POSTS_PER_MINUTE: usize = 10;
@@ -62,12 +62,14 @@ impl Engine {
 
     pub fn posts(&self, channel_id: i64) -> Result<Vec<PostView>> {
         let channel = self.stored_channel(channel_id)?;
-        Ok(self
-            .store
+        self.store
             .posts(channel.id)?
             .into_iter()
-            .map(|post| post_view(channel.id, post))
-            .collect())
+            .map(|post| {
+                let file = self.attached(FileTable::Posts, post.id)?;
+                Ok(post_view(channel.id, post, file))
+            })
+            .collect()
     }
 
     pub fn send_post(
@@ -160,11 +162,22 @@ impl Engine {
 
         let mut events = Vec::new();
         let card = post.message.kind == Kind::Card;
+        let mut file = None;
         let body = match post.message.kind {
             Kind::Text => Some(String::from_utf8_lossy(&post.message.body).into_owned()),
             Kind::Card => ContactCard::from_bytes(&post.message.body)
                 .ok()
                 .map(|card| card.to_text()),
+            Kind::File => {
+                match self.take_offer(&post.message.body, false, bundle.expires_at, now)? {
+                    Some((taken, opened)) => {
+                        file = Some(taken);
+                        events.extend(opened.into_iter().flat_map(|handled| handled.events));
+                        Some(String::new())
+                    }
+                    None => None,
+                }
+            }
             _ => None,
         };
         if let Some(body) = body {
@@ -189,8 +202,15 @@ impl Engine {
                 stored.created_at,
                 Some(now),
             )? {
+                let view = match file {
+                    Some(file) => {
+                        self.store.attach_file(FileTable::Posts, id, file)?;
+                        self.file_view(file)?
+                    }
+                    None => None,
+                };
                 events.push(Event::PostReceived {
-                    post: post_view(channel.id, StoredPost { id, ..stored }),
+                    post: post_view(channel.id, StoredPost { id, ..stored }, view),
                 });
             }
         }
@@ -224,7 +244,12 @@ impl Engine {
         Ok(opened)
     }
 
-    fn post(&mut self, channel_id: i64, message: Message, now: u32) -> Result<(PostView, Frame)> {
+    pub(super) fn post(
+        &mut self,
+        channel_id: i64,
+        message: Message,
+        now: u32,
+    ) -> Result<(PostView, Frame)> {
         let channel = self.stored_channel(channel_id)?;
         if self
             .store
@@ -244,10 +269,10 @@ impl Engine {
         )?;
         self.store.insert_bundle(&bundle, true, now)?;
         let card = message.kind == Kind::Card;
-        let body = if card {
-            self.identity.card().to_text()
-        } else {
-            String::from_utf8_lossy(&message.body).into_owned()
+        let body = match message.kind {
+            Kind::Card => self.identity.card().to_text(),
+            Kind::File => String::new(),
+            _ => String::from_utf8_lossy(&message.body).into_owned(),
         };
         let author = author_key(&seed);
         let id = self
@@ -275,7 +300,7 @@ impl Engine {
             read: true,
         };
         let frame = forwarded(&bundle).expect("a new bundle has hops left");
-        Ok((post_view(channel.id, post), frame))
+        Ok((post_view(channel.id, post, None), frame))
     }
 
     fn author_seed(&self, channel: &StoredChannel) -> [u8; 32] {
@@ -302,7 +327,7 @@ impl Engine {
     }
 }
 
-fn post_view(channel_id: i64, post: StoredPost) -> PostView {
+fn post_view(channel_id: i64, post: StoredPost, file: Option<FileView>) -> PostView {
     let shared_card = post
         .card
         .then(|| ContactCard::from_text(&post.body).ok())
@@ -322,6 +347,7 @@ fn post_view(channel_id: i64, post: StoredPost) -> PostView {
         shared_card,
         created_at: post.created_at,
         read: post.read,
+        file,
     }
 }
 

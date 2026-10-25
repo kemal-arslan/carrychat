@@ -15,10 +15,11 @@ use kervan_proto::ratchet::{Opened, Role, Session};
 use kervan_proto::{day_of, DAY_SECS};
 use rand_core::OsRng;
 
-use crate::store::Store;
+use crate::store::{FileTable, Store};
 use crate::{ContactView, Error, Event, MessageView, Profile, Result, Settings};
 
 mod channels;
+mod files;
 mod groups;
 
 /// Bundles that claim to live longer than this from now are refused (§8).
@@ -82,6 +83,8 @@ pub struct Engine {
     group_tags: HashMap<RecipientTag, i64>,
     /// Tags of channel posts, by channel.
     channel_tags: HashMap<RecipientTag, i64>,
+    /// Tags of the chunks of files still arriving, by file and place.
+    file_tags: HashMap<RecipientTag, (i64, u32)>,
     /// Whether the tags changed since the node last renewed its subscription.
     tags_changed: bool,
     reassembler: Reassembler,
@@ -144,6 +147,7 @@ impl Engine {
             tags_day: None,
             group_tags: HashMap::new(),
             channel_tags: HashMap::new(),
+            file_tags: HashMap::new(),
             tags_changed: false,
             reassembler: Reassembler::default(),
             own_out: Vec::new(),
@@ -226,7 +230,11 @@ impl Engine {
 
     pub fn messages(&self, contact_id: i64) -> Result<Vec<MessageView>> {
         self.contact_index(contact_id)?;
-        self.store.messages(contact_id)
+        let mut messages = self.store.messages(contact_id)?;
+        for message in &mut messages {
+            message.file = self.attached(FileTable::Messages, message.id)?;
+        }
+        Ok(messages)
     }
 
     /// Seals a text message. The returned frame is ready to send on any link.
@@ -286,6 +294,7 @@ impl Engine {
                 Ok(None) => Ok(Handled::quiet(Outcome::Fragment)),
                 Err(_) => Ok(Handled::quiet(Outcome::Dropped)),
             },
+            Frame::Chunk(bundle) => self.handle_chunk(bundle, now, carry),
         }
     }
 
@@ -316,7 +325,7 @@ impl Engine {
         for &id in ids {
             if let Some(bundle) = self.store.bundle(id)? {
                 if !bundle.is_expired(now) {
-                    frames.extend(forwarded(&bundle));
+                    frames.extend(self.passed_on(&bundle)?);
                 }
             }
         }
@@ -337,12 +346,10 @@ impl Engine {
 
     /// Everything worth putting on a USB stick: bundles, then tombstones.
     pub fn export_frames(&self, now: u32) -> Result<Vec<Frame>> {
-        let mut frames: Vec<Frame> = self
-            .store
-            .forwardable_bundles(now)?
-            .iter()
-            .filter_map(forwarded)
-            .collect();
+        let mut frames = Vec::new();
+        for bundle in self.store.forwardable_bundles(now)? {
+            frames.extend(self.passed_on(&bundle)?);
+        }
         frames.extend(self.tombstone_frames()?);
         Ok(frames)
     }
@@ -356,6 +363,7 @@ impl Engine {
         let mut tags: Vec<RecipientTag> = self.tags.keys().copied().collect();
         tags.extend(self.group_tags.keys());
         tags.extend(self.channel_tags.keys());
+        tags.extend(self.file_tags.keys());
         tags.extend(tag_window(now).map(|day| mailbox_tag(&me, day)));
         let waiting = self
             .store
@@ -371,7 +379,7 @@ impl Engine {
         let mut outbox = Vec::new();
         for bundle in self.store.own_bundles(now)? {
             let tag = self.publish_tag(&bundle)?;
-            outbox.extend(forwarded(&bundle).map(|frame| (frame, tag)));
+            outbox.extend(self.passed_on(&bundle)?.map(|frame| (frame, tag)));
         }
         Ok(outbox)
     }
@@ -592,12 +600,31 @@ impl Engine {
                     }
                 }
             }
+            Kind::File if !self.contacts[index].hidden => {
+                if let Some((file, opened)) =
+                    self.take_offer(&message.body, true, bundle.expires_at, now)?
+                {
+                    reopened = opened;
+                    if let Some(mut view) = self.store.insert_message(
+                        contact_id,
+                        false,
+                        bundle.id,
+                        "",
+                        message.created_at,
+                        Some(now),
+                    )? {
+                        self.store.attach_file(FileTable::Messages, view.id, file)?;
+                        view.file = self.file_view(file)?;
+                        events.push(Event::MessageReceived { message: view });
+                    }
+                }
+            }
             Kind::Group => {
                 reopened = self.receive_group_state(index, &message, now, &mut events)?;
             }
             Kind::SenderKey => reopened = self.receive_sender_key(index, &message, now)?,
             Kind::Leave => self.receive_leave(index, &message, now, &mut events)?,
-            Kind::Session | Kind::Unknown(_) => {}
+            Kind::File | Kind::Session | Kind::Unknown(_) => {}
         }
         // Group peers are not listed, so there is nothing to show of them.
         if self.contacts[index].session.is_established() != was_secure
@@ -918,7 +945,24 @@ impl Engine {
                 self.channel_tags.insert(channel.keys.tag(day), channel.id);
             }
         }
+        self.file_tags.clear();
+        for (file, offer) in self.store.incomplete_files(now).unwrap_or_default() {
+            let keys = offer.keys();
+            for index in 0..offer.chunks() {
+                self.file_tags.insert(keys.tag(index), (file, index));
+            }
+        }
         self.tags_day = Some(today);
+    }
+
+    /// A stored bundle as this node passes it on: in a chunk frame if it is a
+    /// file chunk.
+    fn passed_on(&self, bundle: &Bundle) -> Result<Option<Frame>> {
+        Ok(if self.store.is_chunk(bundle.id)? {
+            files::forwarded_chunk(bundle)
+        } else {
+            forwarded(bundle)
+        })
     }
 
     fn contact_index(&self, contact_id: i64) -> Result<usize> {

@@ -1,4 +1,5 @@
-//! What transports carry: whole bundles, fragments and tombstones (§7).
+//! What transports carry: whole bundles, fragments, tombstones and file
+//! chunks (§7).
 
 use std::collections::HashMap;
 
@@ -16,12 +17,18 @@ const TYPE_LEN: usize = 1;
 const TYPE_BUNDLE: u8 = 0x01;
 const TYPE_FRAGMENT: u8 = 0x02;
 const TYPE_TOMBSTONE: u8 = 0x03;
+const TYPE_CHUNK: u8 = 0x04;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Frame {
     Bundle(Bundle),
     Fragment(Fragment),
-    Tombstone { hop_limit: u8, tombstone: Tombstone },
+    Tombstone {
+        hop_limit: u8,
+        tombstone: Tombstone,
+    },
+    /// A file chunk (§5.9): a bundle that never goes over LoRa.
+    Chunk(Bundle),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,6 +43,7 @@ impl Frame {
     pub fn to_bytes(&self) -> Vec<u8> {
         match self {
             Frame::Bundle(bundle) => [&[TYPE_BUNDLE][..], &bundle.to_bytes()].concat(),
+            Frame::Chunk(bundle) => [&[TYPE_CHUNK][..], &bundle.to_bytes()].concat(),
             Frame::Fragment(fragment) => [
                 &[TYPE_FRAGMENT][..],
                 &fragment.id.0,
@@ -59,6 +67,7 @@ impl Frame {
         let (&frame_type, rest) = bytes.split_first().ok_or(Error::Truncated)?;
         match frame_type {
             TYPE_BUNDLE => Ok(Frame::Bundle(Bundle::from_bytes(rest)?)),
+            TYPE_CHUNK => Ok(Frame::Chunk(Bundle::from_bytes(rest)?)),
             TYPE_FRAGMENT => {
                 if bytes.len() <= FRAGMENT_HEADER_LEN {
                     return Err(Error::Truncated);

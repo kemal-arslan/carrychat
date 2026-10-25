@@ -25,6 +25,7 @@ Kervan sends each message over the best link it has, and keeps it until one appe
 - **Forward secrecy.** Once both contacts have written, keys change with every reply: a Double Ratchet adapted to messages that arrive days late, twice or out of order. A key taken from a device later opens none of the messages before it.
 - **Groups of up to 16.** A group message is one bundle that every member opens, so it costs the same airtime for 3 people as for 16, and members carry it on for one another. Members need not know each other. Each member signs what it writes, so nobody can write in another's name, and a removed member reads nothing sent after the others hear of it. Up to 97 bytes of text fit one radio packet.
 - **Public channels.** Anyone who knows a channel's name, and its password if it has one, reads and writes there, without exchanging cards. Each author signs with a key for that channel only, so posts cannot be linked to their card or across channels, and nobody can post as someone else. Posts live a day and travel at most 4 hops; you can mute an author, and share your card when you want people to add you.
+- **Photos and voice messages.** A photo is shrunk to at most 1280 pixels and 1 MB, sealed once with a key of its own and cut into chunks; the key goes in an ordinary message, so files get the same protection as text. Chunks travel over the local network, the internet and files, never over the radio, and have their own storage quota so they never push out messages.
 - **Delivery receipts the network can check.** The recipient publishes a short proof that only the two contacts can produce, and every device that carries a copy deletes it.
 - **Only card holders can write.** To write to someone you need their card. Your first message carries your own card, signed, so they see a request with your fingerprint and accept or decline it. Nobody without your card can reach you.
 
@@ -55,6 +56,8 @@ kervan card                                  # give this to your contacts
 kervan add kervan:…                          # or add theirs: one side is enough
 kervan accept Deniz                          # accept someone who wrote to you first
 kervan send Deniz "İyiyim, Kadıköy'deyim."
+kervan send-file Deniz photo.jpg             # a photo or voice message, up to 1 MB
+kervan save-file 3 photo.jpg                 # a file that arrived, by the number in the log
 kervan run                                   # deliver, receive and relay (local network and internet)
 kervan export messages.kervan                # or carry everything on a USB stick
 kervan group create Mahalle Deniz Mehmet     # you become the group's admin

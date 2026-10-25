@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Contact, Message } from "./api";
 import { Composer } from "./Composer";
+import { FileBubble } from "./FileBubble";
 import { PAIR_OVERHEAD, fullTime, shortTime } from "./format";
 import { useI18n } from "./i18n";
 
@@ -8,11 +9,12 @@ type Props = {
   contact: Contact;
   messages: Message[];
   onSend: (text: string) => Promise<void>;
+  onSendFile: (mime: string, bytes: Uint8Array) => Promise<void>;
   onAccept: () => void;
   onDecline: () => void;
 };
 
-export function Chat({ contact, messages, onSend, onAccept, onDecline }: Props) {
+export function Chat({ contact, messages, onSend, onSendFile, onAccept, onDecline }: Props) {
   const { t, language } = useI18n();
   const list = useRef<HTMLOListElement>(null);
 
@@ -49,7 +51,8 @@ export function Chat({ contact, messages, onSend, onAccept, onDecline }: Props) 
           const [stateClass, stateLabel] = state(message);
           return (
             <li key={message.id} className={message.outgoing ? "bubble outgoing" : "bubble incoming"}>
-              <p>{message.body}</p>
+              {message.file && <FileBubble file={message.file} />}
+              {message.body && <p>{message.body}</p>}
               <footer>
                 <time title={fullTime(message.createdAt, language)}>{shortTime(message.createdAt, language)}</time>
                 {message.outgoing && <span className={`state ${stateClass}`}>{stateLabel}</span>}
@@ -76,6 +79,7 @@ export function Chat({ contact, messages, onSend, onAccept, onDecline }: Props) 
           overhead={PAIR_OVERHEAD}
           conversation={`contact-${contact.id}`}
           onSend={onSend}
+          onSendFile={onSendFile}
         />
       )}
     </section>

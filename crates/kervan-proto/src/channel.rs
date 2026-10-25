@@ -139,7 +139,7 @@ impl ChannelKeys {
         if nick.len() > MAX_NICK_LEN {
             return Err(Error::Invalid("nickname length"));
         }
-        if !matches!(message.kind, Kind::Text | Kind::Card) {
+        if !matches!(message.kind, Kind::Text | Kind::Card | Kind::File) {
             return Err(Error::Invalid("kind of post"));
         }
         check_lifetime(message.created_at, expires_at)?;

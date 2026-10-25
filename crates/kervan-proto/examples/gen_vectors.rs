@@ -9,6 +9,7 @@
 use data_encoding::HEXLOWER;
 use kervan_proto::bundle::{seal_with_nonce, Message, Tombstone};
 use kervan_proto::channel::{author_key, ChannelKeys, CHANNEL_HOP_LIMIT, CHANNEL_TTL_SECS};
+use kervan_proto::file::{assemble, seal_file_with};
 use kervan_proto::frame::{frames_for, Frame, MESHTASTIC_MTU};
 use kervan_proto::group::{GroupId, GroupState, ReceiverChain, SenderChain};
 use kervan_proto::identity::Identity;
@@ -75,6 +76,7 @@ pub fn vectors() -> Value {
         "ratchet": ratchet(&alice, &bob),
         "group": group(&alice, &bob),
         "channel": channel(&alice),
+        "file": file(),
     })
 }
 
@@ -336,5 +338,46 @@ fn channel(alice: &Identity) -> Value {
         "author_key": HEXLOWER.encode(&author_key(&seed)),
         "nick": nick,
         "posts": posts,
+    })
+}
+
+/// A 9000-byte file cut into three chunks (§5.9).
+fn file() -> Value {
+    let data: Vec<u8> = (0..9000).map(|i| (i % 251) as u8).collect();
+    let key = [0xf1; 32];
+    let expires_at = CREATED_AT + 3 * DAY_SECS;
+    let mut next = 0xf2u8;
+    let mut nonces = Vec::new();
+    let (offer, chunks) = seal_file_with("image/jpeg", &data, expires_at, 8, key, || {
+        let nonce = [next; 24];
+        nonces.push(nonce);
+        next += 1;
+        nonce
+    })
+    .unwrap();
+    let keys = offer.keys();
+    let opened: Vec<Vec<u8>> = chunks
+        .iter()
+        .map(|chunk| keys.open_chunk(chunk).unwrap())
+        .collect();
+    assert_eq!(assemble(&offer, &opened).unwrap(), data);
+    let tombstone = keys.tombstone(&chunks[0]);
+    json!({
+        "description": "Bytes i % 251 for i from 0 to 8999, offered as image/jpeg in three chunks.",
+        "size": data.len(),
+        "mime": offer.mime,
+        "key": HEXLOWER.encode(&key),
+        "offer": HEXLOWER.encode(&offer.to_bytes()),
+        "expires_at": expires_at,
+        "hop_limit": 8,
+        "chunks": chunks
+            .iter()
+            .zip(&nonces)
+            .map(|(chunk, nonce)| json!({
+                "nonce": HEXLOWER.encode(nonce),
+                "frame": HEXLOWER.encode(&Frame::Chunk(chunk.clone()).to_bytes()),
+            }))
+            .collect::<Vec<_>>(),
+        "first_chunk_tombstone": HEXLOWER.encode(&tombstone.ack_secret),
     })
 }

@@ -4,5 +4,7 @@
 <dict>
   <key>NSLocalNetworkUsageDescription</key>
   <string>Kervan finds other Kervan computers on your network to pass messages when the internet is down.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Kervan records the voice messages you choose to send.</string>
 </dict>
 </plist>

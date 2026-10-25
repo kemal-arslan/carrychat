@@ -10,14 +10,19 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::{MessageView, Result};
 
 mod channels;
+mod files;
 mod groups;
 
 pub use channels::{StoredChannel, StoredPost};
+pub use files::{FileTable, StoredFile};
 pub use groups::{StoredGroup, StoredGroupMessage};
 
 /// Bundles carried for others, at most. Own bundles do not count.
 pub const MAX_CARRIED_BUNDLES: usize = 2000;
 pub const MAX_CARRIED_BYTES: usize = 8 * 1024 * 1024;
+/// File chunks carried for others, at most, apart from messages (§5.9).
+pub const MAX_CARRIED_CHUNKS: usize = 16_000;
+pub const MAX_CARRIED_CHUNK_BYTES: usize = 64 * 1024 * 1024;
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS meta (
@@ -152,6 +157,25 @@ const MIGRATIONS: &[&str] = &[
          author BLOB NOT NULL,
          PRIMARY KEY (channel_ref, author)
      );",
+    // Files (§5.9): chunk bundles apart from messages, offers, and the
+    // chunks of files still arriving.
+    "ALTER TABLE bundles ADD COLUMN chunk INTEGER NOT NULL DEFAULT 0;
+     CREATE TABLE files (
+         id INTEGER PRIMARY KEY,
+         offer BLOB NOT NULL UNIQUE,
+         pair INTEGER NOT NULL,
+         data BLOB,
+         expires_at INTEGER NOT NULL
+     );
+     CREATE TABLE file_chunks (
+         file_ref INTEGER NOT NULL REFERENCES files (id),
+         idx INTEGER NOT NULL,
+         data BLOB NOT NULL,
+         PRIMARY KEY (file_ref, idx)
+     );
+     ALTER TABLE messages ADD COLUMN file_ref INTEGER;
+     ALTER TABLE group_messages ADD COLUMN file_ref INTEGER;
+     ALTER TABLE channel_posts ADD COLUMN file_ref INTEGER;",
 ];
 
 /// Skipped keys kept per contact, at most; the oldest go first.
@@ -433,6 +457,7 @@ impl Store {
             created_at,
             delivered: false,
             read: false,
+            file: None,
         }))
     }
 
@@ -450,6 +475,7 @@ impl Store {
                 created_at: row.get(3)?,
                 delivered: row.get(4)?,
                 read: row.get(5)?,
+                file: None,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -491,22 +517,37 @@ impl Store {
     }
 
     pub fn insert_bundle(&self, bundle: &Bundle, own: bool, now: u32) -> Result<()> {
+        self.insert_bundle_of(bundle, own, false, now)
+    }
+
+    /// Keeps a file chunk (§5.9), under the quota for chunks.
+    pub fn insert_chunk_bundle(&self, bundle: &Bundle, own: bool, now: u32) -> Result<()> {
+        self.insert_bundle_of(bundle, own, true, now)
+    }
+
+    fn insert_bundle_of(&self, bundle: &Bundle, own: bool, chunk: bool, now: u32) -> Result<()> {
         self.conn.execute(
-            "INSERT OR IGNORE INTO bundles (id, bytes, expires_at, hop_limit, own, stored_at)
-             VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO bundles (id, bytes, expires_at, hop_limit, own, stored_at, chunk)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
             params![
                 bundle.id.0,
                 bundle.to_bytes(),
                 bundle.expires_at,
                 bundle.hop_limit,
                 own,
-                now
+                now,
+                chunk
             ],
         )?;
         if !own {
-            self.enforce_quota()?;
+            self.enforce_quota(chunk)?;
         }
         Ok(())
+    }
+
+    /// Whether a stored bundle is a file chunk, which travels in chunk frames.
+    pub fn is_chunk(&self, id: BundleId) -> Result<bool> {
+        self.exists("SELECT 1 FROM bundles WHERE id = ? AND chunk = 1", id)
     }
 
     pub fn delete_bundle(&self, id: BundleId) -> Result<bool> {
@@ -566,8 +607,13 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// Bundles carried for others, file chunks apart.
     pub fn carried_bundles(&self, now: u32) -> Result<Vec<Bundle>> {
-        self.bundles_where("expires_at > ?1 AND own = 0", now)
+        self.bundles_where("expires_at > ?1 AND own = 0 AND chunk = 0", now)
+    }
+
+    pub fn carried_chunks(&self, now: u32) -> Result<Vec<Bundle>> {
+        self.bundles_where("expires_at > ?1 AND own = 0 AND chunk = 1", now)
     }
 
     /// Own and carried bundle counts.
@@ -577,7 +623,7 @@ impl Store {
             "SELECT
                  (SELECT COUNT(*) FROM messages m JOIN bundles b ON b.id = m.bundle_id
                   WHERE m.outgoing = 1 AND m.delivered_at IS NULL),
-                 (SELECT COUNT(*) FROM bundles WHERE own = 0)",
+                 (SELECT COUNT(*) FROM bundles WHERE own = 0 AND chunk = 0)",
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?)
@@ -673,25 +719,33 @@ impl Store {
             "DELETE FROM skipped_keys WHERE stored_at <= ?",
             [now.saturating_sub(SKIPPED_KEY_LIFETIME)],
         )?;
+        self.prune_files(now)?;
         self.prune_groups(now)
     }
 
     /// Evicts carried bundles closest to expiry until the quota holds (§8).
-    fn enforce_quota(&self) -> Result<()> {
+    /// Messages and file chunks have quotas of their own.
+    fn enforce_quota(&self, chunk: bool) -> Result<()> {
+        let (max_count, max_bytes) = if chunk {
+            (MAX_CARRIED_CHUNKS, MAX_CARRIED_CHUNK_BYTES)
+        } else {
+            (MAX_CARRIED_BUNDLES, MAX_CARRIED_BYTES)
+        };
         loop {
             let (count, bytes): (usize, usize) = self.conn.query_row(
-                "SELECT COUNT(*), COALESCE(SUM(LENGTH(bytes)), 0) FROM bundles WHERE own = 0",
-                [],
+                "SELECT COUNT(*), COALESCE(SUM(LENGTH(bytes)), 0) FROM bundles
+                 WHERE own = 0 AND chunk = ?",
+                [chunk],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )?;
-            if count <= MAX_CARRIED_BUNDLES && bytes <= MAX_CARRIED_BYTES {
+            if count <= max_count && bytes <= max_bytes {
                 return Ok(());
             }
             self.conn.execute(
                 "DELETE FROM bundles WHERE id = (
-                     SELECT id FROM bundles WHERE own = 0 ORDER BY expires_at LIMIT 1
+                     SELECT id FROM bundles WHERE own = 0 AND chunk = ? ORDER BY expires_at LIMIT 1
                  )",
-                [],
+                [chunk],
             )?;
         }
     }

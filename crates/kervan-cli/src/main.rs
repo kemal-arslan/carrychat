@@ -8,7 +8,8 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use kervan_node::{
-    ChannelView, ContactView, Event, GroupView, InternetConfig, LanConfig, LanProblem, Node,
+    ChannelView, ContactView, Event, FileView, GroupView, InternetConfig, LanConfig, LanProblem,
+    Node,
 };
 use tokio::io::{AsyncBufReadExt, BufReader};
 
@@ -46,6 +47,10 @@ enum Command {
         #[arg(required = true, num_args = 1..)]
         text: Vec<String>,
     },
+    /// Queue a photo or voice message for a contact, at most 1 MiB.
+    SendFile { contact: String, path: PathBuf },
+    /// Write a file that arrived to disk, by the number the log shows.
+    SaveFile { file: i64, path: PathBuf },
     /// Show the conversation with a contact and mark it read.
     Log { contact: String },
     /// Change your name. Contacts get the new name with your new card.
@@ -116,6 +121,8 @@ enum GroupCommand {
         #[arg(required = true, num_args = 1..)]
         text: Vec<String>,
     },
+    /// Queue a photo or voice message for a group, at most 1 MiB.
+    SendFile { group: String, path: PathBuf },
     /// Show a group's messages and mark them read.
     Log { group: String },
 }
@@ -146,6 +153,8 @@ enum ChannelCommand {
     },
     /// Post your contact card, so readers can add you.
     ShareCard { channel: String },
+    /// Post a photo or voice message, at most 1 MiB.
+    SendFile { channel: String, path: PathBuf },
     /// Show a channel's posts and mark them read.
     Log { channel: String },
     /// Stop showing and passing on an author's posts, by the id in the log.
@@ -226,6 +235,23 @@ async fn run(cli: Cli) -> AnyResult {
                 contact.name
             );
         }
+        Command::SendFile { contact, path } => {
+            let contact = find_contact(&node, &contact)?;
+            let data = std::fs::read(&path)?;
+            node.send_file(contact.id, mime_of(&path), &data)?;
+            println!(
+                "Queued {} for {}. It leaves with the next `kervan run` or `kervan export`.",
+                path.display(),
+                contact.name
+            );
+        }
+        Command::SaveFile { file, path } => {
+            let (mime, data) = node
+                .file_data(file)?
+                .ok_or_else(|| format!("file {file} is not all here yet"))?;
+            std::fs::write(&path, &data)?;
+            println!("Saved {mime}, {} bytes, to {}", data.len(), path.display());
+        }
         Command::Accept { contact } => {
             let contact = find_contact(&node, &contact)?;
             node.accept_contact(contact.id)?;
@@ -252,7 +278,11 @@ async fn run(cli: Cli) -> AnyResult {
                     (true, false, true) => " ✓",
                     _ => "",
                 };
-                println!("{who}: {}{mark}", message.body);
+                println!(
+                    "{who}: {}{}{mark}",
+                    message.body,
+                    describe(message.file.as_ref())
+                );
             }
             // Read receipts wait for the next `kervan run` or `kervan export`.
             node.mark_read(contact.id)?;
@@ -401,6 +431,10 @@ async fn run_node(
                         println!("· you are no longer in group {}", group.name);
                     }
                 }
+                Ok(Event::FileChanged { file }) if file.ready => {
+                    println!("· file {} is here: {}, {} bytes. Save it with `kervan save-file {}`.", file.id, file.mime, file.size, file.id);
+                }
+                Ok(Event::FileChanged { .. }) => {}
                 Ok(Event::LocalNetworkChanged { problem: None }) => println!("· local network works"),
                 Ok(Event::LocalNetworkChanged { problem: Some(LanProblem::Blocked { detail }) }) => {
                     eprintln!("! macOS is blocking local network access ({detail}).");
@@ -489,11 +523,16 @@ fn group_command(node: &Node, command: GroupCommand) -> AnyResult {
                 group.name
             );
         }
+        GroupCommand::SendFile { group, path } => {
+            let group = find_group(node, &group)?;
+            node.send_group_file(group.id, mime_of(&path), &std::fs::read(&path)?)?;
+            println!("Queued {} for {}.", path.display(), group.name);
+        }
         GroupCommand::Log { group } => {
             let group = find_group(node, &group)?;
             for message in node.group_messages(group.id)? {
                 let who = message.sender.as_deref().unwrap_or("you");
-                println!("{who}: {}", message.body);
+                println!("{who}: {}{}", message.body, describe(message.file.as_ref()));
             }
             node.mark_group_read(group.id)?;
         }
@@ -569,10 +608,15 @@ fn channel_command(node: &Node, command: ChannelCommand) -> AnyResult {
                     Some(card) => {
                         println!("{who} shared a card: {} {}", card.name, card.fingerprint)
                     }
-                    None => println!("{who}: {}", post.body),
+                    None => println!("{who}: {}{}", post.body, describe(post.file.as_ref())),
                 }
             }
             node.mark_channel_read(channel.id)?;
+        }
+        ChannelCommand::SendFile { channel, path } => {
+            let channel = find_channel(node, &channel)?;
+            node.send_channel_file(channel.id, mime_of(&path), &std::fs::read(&path)?)?;
+            println!("Queued {} for #{}.", path.display(), channel.name);
         }
         ChannelCommand::Mute { channel, author } => {
             let channel = find_channel(node, &channel)?;
@@ -629,6 +673,36 @@ fn find_group(node: &Node, query: &str) -> Result<GroupView, Box<dyn std::error:
             Err(format!("more than one group is called {query}; use the id").into())
         }
         (None, _) => Err(format!("no group called {query}").into()),
+    }
+}
+
+/// A file offered in a message, as the log shows it.
+fn describe(file: Option<&FileView>) -> String {
+    let Some(file) = file else {
+        return String::new();
+    };
+    let state = if file.ready {
+        format!("file {}", file.id)
+    } else {
+        format!("{}/{} chunks", file.received, file.chunks)
+    };
+    format!("[{}, {} KB, {state}]", file.mime, file.size.div_ceil(1024))
+}
+
+/// The media type of a file to send, from its extension.
+fn mime_of(path: &Path) -> &'static str {
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase);
+    match extension.as_deref() {
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("png") => "image/png",
+        Some("webp") => "image/webp",
+        Some("m4a" | "mp4" | "aac") => "audio/mp4",
+        Some("webm") => "audio/webm",
+        Some("ogg" | "opus") => "audio/ogg",
+        _ => "application/octet-stream",
     }
 }
 

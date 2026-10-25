@@ -867,3 +867,48 @@ button.danger-outline {
   color: var(--on-night);
   font-weight: 600;
 }
+
+/* Files */
+
+.bubble > a:has(.file-image) {
+  display: block;
+}
+
+.file-image {
+  display: block;
+  width: auto;
+  max-width: 280px;
+  max-height: 320px;
+  border-radius: 10px;
+}
+
+.file-audio {
+  display: block;
+  width: 240px;
+  max-width: 100%;
+}
+
+.file-pending {
+  font-size: 13px;
+  font-style: italic;
+  opacity: 0.8;
+}
+
+/* The meter takes the room; the buttons sit together at the end. */
+.composer-row .meter {
+  flex: 1;
+}
+
+.composer-row .attach {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  color: var(--muted);
+}
+
+.composer-row .attach.recording {
+  color: var(--danger);
+  border-color: var(--danger);
+}

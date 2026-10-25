@@ -65,6 +65,23 @@ pub struct MessageView {
     /// For outgoing messages: whether the recipient read it, if they send
     /// read receipts. For incoming ones: whether we read it.
     pub read: bool,
+    /// The file it offers, for a photo or voice message.
+    pub file: Option<FileView>,
+}
+
+/// A file offered in a message (§5.9), and how much of it is here.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileView {
+    pub id: i64,
+    pub mime: String,
+    pub size: u32,
+    pub chunks: u32,
+    pub received: u32,
+    /// Whether all of it is here, ready to show.
+    pub ready: bool,
+    /// After this, missing chunks will not come any more.
+    pub expires_at: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -108,6 +125,7 @@ pub struct GroupMessageView {
     pub created_at: u32,
     /// Whether we read it. Our own messages count as read.
     pub read: bool,
+    pub file: Option<FileView>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -140,6 +158,7 @@ pub struct PostView {
     pub shared_card: Option<SharedCardView>,
     pub created_at: u32,
     pub read: bool,
+    pub file: Option<FileView>,
 }
 
 /// An author muted in a channel.
@@ -225,6 +244,9 @@ pub enum Event {
     /// A post in one of our channels.
     #[serde(rename_all = "camelCase")]
     PostReceived { post: PostView },
+    /// More of a file arrived, or all of it.
+    #[serde(rename_all = "camelCase")]
+    FileChanged { file: FileView },
     /// An internet relay connected or disconnected.
     #[serde(rename_all = "camelCase")]
     InternetChanged { relays: usize },
@@ -479,6 +501,44 @@ impl Node {
         self.shared.engine().mark_channel_read(channel_id, now())
     }
 
+    /// Sends a file to a contact: a photo or a voice message.
+    pub fn send_file(&self, contact_id: i64, mime: &str, data: &[u8]) -> Result<MessageView> {
+        let (message, frames) = self
+            .shared
+            .engine()
+            .send_file(contact_id, mime, data, now())?;
+        self.shared.send_own_frames(&frames);
+        Ok(message)
+    }
+
+    pub fn send_group_file(
+        &self,
+        group_id: i64,
+        mime: &str,
+        data: &[u8],
+    ) -> Result<GroupMessageView> {
+        let (message, frames) =
+            self.shared
+                .engine()
+                .send_group_file(group_id, mime, data, now())?;
+        self.shared.send_own_frames(&frames);
+        Ok(message)
+    }
+
+    pub fn send_channel_file(&self, channel_id: i64, mime: &str, data: &[u8]) -> Result<PostView> {
+        let (post, frames) =
+            self.shared
+                .engine()
+                .send_channel_file(channel_id, mime, data, now())?;
+        self.shared.send_own_frames(&frames);
+        Ok(post)
+    }
+
+    /// A file's media type and bytes, once all of it is here.
+    pub fn file_data(&self, file_id: i64) -> Result<Option<(String, Vec<u8>)>> {
+        self.shared.engine().file_data(file_id)
+    }
+
     pub fn status(&self) -> Result<Status> {
         let (outbox, carried) = self.shared.engine().counts()?;
         Ok(Status {
@@ -577,7 +637,7 @@ impl Shared {
     pub(crate) fn dispatch(&self, handled: Handled, from: Option<u64>) {
         for frame in &handled.relay {
             let except = match frame {
-                Frame::Bundle(_) => from,
+                Frame::Bundle(_) | Frame::Chunk(_) => from,
                 _ => None,
             };
             self.lan.broadcast(&frame.to_bytes(), except);
@@ -604,6 +664,15 @@ impl Shared {
         if self.engine().take_tags_changed() {
             self.internet.renew_subscription();
         }
+    }
+
+    /// Sends our new frames, a file's offer and chunks, on every link.
+    fn send_own_frames(&self, frames: &[(Frame, kervan_proto::pair::RecipientTag)]) {
+        for (frame, tag) in frames {
+            self.lan.broadcast(&frame.to_bytes(), None);
+            self.internet.post_bundle(frame, tag);
+        }
+        self.internet.probe();
     }
 
     /// Sends a new post of ours, or a group message, on every link.
