@@ -11,6 +11,7 @@ repository.workspace = true
 data-encoding = "2"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 hmac = "0.12"
+if-addrs = "0.15"
 k256 = { version = "0.13", features = ["schnorr"] }
 kervan-proto = { path = "../kervan-proto" }
 rand_core = { version = "0.6", features = ["getrandom"] }

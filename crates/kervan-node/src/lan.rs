@@ -11,7 +11,7 @@ use kervan_proto::bundle::BundleId;
 use kervan_proto::frame::Frame;
 use rand_core::{OsRng, RngCore};
 use serde::Serialize;
-use socket2::{Domain, Protocol, Socket, Type};
+use socket2::{Domain, Protocol, SockRef, Socket, Type};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::tcp::OwnedWriteHalf;
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
@@ -317,8 +317,8 @@ async fn discovery_loop(shared: Weak<Shared>, group: SocketAddrV4, port: u16) {
             },
         };
         match step {
-            Step::Beacon => match current.send_to(&beacon, group).await {
-                Ok(_) => {
+            Step::Beacon => match announce(current, group, &beacon).await {
+                Ok(()) => {
                     failures = 0;
                     report_beacon(None);
                 }
@@ -497,6 +497,60 @@ fn parse_hello(frame: &[u8]) -> Option<u64> {
     }
 }
 
+/// Sends the beacon on every local network interface, after joining the
+/// group on each: a VPN that takes the default route would otherwise take
+/// discovery into its tunnel. Joining again is harmless, and catches
+/// interfaces that appeared or came back. Succeeds if any send does.
+async fn announce(socket: &UdpSocket, group: SocketAddrV4, beacon: &[u8]) -> io::Result<()> {
+    let mut interfaces = discovery_interfaces();
+    for interface in &interfaces {
+        let _ = socket.join_multicast_v4(*group.ip(), *interface);
+    }
+    if interfaces.is_empty() {
+        // The system's choice, as before interfaces were listed.
+        interfaces.push(Ipv4Addr::UNSPECIFIED);
+    }
+    let mut result = Err(io::Error::other("no interface to announce on"));
+    for interface in interfaces {
+        let sent = match SockRef::from(socket).set_multicast_if_v4(&interface) {
+            Ok(()) => socket.send_to(beacon, group).await.map(drop),
+            Err(error) => Err(error),
+        };
+        if result.is_err() {
+            result = sent;
+        }
+    }
+    result
+}
+
+/// The IPv4 addresses of the interfaces discovery runs on.
+fn discovery_interfaces() -> Vec<Ipv4Addr> {
+    let interfaces = if_addrs::get_if_addrs().unwrap_or_default();
+    lan_addresses(
+        interfaces
+            .iter()
+            .filter_map(|interface| match &interface.addr {
+                if_addrs::IfAddr::V4(v4) => {
+                    Some((interface.is_loopback(), v4.ip, v4.broadcast.is_some()))
+                }
+                if_addrs::IfAddr::V6(_) => None,
+            }),
+    )
+}
+
+/// Of `(loopback, address, can broadcast)`, the addresses of interfaces onto
+/// a local network: not loopback, and not point-to-point like a VPN tunnel,
+/// which has no broadcast address.
+fn lan_addresses(interfaces: impl Iterator<Item = (bool, Ipv4Addr, bool)>) -> Vec<Ipv4Addr> {
+    let mut addresses: Vec<Ipv4Addr> = interfaces
+        .filter(|&(loopback, _, broadcast)| !loopback && broadcast)
+        .map(|(_, address, _)| address)
+        .collect();
+    addresses.sort();
+    addresses.dedup();
+    addresses
+}
+
 fn parse_beacon(bytes: &[u8]) -> Option<(u64, u16)> {
     if bytes.len() != BEACON_LEN || !bytes.starts_with(BEACON_PREFIX) {
         return None;
@@ -528,6 +582,21 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn discovery_skips_loopback_and_tunnels() {
+        let wifi = Ipv4Addr::new(192, 168, 1, 18);
+        let cable = Ipv4Addr::new(169, 254, 10, 2);
+        let interfaces = [
+            (true, Ipv4Addr::LOCALHOST, false),
+            (false, wifi, true),
+            (false, Ipv4Addr::new(10, 8, 0, 3), false),
+            (false, cable, true),
+            (false, wifi, true),
+        ];
+        assert_eq!(lan_addresses(interfaces.into_iter()), vec![cable, wifi]);
+        assert!(lan_addresses(std::iter::empty()).is_empty());
+    }
 
     fn os_error(code: i32) -> io::Error {
         io::Error::from_raw_os_error(code)
