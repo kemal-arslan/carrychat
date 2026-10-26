@@ -3,7 +3,7 @@ import { Fragment, useRef } from "react";
 import type { Contact, Message } from "./api";
 import { Composer } from "./Composer";
 import { FileBubble } from "./FileBubble";
-import { PAIR_OVERHEAD, fullTime, shortTime } from "./format";
+import { PAIR_OVERHEAD, clockTime, fullTime } from "./format";
 import { useI18n } from "./i18n";
 import { ChatHeader, bubbleClass, useStickToBottom, useThreadLayout } from "./Thread";
 
@@ -83,7 +83,7 @@ export function Chat({ contact, messages, onSend, onSendFile, onAccept, onDeclin
               {message.file && <FileBubble file={message.file} />}
               {message.body && <p>{message.body}</p>}
               <footer>
-                <time title={fullTime(message.createdAt, language)}>{shortTime(message.createdAt, language)}</time>
+                <time title={fullTime(message.createdAt, language)}>{clockTime(message.createdAt, language)}</time>
                 {message.outgoing && state(message)}
               </footer>
             </li>

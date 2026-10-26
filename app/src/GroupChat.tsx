@@ -3,7 +3,7 @@ import { Fragment, useRef } from "react";
 import type { Group, GroupMessage } from "./api";
 import { Composer } from "./Composer";
 import { FileBubble } from "./FileBubble";
-import { GROUP_OVERHEAD, fullTime, shortTime } from "./format";
+import { GROUP_OVERHEAD, clockTime, fullTime } from "./format";
 import { useI18n } from "./i18n";
 import { ChatHeader, bubbleClass, useStickToBottom, useThreadLayout } from "./Thread";
 
@@ -47,7 +47,7 @@ export function GroupChat({ group, messages, onSend, onSendFile, onMembers, onBa
               {message.file && <FileBubble file={message.file} />}
               {message.body && <p>{message.body}</p>}
               <footer>
-                <time title={fullTime(message.createdAt, language)}>{shortTime(message.createdAt, language)}</time>
+                <time title={fullTime(message.createdAt, language)}>{clockTime(message.createdAt, language)}</time>
               </footer>
             </li>
           </Fragment>

@@ -3,7 +3,7 @@ import { Fragment, useRef } from "react";
 import type { Channel, Post } from "./api";
 import { Composer } from "./Composer";
 import { FileBubble } from "./FileBubble";
-import { CHANNEL_OVERHEAD, fullTime, shortTime, utf8Length } from "./format";
+import { CHANNEL_OVERHEAD, clockTime, fullTime, utf8Length } from "./format";
 import { useI18n } from "./i18n";
 import { ChatHeader, bubbleClass, useStickToBottom, useThreadLayout } from "./Thread";
 
@@ -66,7 +66,7 @@ export function ChannelChat({ channel, posts, onSend, onSendFile, onSettings, on
                 </>
               )}
               <footer>
-                <time title={fullTime(post.createdAt, language)}>{shortTime(post.createdAt, language)}</time>
+                <time title={fullTime(post.createdAt, language)}>{clockTime(post.createdAt, language)}</time>
                 {!post.outgoing && (
                   <button className="mute" onClick={() => onMute(post)}>
                     {t.mute}

@@ -37,6 +37,11 @@ export function shortTime(unix: number, language: Language): string {
   ).format(date);
 }
 
+/** The time of day, for a bubble: the day heading above it gives the date. */
+export function clockTime(unix: number, language: Language): string {
+  return new Intl.DateTimeFormat(language, { hour: "2-digit", minute: "2-digit" }).format(new Date(unix * 1000));
+}
+
 export function fullTime(unix: number, language: Language): string {
   return new Intl.DateTimeFormat(language, {
     day: "numeric",
