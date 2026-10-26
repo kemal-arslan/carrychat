@@ -10,7 +10,7 @@ const en = {
   tagline: "Messages that get through when the internet doesn't.",
   yourName: "Your name",
   nameTooLong: "That name is too long for a contact card.",
-  nameHint: "Your contacts see this name. There is no account: your identity is created and kept on this computer.",
+  nameHint: "Your contacts see this name. There is no account: your identity is created and kept on this device.",
   createIdentity: "Create my identity",
 
   requests: "Requests",
@@ -20,14 +20,15 @@ const en = {
   addContact: "Add contact",
   myCard: "My card",
   settings: "Settings",
+  back: "Back",
   noConversation: "No conversation yet",
   noConversationHint:
-    "Give your card to someone or add theirs. Messages wait on this computer until a path appears.",
+    "Give your card to someone or add theirs. Messages wait on this device until a path appears.",
 
   wantsToMessage: (name: string) => `${name} wants to message you.`,
   declined: (name: string) => `Declined ${name}. Their messages are deleted and new ones will be ignored.`,
   exported: (count: number) =>
-    `Saved ${count === 1 ? "1 item" : `${count} items`} to the file. Carry it to another Kervan computer.`,
+    `Saved ${count === 1 ? "1 item" : `${count} items`} to the file. Carry it to another Kervan device.`,
   imported: (received: number, delivered: number, carried: number, skipped: number) =>
     `Imported: ${received === 1 ? "1 new message" : `${received} new messages`}, ` +
     `${delivered === 1 ? "1 delivery receipt" : `${delivered} delivery receipts`}, ${carried} to carry for others` +
@@ -43,11 +44,13 @@ const en = {
   securePendingHint:
     "Until you have both written once, messages here use your pair key. A key taken from a device later could open them.",
   chatEmpty: (name: string) =>
-    `Nothing here yet. What you write waits on this computer until a path to ${name} appears: another Kervan computer on the network, the internet, or a file someone carries.`,
+    `Nothing here yet. What you write waits on this device until a path to ${name} appears: another Kervan device on the network, the internet, or a file someone carries.`,
   waitingForPath: "Waiting for a path",
   delivered: "Delivered",
   read: "Read",
   messageTo: (name: string) => `Message ${name}`,
+  messageGroup: (name: string) => `Message ${name}`,
+  messageChannel: (name: string) => `Post to #${name}`,
   composerHint: "Enter sends, Shift+Enter starts a new line",
   tooLong: (bytes: number, max: number) => `Too long: ${bytes} of ${max} bytes`,
   onePacket: (bytes: number) => `${bytes} bytes · fits one radio packet`,
@@ -59,8 +62,8 @@ const en = {
   acceptAndReply: "Accept and reply",
 
   lanOff: "Local network: off",
-  lanWaiting: "Local network: looking for other computers",
-  lanUp: (count: number) => `Local network: ${count === 1 ? "1 computer" : `${count} computers`} nearby`,
+  lanWaiting: "Local network: looking for other devices",
+  lanUp: (count: number) => `Local network: ${count === 1 ? "1 device" : `${count} devices`} nearby`,
   lanBlocked: "Local network: blocked by macOS",
   lanFailed: "Local network: not working",
   fix: "Fix…",
@@ -102,18 +105,18 @@ const en = {
   copyCard: "Copy card",
   copied: "Copied",
 
-  connectTitle: "Connect to a computer",
-  connectIntro: "Computers on the same network usually find each other. If they don't, connect by address.",
-  listensOn: (port: number) => ` This computer listens on port ${port}.`,
+  connectTitle: "Connect to a device",
+  connectIntro: "Devices on the same network usually find each other. If they don't, connect by address.",
+  listensOn: (port: number) => ` This device listens on port ${port}.`,
   address: "Address",
   connectButton: "Connect",
 
   failedTitle: "The local network is not working",
-  failedIntro: "Kervan could not reach another computer on this network:",
+  failedIntro: "Kervan could not reach another device on this network:",
   failedHint:
-    "Check that both computers are on the same network and that the other computer's firewall lets Kervan accept connections. Guest networks often keep computers from reaching each other.",
+    "Check that both devices are on the same network and that the other device's firewall lets Kervan accept connections. Guest networks often keep devices from reaching each other.",
   blockedTitle: "Let Kervan use the local network",
-  blockedIntro: "macOS is not letting Kervan reach other computers on this network, so messages cannot leave this Mac.",
+  blockedIntro: "macOS is not letting Kervan reach other devices on this network, so messages cannot leave this Mac.",
   blockedStep1: "Open System Settings → Privacy & Security → Local Network.",
   blockedStep2: "Turn on Kervan.",
   blockedStep3: "If this still shows as blocked after a few seconds, quit Kervan and open it again.",
@@ -128,7 +131,7 @@ const en = {
   language: "Language",
   languageSystem: "System",
   eraseTitle: "Erase everything",
-  eraseHint: "Deletes your identity, contacts and messages from this computer. It cannot be undone.",
+  eraseHint: "Deletes your identity, contacts and messages from this device. It cannot be undone.",
   eraseButton: "Erase everything…",
   eraseConfirm: "Are you sure? Kervan starts again empty.",
   eraseNow: "Erase now",
@@ -225,7 +228,7 @@ const tr: Strings = {
   tagline: "İnternet olmadığında da ulaşan mesajlar.",
   yourName: "Adın",
   nameTooLong: "Bu ad kişi kartı için fazla uzun.",
-  nameHint: "Kişilerin bu adı görür. Hesap yok: kimliğin bu bilgisayarda oluşturulur ve burada kalır.",
+  nameHint: "Kişilerin bu adı görür. Hesap yok: kimliğin bu cihazda oluşturulur ve burada kalır.",
   createIdentity: "Kimliğimi oluştur",
 
   requests: "İstekler",
@@ -235,12 +238,13 @@ const tr: Strings = {
   addContact: "Kişi ekle",
   myCard: "Kartım",
   settings: "Ayarlar",
+  back: "Geri",
   noConversation: "Henüz konuşma yok",
-  noConversationHint: "Kartını birine ver ya da onunkini ekle. Mesajlar bir yol bulunana kadar bu bilgisayarda bekler.",
+  noConversationHint: "Kartını birine ver ya da onunkini ekle. Mesajlar bir yol bulunana kadar bu cihazda bekler.",
 
   wantsToMessage: (name) => `${name} sana yazmak istiyor.`,
   declined: (name) => `${name} reddedildi. Mesajları silindi, yenileri yok sayılacak.`,
-  exported: (count) => `${count} öğe dosyaya kaydedildi. Dosyayı başka bir Kervan bilgisayarına taşı.`,
+  exported: (count) => `${count} öğe dosyaya kaydedildi. Dosyayı başka bir Kervan cihazına taşı.`,
   imported: (received, delivered, carried, skipped) =>
     `İçe aktarıldı: ${received} yeni mesaj, ${delivered} teslim kanıtı, başkaları için taşınacak ${carried} paket` +
     (skipped > 0 ? `, okunamayan ${skipped}.` : "."),
@@ -255,11 +259,13 @@ const tr: Strings = {
   securePendingHint:
     "İkiniz de birer kez yazana kadar mesajlar ortak anahtarınızla şifrelenir. Sonradan bir cihazdan alınan anahtar bunları açabilir.",
   chatEmpty: (name) =>
-    `Henüz bir şey yok. Yazdıkların ${name} kişisine bir yol bulunana kadar bu bilgisayarda bekler: ağdaki başka bir Kervan bilgisayarı, internet ya da birinin taşıdığı bir dosya.`,
+    `Henüz bir şey yok. Yazdıkların ${name} kişisine bir yol bulunana kadar bu cihazda bekler: ağdaki başka bir Kervan cihazı, internet ya da birinin taşıdığı bir dosya.`,
   waitingForPath: "Yol bekleniyor",
   delivered: "Teslim edildi",
   read: "Okundu",
   messageTo: (name) => `${name} kişisine mesaj`,
+  messageGroup: (name) => `${name} grubuna mesaj`,
+  messageChannel: (name) => `#${name} kanalına yaz`,
   composerHint: "Enter gönderir, Shift+Enter yeni satır açar",
   tooLong: (bytes, max) => `Çok uzun: ${bytes}/${max} bayt`,
   onePacket: (bytes) => `${bytes} bayt · tek radyo paketine sığar`,
@@ -271,8 +277,8 @@ const tr: Strings = {
   acceptAndReply: "Kabul et ve yanıtla",
 
   lanOff: "Yerel ağ: kapalı",
-  lanWaiting: "Yerel ağ: diğer bilgisayarlar aranıyor",
-  lanUp: (count) => `Yerel ağ: yakında ${count} bilgisayar`,
+  lanWaiting: "Yerel ağ: diğer cihazlar aranıyor",
+  lanUp: (count) => `Yerel ağ: yakında ${count} cihaz`,
   lanBlocked: "Yerel ağ: macOS engelliyor",
   lanFailed: "Yerel ağ: çalışmıyor",
   fix: "Düzelt…",
@@ -314,18 +320,18 @@ const tr: Strings = {
   copyCard: "Kartı kopyala",
   copied: "Kopyalandı",
 
-  connectTitle: "Bir bilgisayara bağlan",
-  connectIntro: "Aynı ağdaki bilgisayarlar genellikle birbirini bulur. Bulamazlarsa adresle bağlan.",
-  listensOn: (port) => ` Bu bilgisayar ${port} portunu dinliyor.`,
+  connectTitle: "Bir cihaza bağlan",
+  connectIntro: "Aynı ağdaki cihazlar genellikle birbirini bulur. Bulamazlarsa adresle bağlan.",
+  listensOn: (port) => ` Bu cihaz ${port} portunu dinliyor.`,
   address: "Adres",
   connectButton: "Bağlan",
 
   failedTitle: "Yerel ağ çalışmıyor",
-  failedIntro: "Kervan bu ağdaki başka bir bilgisayara ulaşamadı:",
+  failedIntro: "Kervan bu ağdaki başka bir cihaza ulaşamadı:",
   failedHint:
-    "İki bilgisayarın aynı ağda olduğunu ve diğer bilgisayarın güvenlik duvarının Kervan'a izin verdiğini kontrol et. Misafir ağları çoğu zaman bilgisayarların birbirine ulaşmasını engeller.",
+    "İki cihazın aynı ağda olduğunu ve diğer cihazın güvenlik duvarının Kervan'a izin verdiğini kontrol et. Misafir ağları çoğu zaman cihazların birbirine ulaşmasını engeller.",
   blockedTitle: "Kervan'ın yerel ağı kullanmasına izin ver",
-  blockedIntro: "macOS, Kervan'ın bu ağdaki diğer bilgisayarlara ulaşmasına izin vermiyor; mesajlar bu Mac'ten çıkamıyor.",
+  blockedIntro: "macOS, Kervan'ın bu ağdaki diğer cihazlara ulaşmasına izin vermiyor; mesajlar bu Mac'ten çıkamıyor.",
   blockedStep1: "Sistem Ayarları → Gizlilik ve Güvenlik → Yerel Ağ'ı aç.",
   blockedStep2: "Kervan'ı aç.",
   blockedStep3: "Birkaç saniye sonra hâlâ engelli görünüyorsa Kervan'dan çık ve yeniden aç.",
@@ -340,7 +346,7 @@ const tr: Strings = {
   language: "Dil",
   languageSystem: "Sistem",
   eraseTitle: "Her şeyi sil",
-  eraseHint: "Kimliğini, kişilerini ve mesajlarını bu bilgisayardan siler. Geri alınamaz.",
+  eraseHint: "Kimliğini, kişilerini ve mesajlarını bu cihazdan siler. Geri alınamaz.",
   eraseButton: "Her şeyi sil…",
   eraseConfirm: "Emin misin? Kervan boş olarak yeniden başlar.",
   eraseNow: "Şimdi sil",

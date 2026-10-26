@@ -717,6 +717,34 @@ button.danger-outline {
   }
 }
 
+/* Phones: the list and the conversation take the whole screen in turn. */
+
+.shell.narrow {
+  grid-template-columns: minmax(0, 1fr);
+  height: 100dvh;
+}
+
+.shell.narrow.open .sidebar,
+.shell.narrow.open .status,
+.shell.narrow:not(.open) .conversation {
+  display: none;
+}
+
+.shell.narrow .sidebar {
+  border-right: 0;
+}
+
+.shell.narrow .chat-header {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 10px 14px 10px 8px;
+}
+
+.back-button {
+  margin-right: -4px;
+}
+
 /* Groups */
 
 .section-row {
@@ -872,6 +900,7 @@ button.danger-outline {
 
 .file-open {
   display: block;
+  max-width: 100%;
   padding: 0;
   border: 0;
   background: none;
@@ -881,7 +910,8 @@ button.danger-outline {
 .file-image {
   display: block;
   width: auto;
-  max-width: 280px;
+  /* A bubble on a phone is narrower than the photo's usual width. */
+  max-width: min(280px, 100%);
   max-height: 320px;
   border-radius: 10px;
 }

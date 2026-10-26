@@ -16,6 +16,9 @@ type Props = {
 
 type Recording = Recorder & { started: number };
 
+/** A touch keyboard's Enter starts a new line; the Send button sends. */
+const TOUCH = window.matchMedia("(pointer: coarse)").matches;
+
 export function Composer({ placeholder, overhead, conversation, onSend, onSendFile }: Props) {
   const { t } = useI18n();
   const [draft, setDraft] = useState("");
@@ -110,6 +113,7 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (TOUCH) return;
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       send();
@@ -134,7 +138,9 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
               : tooLong
                 ? t.tooLong(bytes, max)
                 : bytes === 0
-                  ? t.composerHint
+                  ? TOUCH
+                    ? ""
+                    : t.composerHint
                   : packets === 1
                     ? t.onePacket(bytes)
                     : t.packets(bytes, packets))}

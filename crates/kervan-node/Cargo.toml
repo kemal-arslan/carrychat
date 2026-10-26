@@ -29,3 +29,7 @@ tor-rtcompat = { version = "0.34", default-features = false, features = ["tokio"
 [dev-dependencies]
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 tempfile = "3"
+
+# Android has no system OpenSSL for native-tls (relays, Tor): build it in.
+[target.'cfg(target_os = "android")'.dependencies]
+openssl = { version = "0.10", features = ["vendored"] }

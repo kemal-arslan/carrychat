@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { Channel, Post } from "./api";
+import { BackButton } from "./BackButton";
 import { Composer } from "./Composer";
 import { FileBubble } from "./FileBubble";
 import { CHANNEL_OVERHEAD, fullTime, shortTime, utf8Length } from "./format";
@@ -13,9 +14,10 @@ type Props = {
   onSettings: () => void;
   onMute: (post: Post) => void;
   onAddCard: (card: string) => void;
+  onBack?: () => void;
 };
 
-export function ChannelChat({ channel, posts, onSend, onSendFile, onSettings, onMute, onAddCard }: Props) {
+export function ChannelChat({ channel, posts, onSend, onSendFile, onSettings, onMute, onAddCard, onBack }: Props) {
   const { t, language } = useI18n();
   const list = useRef<HTMLOListElement>(null);
 
@@ -26,6 +28,7 @@ export function ChannelChat({ channel, posts, onSend, onSendFile, onSettings, on
   return (
     <section className="chat" aria-label={`#${channel.name}`}>
       <header className="chat-header">
+        {onBack && <BackButton onBack={onBack} />}
         <h2>#{channel.name}</h2>
         <button className="members-link" onClick={onSettings}>
           {t.postingAs(channel.nick)}
@@ -71,7 +74,7 @@ export function ChannelChat({ channel, posts, onSend, onSendFile, onSettings, on
       </ol>
 
       <Composer
-        placeholder={t.messageTo(`#${channel.name}`)}
+        placeholder={t.messageChannel(channel.name)}
         overhead={CHANNEL_OVERHEAD + utf8Length(channel.nick)}
         conversation={`channel-${channel.id}`}
         onSend={onSend}

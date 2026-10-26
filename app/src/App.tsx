@@ -86,6 +86,9 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
   channelsRef.current = channels;
   const tRef = useRef(t);
   tRef.current = t;
+  const narrow = useNarrow();
+  const narrowRef = useRef(narrow);
+  narrowRef.current = narrow;
 
   const refreshContacts = useCallback(() => api.contacts().then(setContacts), []);
   const refreshGroups = useCallback(() => api.groups().then(setGroups), []);
@@ -110,19 +113,46 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
     if (channelId !== null) api.markChannelRead(channelId).then(refreshChannels);
   }, [refreshContacts, refreshGroups, refreshChannels]);
 
+  // On a phone the list and the conversation are pages of their own, and
+  // opening a conversation is a step that the back button takes back.
+  function open() {
+    if (narrowRef.current && history.state?.conversation !== true) {
+      history.pushState({ conversation: true }, "");
+    }
+  }
+
+  const closeAll = useCallback(() => {
+    setSelected(null);
+    setSelectedGroup(null);
+    setSelectedChannel(null);
+  }, []);
+
+  function back() {
+    if (history.state?.conversation === true) history.back();
+    else closeAll();
+  }
+
+  useEffect(() => {
+    window.addEventListener("popstate", closeAll);
+    return () => window.removeEventListener("popstate", closeAll);
+  }, [closeAll]);
+
   function selectContact(id: number) {
+    open();
     setSelectedGroup(null);
     setSelectedChannel(null);
     setSelected(id);
   }
 
   function selectGroup(id: number) {
+    open();
     setSelected(null);
     setSelectedChannel(null);
     setSelectedGroup(id);
   }
 
   function selectChannel(id: number) {
+    open();
     setSelected(null);
     setSelectedGroup(null);
     setSelectedChannel(id);
@@ -143,10 +173,12 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
   }, [refreshContacts, refreshGroups, refreshChannels, refreshStatus, markSelectedRead]);
 
   useEffect(() => {
+    // A phone starts on the list: opening the first contact would hide it.
+    if (narrow) return;
     if (selected === null && selectedGroup === null && selectedChannel === null && contacts.length > 0) {
       setSelected(contacts[0].id);
     }
-  }, [contacts, selected, selectedGroup, selectedChannel]);
+  }, [contacts, selected, selectedGroup, selectedChannel, narrow]);
 
   useEffect(() => {
     if (selectedChannel === null) return;
@@ -348,7 +380,7 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
     if (!contact) return;
     try {
       await api.declineContact(contact.id);
-      setSelected(null);
+      back();
       setMessages([]);
       refreshContacts();
       show(t.declined(contact.name));
@@ -455,7 +487,7 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
   }
 
   return (
-    <div className="shell">
+    <div className={["shell", narrow && "narrow", (channel || group || contact) && "open"].filter(Boolean).join(" ")}>
       <aside className="sidebar">
         <header className="brand">
           <Logo size={32} />
@@ -521,6 +553,7 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
             onSend={sendToChannel}
             onSendFile={sendFile}
             onSettings={() => setDialog("channelSettings")}
+            onBack={narrow ? back : undefined}
             onMute={mute}
             onAddCard={addSharedCard}
           />
@@ -531,6 +564,7 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
             onSend={sendToGroup}
             onSendFile={sendFile}
             onMembers={() => setDialog("members")}
+            onBack={narrow ? back : undefined}
           />
         ) : contact ? (
           <Chat
@@ -540,6 +574,7 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
             onSendFile={sendFile}
             onAccept={accept}
             onDecline={decline}
+            onBack={narrow ? back : undefined}
           />
         ) : (
           <div className="placeholder">
@@ -608,7 +643,7 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
           }}
           onLeft={() => {
             setDialog(null);
-            setSelectedChannel(null);
+            back();
             setPosts([]);
             refreshChannels();
             show(t.leftChannel(channel.name));
@@ -662,4 +697,18 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
       )}
     </div>
   );
+}
+
+const NARROW = "(max-width: 640px)";
+
+/** Whether the window is phone-sized, kept current as it changes. */
+function useNarrow() {
+  const [narrow, setNarrow] = useState(() => window.matchMedia(NARROW).matches);
+  useEffect(() => {
+    const query = window.matchMedia(NARROW);
+    const changed = () => setNarrow(query.matches);
+    query.addEventListener("change", changed);
+    return () => query.removeEventListener("change", changed);
+  }, []);
+  return narrow;
 }

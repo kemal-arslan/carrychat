@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- The dark of the Kervan icon, so the adaptive icon's mask shows no edge. -->
+  <color name="ic_launcher_background">#14232B</color>
+</resources>

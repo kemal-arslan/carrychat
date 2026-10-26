@@ -1,6 +1,7 @@
-//! The desktop app: a thin layer of commands over a [`Node`]. Node events are
+//! The app: a thin layer of commands over a [`Node`]. Node events are
 //! forwarded to the window as `kervan-event`.
 
+use std::io::Write;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -11,6 +12,7 @@ use kervan_node::{
     MessageView, MutedView, Node, PostView, Profile, Settings, Status,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_fs::{FilePath, FsExt, OpenOptions};
 
 struct AppState {
     dir: PathBuf,
@@ -357,13 +359,27 @@ fn file_data(state: State<'_, AppState>, file_id: i64) -> CommandResult<Option<F
 
 /// Writes a file that arrived to a path the user chose.
 #[tauri::command]
-fn save_file(state: State<'_, AppState>, file_id: i64, path: PathBuf) -> CommandResult<()> {
+fn save_file(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    file_id: i64,
+    path: FilePath,
+) -> CommandResult<()> {
     let (_, data) = state
         .node()?
         .file_data(file_id)
         .map_err(text)?
         .ok_or_else(|| "the file is not all here yet".to_owned())?;
-    std::fs::write(path, data).map_err(text)
+    write_to(&app, path, &data)
+}
+
+/// Writes to a chosen file. On Android the file picker gives a content URI
+/// rather than a path, which only the fs plugin can open.
+fn write_to(app: &AppHandle, path: FilePath, data: &[u8]) -> CommandResult<()> {
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    let mut file = app.fs().open(path, options).map_err(text)?;
+    file.write_all(data).map_err(text)
 }
 
 #[derive(serde::Serialize)]
@@ -390,13 +406,20 @@ fn status(state: State<'_, AppState>) -> CommandResult<Status> {
 }
 
 #[tauri::command]
-fn export_file(state: State<'_, AppState>, path: PathBuf) -> CommandResult<usize> {
-    state.node()?.export_file(&path).map_err(text)
+fn export_file(app: AppHandle, state: State<'_, AppState>, path: FilePath) -> CommandResult<usize> {
+    let (data, count) = state.node()?.export_bytes().map_err(text)?;
+    write_to(&app, path, &data)?;
+    Ok(count)
 }
 
 #[tauri::command]
-fn import_file(state: State<'_, AppState>, path: PathBuf) -> CommandResult<ImportReport> {
-    state.node()?.import_file(&path).map_err(text)
+fn import_file(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: FilePath,
+) -> CommandResult<ImportReport> {
+    let data = app.fs().read(path).map_err(text)?;
+    state.node()?.import_bytes(&data).map_err(text)
 }
 
 #[tauri::command]
@@ -426,6 +449,7 @@ fn open_network_settings() -> CommandResult<()> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             // KERVAN_DIR lets two copies run side by side for testing.

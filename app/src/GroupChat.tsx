@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { Group, GroupMessage } from "./api";
+import { BackButton } from "./BackButton";
 import { Composer } from "./Composer";
 import { FileBubble } from "./FileBubble";
 import { GROUP_OVERHEAD, fullTime, shortTime } from "./format";
@@ -11,9 +12,10 @@ type Props = {
   onSend: (text: string) => Promise<void>;
   onSendFile: (mime: string, bytes: Uint8Array) => Promise<void>;
   onMembers: () => void;
+  onBack?: () => void;
 };
 
-export function GroupChat({ group, messages, onSend, onSendFile, onMembers }: Props) {
+export function GroupChat({ group, messages, onSend, onSendFile, onMembers, onBack }: Props) {
   const { t, language } = useI18n();
   const list = useRef<HTMLOListElement>(null);
 
@@ -24,6 +26,7 @@ export function GroupChat({ group, messages, onSend, onSendFile, onMembers }: Pr
   return (
     <section className="chat" aria-label={group.name}>
       <header className="chat-header">
+        {onBack && <BackButton onBack={onBack} />}
         <h2>{group.name}</h2>
         <button className="members-link" onClick={onMembers}>
           {t.membersCount(group.members.length)}
@@ -49,7 +52,7 @@ export function GroupChat({ group, messages, onSend, onSendFile, onMembers }: Pr
 
       {group.member ? (
         <Composer
-          placeholder={t.messageTo(group.name)}
+          placeholder={t.messageGroup(group.name)}
           overhead={GROUP_OVERHEAD}
           conversation={`group-${group.id}`}
           onSend={onSend}

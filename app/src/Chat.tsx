@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { Contact, Message } from "./api";
+import { BackButton } from "./BackButton";
 import { Composer } from "./Composer";
 import { FileBubble } from "./FileBubble";
 import { PAIR_OVERHEAD, fullTime, shortTime } from "./format";
@@ -12,9 +13,11 @@ type Props = {
   onSendFile: (mime: string, bytes: Uint8Array) => Promise<void>;
   onAccept: () => void;
   onDecline: () => void;
+  /** Set on a phone, where the conversation covers the list. */
+  onBack?: () => void;
 };
 
-export function Chat({ contact, messages, onSend, onSendFile, onAccept, onDecline }: Props) {
+export function Chat({ contact, messages, onSend, onSendFile, onAccept, onDecline, onBack }: Props) {
   const { t, language } = useI18n();
   const list = useRef<HTMLOListElement>(null);
 
@@ -31,6 +34,7 @@ export function Chat({ contact, messages, onSend, onSendFile, onAccept, onDeclin
   return (
     <section className="chat" aria-label={contact.name}>
       <header className="chat-header">
+        {onBack && <BackButton onBack={onBack} />}
         <h2>{contact.name}</h2>
         <span className="fingerprint" title={t.compareFingerprint}>
           {contact.fingerprint}

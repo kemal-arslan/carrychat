@@ -81,7 +81,7 @@ kervan erase --yes                           # delete identity, contacts and mes
 2. **Local network link, message store, desktop app, command line, USB export and import** (done)
 3. LoRa link through a Meshtastic radio over USB
 4. **Internet link over Nostr** (done). Computers with internet also pass on what they carry for computers without it. Fetching for those computers is still open.
-5. Bluetooth link, mobile apps, HF radio
+5. **Android app** (done). Bluetooth link, iOS app, HF radio
 
 ## Build
 
@@ -92,12 +92,19 @@ cd app && npm run tauri build    # desktop app installer
 
 On Linux the desktop app needs WebKitGTK. See the [Tauri prerequisites](https://tauri.app/start/prerequisites/).
 
+The Android app builds from the same project. It needs JDK 17, the Android SDK with NDK 27, and the Rust Android targets, set up as the [Tauri Android prerequisites](https://tauri.app/start/prerequisites/#android) describe. OpenSSL is built into the app on Android, and its build looks for `aarch64-linux-android-ranlib`, which current NDKs no longer ship, so point it at the NDK's own `llvm-ranlib` (under `prebuilt/linux-x86_64` on Linux):
+
+```bash
+export RANLIB_aarch64_linux_android=$NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ranlib
+cd app && npx tauri android build --target aarch64 --apk
+```
+
 | Crate | What it is |
 | --- | --- |
 | [`kervan-proto`](crates/kervan-proto) | Wire format and cryptography, no I/O |
 | [`kervan-node`](crates/kervan-node) | Message store, forwarding, local network and file links |
 | [`kervan-cli`](crates/kervan-cli) | The `kervan` command |
-| [`app`](app) | The desktop app (Tauri and React) |
+| [`app`](app) | The desktop and Android app (Tauri and React) |
 
 ## Security
 

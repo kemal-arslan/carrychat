@@ -596,16 +596,31 @@ impl Node {
     /// Writes every bundle and tombstone this node holds to a file, for
     /// someone to carry. Returns the number of frames written.
     pub fn export_file(&self, path: &Path) -> Result<usize> {
+        let (data, count) = self.export_bytes()?;
+        std::fs::write(path, data)?;
+        Ok(count)
+    }
+
+    /// What `export_file` writes, and how many frames it holds, for a
+    /// caller that writes it somewhere other than a path.
+    pub fn export_bytes(&self) -> Result<(Vec<u8>, usize)> {
         let frames = self.shared.engine().export_frames(now())?;
-        std::fs::write(path, file::encode(&frames))?;
-        Ok(frames.len())
+        Ok((file::encode(&frames), frames.len()))
     }
 
     pub fn import_file(&self, path: &Path) -> Result<ImportReport> {
         if std::fs::metadata(path)?.len() > file::MAX_FILE_LEN {
             return Err(Error::Invalid("file is too large"));
         }
-        let (frames, skipped) = file::decode(&std::fs::read(path)?)?;
+        self.import_bytes(&std::fs::read(path)?)
+    }
+
+    /// Takes in a file that `export_bytes` wrote.
+    pub fn import_bytes(&self, data: &[u8]) -> Result<ImportReport> {
+        if data.len() as u64 > file::MAX_FILE_LEN {
+            return Err(Error::Invalid("file is too large"));
+        }
+        let (frames, skipped) = file::decode(data)?;
         let mut report = ImportReport {
             skipped,
             ..ImportReport::default()
