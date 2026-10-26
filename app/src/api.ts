@@ -217,6 +217,9 @@ export interface Api {
   eraseEverything(): Promise<void>;
   /** Shows a system notification, asking for permission the first time. */
   notify(title: string, body: string): Promise<void>;
+  /** Tells the app the notification setting and language, which Android
+   * uses for messages that arrive while this page is closed. */
+  setNotifications(on: boolean, language: string): Promise<void>;
   onEvent(handler: (event: NodeEvent) => void): Promise<() => void>;
   onError(handler: (message: string) => void): Promise<() => void>;
 }
@@ -339,6 +342,7 @@ function desktopApi(): Api {
       if (!granted) granted = (await requestPermission()) === "granted";
       if (granted) sendNotification({ title, body });
     },
+    setNotifications: (on, language) => call("set_notifications", { on, language }),
     onEvent: (handler) => listen<NodeEvent>("kervan-event", (event) => handler(event.payload)),
     onError: (handler) => listen<string>("kervan-error", (event) => handler(event.payload)),
   };
@@ -762,6 +766,7 @@ function previewApi(): Api {
       location.reload();
     },
     async notify() {},
+    async setNotifications() {},
     async onEvent(handler) {
       listeners.push(handler);
       return () => listeners.splice(listeners.indexOf(handler), 1);

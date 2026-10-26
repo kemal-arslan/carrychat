@@ -1,4 +1,9 @@
 <resources>
     <string name="app_name">"Kervan"</string>
     <string name="main_activity_title">"Kervan"</string>
+    <string name="background_channel">Running in the background</string>
+    <string name="background_title">Kervan is receiving messages</string>
+    <string name="background_text">Messages arrive and are passed on while the app is closed.</string>
+    <string name="background_stop">Turn off</string>
+    <string name="messages_channel">Messages</string>
 </resources>

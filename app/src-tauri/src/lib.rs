@@ -14,6 +14,9 @@ use kervan_node::{
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_fs::{FilePath, FsExt, OpenOptions};
 
+#[cfg(target_os = "android")]
+mod android;
+
 struct AppState {
     dir: PathBuf,
     node: Mutex<Option<Node>>,
@@ -48,8 +51,12 @@ fn launch(app: &AppHandle, node: &Node, dir: &Path) {
     };
     let mut events = node.subscribe();
     let handle = app.clone();
+    #[cfg(target_os = "android")]
+    let names = node.clone();
     tauri::async_runtime::spawn(async move {
         while let Ok(event) = events.recv().await {
+            #[cfg(target_os = "android")]
+            android::notify(&handle, &names, &event);
             let _ = handle.emit("kervan-event", event);
         }
     });
@@ -394,6 +401,16 @@ fn set_tor(state: State<'_, AppState>, on: bool) -> CommandResult<()> {
     state.node()?.set_tor(on).map_err(text)
 }
 
+/// The page's notification setting and language, for the notifications
+/// Android shows while the page is closed.
+#[tauri::command]
+fn set_notifications(on: bool, language: String) {
+    #[cfg(target_os = "android")]
+    android::set_notifications(on, &language);
+    #[cfg(not(target_os = "android"))]
+    let _ = (on, language);
+}
+
 /// Starts the app again, for a setting that applies at start.
 #[tauri::command]
 fn restart(app: AppHandle) {
@@ -457,6 +474,8 @@ pub fn run() {
                 Some(dir) => PathBuf::from(dir),
                 None => app.path().app_data_dir()?,
             };
+            #[cfg(target_os = "android")]
+            android::keep(app.handle());
             let node = Node::open(&dir)?;
             if let Some(node) = &node {
                 launch(app.handle(), node, &dir);
@@ -504,6 +523,7 @@ pub fn run() {
             file_data,
             save_file,
             set_tor,
+            set_notifications,
             restart,
             status,
             export_file,
@@ -511,6 +531,10 @@ pub fn run() {
             connect_peer,
             open_network_settings,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Kervan");
+        .build(tauri::generate_context!())
+        .expect("error while building Kervan")
+        .run(|_app, _event| {
+            #[cfg(target_os = "android")]
+            android::on_run_event(_event);
+        });
 }

@@ -25,3 +25,7 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-notification = "2"
+
+# Android: posting notifications through the service while no screen is open.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"

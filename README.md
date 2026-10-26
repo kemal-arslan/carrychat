@@ -99,6 +99,8 @@ export RANLIB_aarch64_linux_android=$NDK_HOME/toolchains/llvm/prebuilt/darwin-x8
 cd app && npx tauri android build --target aarch64 --apk
 ```
 
+On a phone Kervan keeps running after its screen is closed, with an ongoing notification, so messages still arrive, and are passed on for others, while the app is out of sight. Messages that arrive then are announced as notifications. **Turn off** in that notification stops Kervan until it is opened again.
+
 | Crate | What it is |
 | --- | --- |
 | [`kervan-proto`](crates/kervan-proto) | Wire format and cryptography, no I/O |

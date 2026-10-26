@@ -239,7 +239,7 @@ export function SettingsDialog({
   onClose: () => void;
   onRenamed: (profile: Profile) => void;
 }) {
-  const { t, choice, setChoice } = useI18n();
+  const { t, choice, setChoice, language } = useI18n();
   const [name, setName] = useState(profile.name);
   const [readReceipts, setReadReceipts] = useState<boolean | null>(null);
   // Tor as the link started with it, and as now chosen.
@@ -282,6 +282,7 @@ export function SettingsDialog({
   function toggleNotifications(on: boolean) {
     setNotifications(on);
     setNotificationsEnabled(on);
+    api.setNotifications(on, language);
   }
 
   async function erase() {

@@ -8,6 +8,9 @@
     <!-- Voice messages and message notifications. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- The service that keeps messages arriving while the app is closed. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
@@ -30,6 +33,11 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".KervanService"
+            android:exported="false"
+            android:foregroundServiceType="remoteMessaging" />
 
         <provider
           android:name="androidx.core.content.FileProvider"

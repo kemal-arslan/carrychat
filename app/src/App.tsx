@@ -158,6 +158,11 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
     setSelectedChannel(id);
   }
 
+  // Android announces messages itself while this page is closed.
+  useEffect(() => {
+    api.setNotifications(notificationsEnabled(), language);
+  }, [language]);
+
   useEffect(() => {
     refreshContacts();
     refreshGroups();

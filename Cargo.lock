@@ -3112,6 +3112,7 @@ name = "kervan-app"
 version = "0.0.1"
 dependencies = [
  "data-encoding",
+ "jni",
  "kervan-node",
  "serde",
  "serde_json",
