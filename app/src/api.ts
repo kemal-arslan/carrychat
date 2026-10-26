@@ -193,6 +193,8 @@ export interface Api {
   sendFile(target: FileTarget, mime: string, bytes: Uint8Array): Promise<Message | GroupMessage | Post>;
   /** An object URL for a file that is all here, or null. */
   fileUrl(fileId: number): Promise<string | null>;
+  /** Asks where to save a file that arrived, then saves it. False if cancelled. */
+  saveFile(file: FileView): Promise<boolean>;
   settings(): Promise<Settings>;
   setReadReceipts(on: boolean): Promise<void>;
   status(): Promise<Status>;
@@ -212,6 +214,19 @@ export interface Api {
 }
 
 const FILE_FILTERS = [{ name: "Kervan", extensions: ["kervan"] }];
+
+/** A name to suggest when saving a file, from its media type. */
+function fileName(file: FileView): string {
+  const extension: Record<string, string> = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "audio/mp4": "m4a",
+    "audio/webm": "webm",
+    "audio/ogg": "ogg",
+  };
+  return `kervan-${file.id}.${extension[file.mime] ?? "bin"}`;
+}
 
 /** Object URLs of files that arrived, made once each. */
 const fileUrls = new Map<number, string>();
@@ -272,6 +287,12 @@ function desktopApi(): Api {
     mutedAuthors: (channelId) => call("muted_authors", { channelId }),
     markChannelRead: (channelId) => call("mark_channel_read", { channelId }),
     sendFile: (target, mime, bytes) => call("send_file", { target, mime, data: toBase64(bytes) }),
+    async saveFile(file) {
+      const path = await save({ defaultPath: fileName(file) });
+      if (!path) return false;
+      await call("save_file", { fileId: file.id, path });
+      return true;
+    },
     async fileUrl(fileId) {
       const cached = fileUrls.get(fileId);
       if (cached) return cached;
@@ -663,6 +684,15 @@ function previewApi(): Api {
     },
     async fileUrl(fileId) {
       return fileUrls.get(fileId) ?? null;
+    },
+    async saveFile(file) {
+      const url = fileUrls.get(file.id);
+      if (!url) return false;
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName(file);
+      link.click();
+      return true;
     },
     async markChannelRead(channelId) {
       posts.filter((candidate) => candidate.channelId === channelId).forEach((candidate) => {

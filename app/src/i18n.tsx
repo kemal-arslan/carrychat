@@ -205,6 +205,7 @@ const en = {
   fileArriving: (kind: string, received: number, chunks: number) => `${kind} arriving… ${received}/${chunks}`,
   fileLost: "This file did not arrive in time.",
   fileOther: (mime: string, kb: number) => `${mime}, ${kb} KB`,
+  saveFile: "Save…",
   groupChatEmpty: (name: string) =>
     `Nothing in ${name} yet. A message here is one bundle that every member opens, and members carry it on for one another.`,
 };
@@ -405,6 +406,7 @@ const tr: Strings = {
   fileArriving: (kind, received, chunks) => `${kind} geliyor… ${received}/${chunks}`,
   fileLost: "Bu dosya zamanında gelmedi.",
   fileOther: (mime, kb) => `${mime}, ${kb} KB`,
+  saveFile: "Kaydet…",
   groupChatEmpty: (name) =>
     `${name} grubunda henüz bir şey yok. Buradaki her mesaj, bütün üyelerin açtığı tek bir pakettir ve üyeler onu birbirlerine taşır.`,
 };

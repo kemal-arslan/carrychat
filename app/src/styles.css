@@ -870,8 +870,12 @@ button.danger-outline {
 
 /* Files */
 
-.bubble > a:has(.file-image) {
+.file-open {
   display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
 }
 
 .file-image {
@@ -882,10 +886,42 @@ button.danger-outline {
   border-radius: 10px;
 }
 
-.file-audio {
+.file-audio audio {
   display: block;
   width: 240px;
   max-width: 100%;
+}
+
+.file-save {
+  margin-top: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  padding: 24px;
+  background: rgb(10 18 22 / 0.86);
+  cursor: zoom-out;
+}
+
+.lightbox img {
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 110px);
+  border-radius: 8px;
+  cursor: default;
+}
+
+.lightbox-actions {
+  display: flex;
+  gap: 8px;
+  cursor: default;
 }
 
 .file-pending {
@@ -911,4 +947,10 @@ button.danger-outline {
 .composer-row .attach.recording {
   color: var(--danger);
   border-color: var(--danger);
+}
+
+.lightbox-actions .file-save {
+  margin-top: 0;
+  padding: revert-layer;
+  font-size: inherit;
 }

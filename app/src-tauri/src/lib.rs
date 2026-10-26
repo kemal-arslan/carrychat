@@ -347,6 +347,17 @@ fn file_data(state: State<'_, AppState>, file_id: i64) -> CommandResult<Option<F
         }))
 }
 
+/// Writes a file that arrived to a path the user chose.
+#[tauri::command]
+fn save_file(state: State<'_, AppState>, file_id: i64, path: PathBuf) -> CommandResult<()> {
+    let (_, data) = state
+        .node()?
+        .file_data(file_id)
+        .map_err(text)?
+        .ok_or_else(|| "the file is not all here yet".to_owned())?;
+    std::fs::write(path, data).map_err(text)
+}
+
 #[derive(serde::Serialize)]
 struct FileData {
     mime: String,
@@ -447,6 +458,7 @@ pub fn run() {
             mark_channel_read,
             send_file,
             file_data,
+            save_file,
             status,
             export_file,
             import_file,
