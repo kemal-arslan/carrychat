@@ -242,6 +242,9 @@ export function SettingsDialog({
   const { t, choice, setChoice } = useI18n();
   const [name, setName] = useState(profile.name);
   const [readReceipts, setReadReceipts] = useState<boolean | null>(null);
+  // Tor as the link started with it, and as now chosen.
+  const [torAtStart, setTorAtStart] = useState<boolean | null>(null);
+  const [tor, setTor] = useState(false);
   const [notifications, setNotifications] = useState(notificationsEnabled);
   const [confirmErase, setConfirmErase] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -249,7 +252,11 @@ export function SettingsDialog({
   const tooLong = utf8Length(trimmed) > MAX_NAME_BYTES;
 
   useEffect(() => {
-    api.settings().then((settings) => setReadReceipts(settings.readReceipts));
+    api.settings().then((settings) => {
+      setReadReceipts(settings.readReceipts);
+      setTorAtStart(settings.tor);
+      setTor(settings.tor);
+    });
   }, []);
 
   async function rename(event: FormEvent) {
@@ -265,6 +272,11 @@ export function SettingsDialog({
   async function toggleReadReceipts(on: boolean) {
     setReadReceipts(on);
     await api.setReadReceipts(on).catch((failure) => setError(errorText(failure)));
+  }
+
+  async function toggleTor(on: boolean) {
+    setTor(on);
+    await api.setTor(on).catch((failure) => setError(errorText(failure)));
   }
 
   function toggleNotifications(on: boolean) {
@@ -311,6 +323,24 @@ export function SettingsDialog({
         />
         {t.notifications}
       </label>
+      <label className="toggle">
+        <input
+          type="checkbox"
+          checked={tor}
+          disabled={torAtStart === null}
+          onChange={(event) => toggleTor(event.target.checked)}
+        />
+        {t.torSetting}
+      </label>
+      <p className="hint">{t.torHint}</p>
+      {torAtStart !== null && tor !== torAtStart && (
+        <div className="inline-field">
+          <p className="hint">{t.torRestart}</p>
+          <button className="primary" type="button" onClick={() => api.restart()}>
+            {t.restartNow}
+          </button>
+        </div>
+      )}
 
       <label htmlFor="language">{t.language}</label>
       <select id="language" value={choice} onChange={(event) => setChoice(event.target.value as LanguageChoice)}>

@@ -9,7 +9,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use kervan_node::{
     ChannelView, ContactView, Event, FileView, GroupView, InternetConfig, LanConfig, LanProblem,
-    Node,
+    Node, TorState,
 };
 use tokio::io::{AsyncBufReadExt, BufReader};
 
@@ -93,6 +93,9 @@ enum Command {
         /// Nostr relay to use instead of the defaults. Repeat for more.
         #[arg(long = "relay")]
         relays: Vec<String>,
+        /// Reach the relays over Tor only, never directly.
+        #[arg(long)]
+        tor: bool,
         /// Send every line typed on standard input to this contact.
         #[arg(long)]
         chat: Option<String>,
@@ -314,6 +317,7 @@ async fn run(cli: Cli) -> AnyResult {
             no_discovery,
             no_internet,
             relays,
+            tor,
             chat,
         } => {
             let chat = chat.map(|name| find_contact(&node, &name)).transpose()?;
@@ -325,14 +329,14 @@ async fn run(cli: Cli) -> AnyResult {
                 lan.discovery = None;
             }
             let internet = (!no_internet).then(|| {
-                if relays.is_empty() {
-                    InternetConfig::default()
-                } else {
-                    InternetConfig {
-                        relays,
-                        ..InternetConfig::default()
-                    }
+                let mut config = InternetConfig {
+                    tor: tor.then(|| dir.join("tor")),
+                    ..InternetConfig::default()
+                };
+                if !relays.is_empty() {
+                    config.relays = relays;
                 }
+                config
             });
             run_node(node, lan, internet, connect, chat).await?;
         }
@@ -381,13 +385,18 @@ async fn run_node(
         tokio::select! {
             event = events.recv() => match event {
                 Ok(Event::MessageReceived { message }) => {
-                    println!("{}: {}", names(message.contact_id), message.body);
+                    println!("{}: {}{}", names(message.contact_id), message.body, describe(message.file.as_ref()));
                 }
                 Ok(Event::MessageDelivered { contact_id, .. }) => {
                     println!("✓ delivered to {}", names(contact_id));
                 }
                 Ok(Event::PeersChanged { count }) => println!("· {count} node(s) nearby"),
-                Ok(Event::InternetChanged { relays }) => println!("· {relays} internet relay(s) connected"),
+                Ok(Event::InternetChanged { relays }) => match node.status().ok().and_then(|status| status.internet_tor) {
+                    Some(TorState::Starting) => println!("· starting Tor"),
+                    Some(TorState::Failed { detail }) => eprintln!("! Tor did not start: {detail}"),
+                    Some(TorState::Ready) => println!("· {relays} internet relay(s) connected over Tor"),
+                    None => println!("· {relays} internet relay(s) connected"),
+                },
                 Ok(Event::MessagesRead { contact_id, message_ids }) => {
                     println!("✓✓ {} read {} message(s)", names(contact_id), message_ids.len());
                 }
@@ -408,7 +417,7 @@ async fn run_node(
                         .and_then(|groups| groups.into_iter().find(|group| group.id == message.group_id))
                         .map_or_else(|| format!("group {}", message.group_id), |group| group.name);
                     let sender = message.sender.unwrap_or_default();
-                    println!("[{group}] {sender}: {}", message.body);
+                    println!("[{group}] {sender}: {}{}", message.body, describe(message.file.as_ref()));
                 }
                 Ok(Event::PostReceived { post }) => {
                     let channel = node
@@ -421,7 +430,7 @@ async fn run_node(
                             "[#{channel}] {} ({}) shared a card: {} {}",
                             post.nick, post.author, card.name, card.fingerprint
                         ),
-                        None => println!("[#{channel}] {} ({}): {}", post.nick, post.author, post.body),
+                        None => println!("[#{channel}] {} ({}): {}{}", post.nick, post.author, post.body, describe(post.file.as_ref())),
                     }
                 }
                 Ok(Event::GroupChanged { group }) => {

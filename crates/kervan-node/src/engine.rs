@@ -488,7 +488,13 @@ impl Engine {
     pub fn settings(&self) -> Result<Settings> {
         Ok(Settings {
             read_receipts: self.store.meta("read_receipts")?.as_deref() != Some(b"0".as_slice()),
+            tor: self.store.meta("tor")?.as_deref() == Some(b"1".as_slice()),
         })
+    }
+
+    /// Whether the internet link should go over Tor, from its next start.
+    pub fn set_tor(&self, on: bool) -> Result<()> {
+        self.store.set_meta("tor", if on { b"1" } else { b"0" })
     }
 
     pub fn set_read_receipts(&self, on: bool) -> Result<()> {

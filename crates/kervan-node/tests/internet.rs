@@ -115,6 +115,7 @@ fn config_with(url: &str, keepalive: Duration) -> InternetConfig {
     InternetConfig {
         relays: vec![url.to_owned()],
         keepalive,
+        tor: None,
     }
 }
 

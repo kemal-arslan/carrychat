@@ -28,12 +28,28 @@ export function StatusBar({ status, preview, onNetworkHelp, onConnect, onImport,
     failed: t.lanFailed,
   }[link];
 
-  const internet = !status?.internetOn ? "off" : status.internetRelays > 0 ? "up" : "waiting";
-  const internetLabel = {
-    off: t.internetOff,
-    waiting: t.internetConnecting,
-    up: t.internetUp(status?.internetRelays ?? 0),
-  }[internet];
+  const tor = status?.internetTor ?? null;
+  const internet = !status?.internetOn
+    ? "off"
+    : tor?.state === "failed"
+      ? "failed"
+      : tor?.state !== "starting" && status.internetRelays > 0
+        ? "up"
+        : "waiting";
+  const internetLabel = tor
+    ? {
+        off: t.internetOff,
+        failed: t.torFailed,
+        waiting: tor.state === "starting" ? t.torStarting : t.torConnecting,
+        up: t.torUp(status?.internetRelays ?? 0),
+      }[internet]
+    : {
+        off: t.internetOff,
+        failed: t.internetOff,
+        waiting: t.internetConnecting,
+        up: t.internetUp(status?.internetRelays ?? 0),
+      }[internet];
+  const internetTitle = tor?.state === "failed" ? tor.detail : (status?.internetRefusal ?? undefined);
 
   return (
     <footer className="status">
@@ -46,7 +62,7 @@ export function StatusBar({ status, preview, onNetworkHelp, onConnect, onImport,
           </button>
         )}
       </span>
-      <span className={`link ${internet}`} title={status?.internetRefusal ?? undefined}>
+      <span className={`link ${internet}`} title={internetTitle}>
         <span className="dot" aria-hidden />
         {internetLabel}
       </span>

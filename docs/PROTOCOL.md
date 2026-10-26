@@ -408,7 +408,8 @@ Implemented in `crates/kervan-node/src/internet.rs`.
 - **Connections.** A node pings every relay every 20 seconds and drops a connection that has been silent for 40, then connects again. Right after sending, it also pings every relay and drops a connection that does not answer within 5 seconds. On connecting again it posts its waiting bundles once more. A computer that moves to another network can otherwise keep a dead connection for minutes without noticing, and lose what it sends into it.
 - **What a node posts.** Its own bundles when it sends them and again on every connection, the tombstones of bundles it receives, and, as a gateway, every bundle it starts carrying that came over another link.
 - **What a node takes.** Only bundles for itself and tombstones. A bundle from a relay that does not open is dropped, not carried, so a relay cannot fill a node's store.
-- **Relays** see tags, sizes, timing and the node's IP address. They also see which tags one connection asks for together, which links the tags of one node's contacts within a day. Reaching relays over Tor is future work.
+- **Tor.** A node may reach the relays over Tor, each relay on a circuit of its own, with the relay's host name looked up at the exit. Such a node never connects directly: while Tor does not work, it does not use the internet at all.
+- **Relays** see tags, sizes and timing, and, unless the node comes over Tor, its IP address. They also see which tags one connection asks for together, which links the tags of one node's contacts within a day.
 
 The default relays are `wss://relay.damus.io`, `wss://nos.lol` and `wss://relay.primal.net`. Fetching for nodes without internet access (downlink through a gateway) is still open (§11).
 

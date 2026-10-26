@@ -20,6 +20,7 @@ Kervan sends each message over the best link it has, and keeps it until one appe
 | File on a USB stick | as far as someone carries it | nothing else reaches |
 
 - **One message, one radio packet.** A bundle adds 104 bytes to a message (67 before a session starts), so up to 128 bytes of text fit into a single 233-byte Meshtastic packet. Longer messages are split.
+- **Tor built in.** If you choose, Kervan reaches the internet relays over Tor, so they never see your IP address and your network does not see that you use Kervan. It never falls back to a direct connection: while Tor does not work, it stays off the internet and keeps using the local network and files.
 - **Store and forward.** Every computer keeps its own outgoing messages and carries other people's for up to 7 days, passing them on when it meets a new link.
 - **Nothing to learn in transit.** Devices that carry a message see only a tag that changes daily and differs per direction. Without one of the two keys, they cannot tell who it is from or for.
 - **Forward secrecy.** Once both contacts have written, keys change with every reply: a Double Ratchet adapted to messages that arrive days late, twice or out of order. A key taken from a device later opens none of the messages before it.
@@ -59,6 +60,7 @@ kervan send Deniz "İyiyim, Kadıköy'deyim."
 kervan send-file Deniz photo.jpg             # a photo or voice message, up to 1 MB
 kervan save-file 3 photo.jpg                 # a file that arrived, by the number in the log
 kervan run                                   # deliver, receive and relay (local network and internet)
+kervan run --tor                             # the same, with the internet only over Tor
 kervan export messages.kervan                # or carry everything on a USB stick
 kervan group create Mahalle Deniz Mehmet     # you become the group's admin
 kervan group send Mahalle "Su dağıtımı okulun önünde."

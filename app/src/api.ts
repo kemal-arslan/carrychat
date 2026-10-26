@@ -119,7 +119,10 @@ export type Message = {
   file: FileView | null;
 };
 
-export type Settings = { readReceipts: boolean };
+export type Settings = { readReceipts: boolean; tor: boolean };
+
+/** How the internet link stands with Tor, when it goes over Tor. */
+export type TorState = { state: "starting" } | { state: "ready" } | { state: "failed"; detail: string };
 
 /** Why the local network link is not working. `blocked`: macOS denies the Local Network permission. */
 export type LanProblem = { kind: "blocked" | "failed"; detail: string };
@@ -132,6 +135,8 @@ export type Status = {
   internetRelays: number;
   /** The last reason a relay gave for refusing an event. */
   internetRefusal: string | null;
+  /** Tor's state, when the internet link goes over Tor. */
+  internetTor: TorState | null;
   outbox: number;
   carried: number;
 };
@@ -197,6 +202,9 @@ export interface Api {
   saveFile(file: FileView): Promise<boolean>;
   settings(): Promise<Settings>;
   setReadReceipts(on: boolean): Promise<void>;
+  /** Chooses Tor for the internet link; it applies after a restart. */
+  setTor(on: boolean): Promise<void>;
+  restart(): Promise<void>;
   status(): Promise<Status>;
   /** Asks where to save, then exports. Returns null if cancelled. */
   exportFile(): Promise<number | null>;
@@ -214,6 +222,13 @@ export interface Api {
 }
 
 const FILE_FILTERS = [{ name: "Kervan", extensions: ["kervan"] }];
+
+function torPreview(): TorState | null {
+  const state = new URLSearchParams(location.search).get("tor");
+  if (state === "starting" || state === "ready") return { state };
+  if (state === "failed") return { state, detail: "Unable to connect to the Tor network" };
+  return null;
+}
 
 /** A name to suggest when saving a file, from its media type. */
 function fileName(file: FileView): string {
@@ -304,6 +319,8 @@ function desktopApi(): Api {
     },
     settings: () => call("settings"),
     setReadReceipts: (on) => call("set_read_receipts", { on }),
+    setTor: (on) => call("set_tor", { on }),
+    restart: () => call("restart"),
     status: () => call("status"),
     async exportFile() {
       const day = new Date().toISOString().slice(0, 10);
@@ -332,7 +349,7 @@ function previewApi(): Api {
   const listeners: ((event: NodeEvent) => void)[] = [];
   const emit = (event: NodeEvent) => listeners.forEach((listener) => listener(event));
   let profile: Profile | null = null;
-  let settings: Settings = { readReceipts: true };
+  let settings: Settings = { readReceipts: true, tor: false };
   let nextId = 10;
   const contact = (id: number, name: string, fingerprint: string, request = false, secure = false): Contact => ({
     id,
@@ -703,7 +720,13 @@ function previewApi(): Api {
       return settings;
     },
     async setReadReceipts(on) {
-      settings = { readReceipts: on };
+      settings = { ...settings, readReceipts: on };
+    },
+    async setTor(on) {
+      settings = { ...settings, tor: on };
+    },
+    async restart() {
+      location.reload();
     },
     async status() {
       // ?lan=blocked or ?lan=failed shows the local network warnings.
@@ -721,6 +744,8 @@ function previewApi(): Api {
         internetOn: true,
         internetRelays: 3,
         internetRefusal: null,
+        // ?tor=starting, ?tor=ready or ?tor=failed shows the Tor states.
+        internetTor: torPreview(),
         outbox: messages.filter((m) => m.outgoing && !m.delivered).length,
         carried: 3,
       };

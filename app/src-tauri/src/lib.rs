@@ -2,7 +2,7 @@
 //! forwarded to the window as `kervan-event`.
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use data_encoding::BASE64;
@@ -35,7 +35,15 @@ fn text(error: impl ToString) -> String {
 
 /// Starts the local network and internet links and forwards node events to
 /// the window.
-fn launch(app: &AppHandle, node: &Node) {
+fn launch(app: &AppHandle, node: &Node, dir: &Path) {
+    // Tor keeps its state next to the node's, and is used if chosen.
+    let internet = InternetConfig {
+        tor: node
+            .settings()
+            .is_ok_and(|settings| settings.tor)
+            .then(|| dir.join("tor")),
+        ..InternetConfig::default()
+    };
     let mut events = node.subscribe();
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -52,7 +60,7 @@ fn launch(app: &AppHandle, node: &Node) {
                 format!("Local network link is off: {error}"),
             );
         }
-        if let Err(error) = node.start_internet(InternetConfig::default()) {
+        if let Err(error) = node.start_internet(internet) {
             let _ = handle.emit("kervan-error", format!("Internet link is off: {error}"));
         }
     });
@@ -74,7 +82,7 @@ fn create_profile(
         return Err("Choose a name".to_owned());
     }
     let node = Node::create(&state.dir, name).map_err(text)?;
-    launch(&app, &node);
+    launch(&app, &node, &state.dir);
     let profile = node.profile();
     *state
         .node
@@ -364,6 +372,18 @@ struct FileData {
     data: String,
 }
 
+/// Chooses whether the internet link goes over Tor, from the next start.
+#[tauri::command]
+fn set_tor(state: State<'_, AppState>, on: bool) -> CommandResult<()> {
+    state.node()?.set_tor(on).map_err(text)
+}
+
+/// Starts the app again, for a setting that applies at start.
+#[tauri::command]
+fn restart(app: AppHandle) {
+    app.restart()
+}
+
 #[tauri::command]
 fn status(state: State<'_, AppState>) -> CommandResult<Status> {
     state.node()?.status().map_err(text)
@@ -415,7 +435,7 @@ pub fn run() {
             };
             let node = Node::open(&dir)?;
             if let Some(node) = &node {
-                launch(app.handle(), node);
+                launch(app.handle(), node, &dir);
             }
             app.manage(AppState {
                 dir,
@@ -459,6 +479,8 @@ pub fn run() {
             send_file,
             file_data,
             save_file,
+            set_tor,
+            restart,
             status,
             export_file,
             import_file,

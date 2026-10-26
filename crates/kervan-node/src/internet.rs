@@ -3,9 +3,14 @@
 //! reconnects on its own; what one connection receives is handled like a
 //! frame from any other link.
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant};
+
+use arti_client::config::TorClientConfigBuilder;
+use arti_client::TorClient;
+use serde::Serialize;
 
 use data_encoding::{BASE64URL_NOPAD, HEXLOWER};
 use futures_util::{SinkExt, StreamExt};
@@ -18,6 +23,7 @@ use kervan_proto::DAY_SECS;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tokio::sync::{broadcast, watch};
+use tokio_tungstenite::tungstenite::http::Uri;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::engine::{Handled, Outcome};
@@ -45,6 +51,13 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Time between two file chunks sent to one relay, so a photo does not run
 /// into the relay's rate limit.
 const CHUNK_GAP: Duration = Duration::from_millis(60);
+/// Over Tor, circuits take longer to build and answers to come.
+const TOR_CONNECT_TIMEOUT: Duration = Duration::from_secs(45);
+const TOR_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long to wait before trying Tor again after it failed to start.
+const TOR_RETRY: Duration = Duration::from_secs(30);
+
+type Tor = TorClient<tor_rtcompat::PreferredRuntime>;
 
 #[derive(Clone, Debug)]
 pub struct InternetConfig {
@@ -53,6 +66,21 @@ pub struct InternetConfig {
     /// as gone, as happens when the computer moves to another network, and is
     /// connected to again.
     pub keepalive: Duration,
+    /// Reaches every relay over Tor, keeping Tor's state in this folder.
+    /// Until Tor works the node does not connect at all, never directly.
+    pub tor: Option<PathBuf>,
+}
+
+/// How the internet link stands with Tor, when it goes over Tor.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum TorState {
+    Starting,
+    Ready,
+    #[serde(rename_all = "camelCase")]
+    Failed {
+        detail: String,
+    },
 }
 
 impl Default for InternetConfig {
@@ -63,6 +91,7 @@ impl Default for InternetConfig {
                 .map(|relay| relay.to_string())
                 .collect(),
             keepalive: Duration::from_secs(20),
+            tor: None,
         }
     }
 }
@@ -80,6 +109,10 @@ pub(crate) struct Internet {
     secret: OnceLock<[u8; 32]>,
     /// The last reason a relay gave for refusing an event.
     refusal: Mutex<Option<String>>,
+    /// Tor's state, when the link goes over Tor.
+    tor_state: Mutex<Option<TorState>>,
+    /// The Tor client, once it has started.
+    tor: watch::Sender<Option<Arc<Tor>>>,
 }
 
 impl Internet {
@@ -92,7 +125,16 @@ impl Internet {
             connected: AtomicUsize::new(0),
             secret: OnceLock::new(),
             refusal: Mutex::default(),
+            tor_state: Mutex::default(),
+            tor: watch::channel(None).0,
         }
+    }
+
+    pub(crate) fn tor_state(&self) -> Option<TorState> {
+        self.tor_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
 
     pub(crate) fn connected(&self) -> usize {
@@ -166,10 +208,81 @@ pub(crate) fn start(shared: &Arc<Shared>, config: InternetConfig) -> Result<()> 
     if shared.internet.secret.set(secret).is_err() {
         return Err(Error::Invalid("the internet link is already running"));
     }
+    let over_tor = config.tor.is_some();
+    if let Some(dir) = config.tor {
+        set_tor_state(shared, TorState::Starting);
+        tokio::spawn(tor_loop(Arc::downgrade(shared), dir));
+    }
     for relay in config.relays {
-        tokio::spawn(relay_loop(Arc::downgrade(shared), relay, config.keepalive));
+        tokio::spawn(relay_loop(
+            Arc::downgrade(shared),
+            relay,
+            config.keepalive,
+            over_tor,
+        ));
     }
     Ok(())
+}
+
+/// Starts Tor, trying again until it works.
+async fn tor_loop(shared: Weak<Shared>, dir: PathBuf) {
+    loop {
+        let started = async {
+            let config =
+                TorClientConfigBuilder::from_directories(dir.join("state"), dir.join("cache"))
+                    .build()
+                    .map_err(|error| error.to_string())?;
+            TorClient::create_bootstrapped(config)
+                .await
+                .map_err(|error| error.to_string())
+        }
+        .await;
+        let Some(shared) = shared.upgrade() else {
+            return;
+        };
+        match started {
+            Ok(client) => {
+                set_tor_state(&shared, TorState::Ready);
+                shared.internet.tor.send_replace(Some(Arc::new(client)));
+                return;
+            }
+            Err(detail) => set_tor_state(&shared, TorState::Failed { detail }),
+        }
+        drop(shared);
+        tokio::time::sleep(TOR_RETRY).await;
+    }
+}
+
+fn set_tor_state(shared: &Shared, state: TorState) {
+    *shared
+        .internet
+        .tor_state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(state);
+    shared.emit(Event::InternetChanged {
+        relays: shared.internet.connected(),
+    });
+}
+
+/// Opens a Tor stream to the relay's host, on a circuit of its own. The
+/// host name is looked up at the exit, so it does not leak locally either.
+async fn tor_stream(tor: &Tor, url: &str) -> Option<arti_client::DataStream> {
+    tor.isolated_client()
+        .connect(host_and_port(url)?)
+        .await
+        .ok()
+}
+
+/// The host and port a relay URL points at.
+fn host_and_port(url: &str) -> Option<(String, u16)> {
+    let uri: Uri = url.parse().ok()?;
+    let host = uri.host()?.to_owned();
+    let port = uri.port_u16().unwrap_or(if uri.scheme_str() == Some("ws") {
+        80
+    } else {
+        443
+    });
+    Some((host, port))
 }
 
 /// The `EVENT` message that posts a bundle or chunk frame under `tag`.
@@ -224,52 +337,88 @@ pub fn signed_event(
     })
 }
 
-async fn relay_loop(shared: Weak<Shared>, url: String, keepalive: Duration) {
+async fn relay_loop(shared: Weak<Shared>, url: String, keepalive: Duration, over_tor: bool) {
     let mut retry = FIRST_RETRY;
     loop {
-        let Some((mut outgoing, mut chunks, mut renew, mut probe)) =
+        let Some((mut outgoing, mut chunks, mut renew, mut probe, mut tor)) =
             shared.upgrade().map(|shared| {
                 (
                     shared.internet.outgoing.subscribe(),
                     shared.internet.chunks.subscribe(),
                     shared.internet.renew.subscribe(),
                     shared.internet.probe.subscribe(),
+                    shared.internet.tor.subscribe(),
                 )
             })
         else {
             return;
         };
-        let connected = tokio::time::timeout(
-            CONNECT_TIMEOUT,
-            tokio_tungstenite::connect_async(url.as_str()),
-        )
-        .await;
-        if let Ok(Ok((socket, _))) = connected {
-            retry = FIRST_RETRY;
-            run_relay(
-                &shared,
-                socket,
-                &mut outgoing,
-                &mut chunks,
-                &mut renew,
-                &mut probe,
-                keepalive,
+        let mut channels = Channels {
+            outgoing: &mut outgoing,
+            chunks: &mut chunks,
+            renew: &mut renew,
+            probe: &mut probe,
+        };
+        let ran = if over_tor {
+            // Never directly: wait for Tor, however long it takes.
+            let Ok(client) = tor
+                .wait_for(Option::is_some)
+                .await
+                .map(|client| client.clone())
+            else {
+                return;
+            };
+            let client = client.expect("waited for a client");
+            let connected = tokio::time::timeout(TOR_CONNECT_TIMEOUT, async {
+                let stream = tor_stream(&client, &url).await?;
+                tokio_tungstenite::client_async_tls(url.as_str(), stream)
+                    .await
+                    .ok()
+            })
+            .await;
+            match connected {
+                Ok(Some((socket, _))) => {
+                    run_relay(&shared, socket, &mut channels, keepalive, TOR_PROBE_TIMEOUT).await;
+                    true
+                }
+                _ => false,
+            }
+        } else {
+            let connected = tokio::time::timeout(
+                CONNECT_TIMEOUT,
+                tokio_tungstenite::connect_async(url.as_str()),
             )
             .await;
+            match connected {
+                Ok(Ok((socket, _))) => {
+                    run_relay(&shared, socket, &mut channels, keepalive, PROBE_TIMEOUT).await;
+                    true
+                }
+                _ => false,
+            }
+        };
+        if ran {
+            retry = FIRST_RETRY;
         }
         tokio::time::sleep(retry).await;
         retry = (retry * 2).min(MAX_RETRY);
     }
 }
 
+/// What a relay connection listens to besides the relay.
+struct Channels<'a> {
+    outgoing: &'a mut broadcast::Receiver<String>,
+    chunks: &'a mut broadcast::Receiver<String>,
+    renew: &'a mut watch::Receiver<u64>,
+    probe: &'a mut watch::Receiver<u64>,
+}
+
 async fn run_relay<S>(
     shared: &Weak<Shared>,
     socket: S,
-    outgoing: &mut broadcast::Receiver<String>,
-    chunks: &mut broadcast::Receiver<String>,
-    renew: &mut watch::Receiver<u64>,
-    probe: &mut watch::Receiver<u64>,
+    channels: &mut Channels<'_>,
     keepalive: Duration,
+    probe_timeout: Duration,
 ) where
     S: futures_util::Sink<Message>
         + futures_util::Stream<Item = tokio_tungstenite::tungstenite::Result<Message>>
@@ -318,12 +467,12 @@ async fn run_relay<S>(
                     None
                 }
             },
-            message = outgoing.recv() => match message {
+            message = channels.outgoing.recv() => match message {
                 Ok(message) => Some(Message::text(message)),
                 Err(broadcast::error::RecvError::Lagged(_)) => None,
                 Err(broadcast::error::RecvError::Closed) => break,
             },
-            chunk = chunks.recv() => match chunk {
+            chunk = channels.chunks.recv() => match chunk {
                 Ok(chunk) => {
                     pending.push_back(chunk);
                     None
@@ -333,14 +482,14 @@ async fn run_relay<S>(
                 Err(broadcast::error::RecvError::Closed) => break,
             },
             _ = pace.tick(), if !pending.is_empty() => pending.pop_front().map(Message::text),
-            changed = renew.changed() => match changed {
+            changed = channels.renew.changed() => match changed {
                 Ok(()) => with(shared, subscription).flatten().map(Message::text),
                 Err(_) => break,
             },
             _ = renewal.tick() => with(shared, subscription).flatten().map(Message::text),
-            changed = probe.changed() => match changed {
+            changed = channels.probe.changed() => match changed {
                 Ok(()) => {
-                    probe_deadline.get_or_insert(tokio::time::Instant::now() + PROBE_TIMEOUT);
+                    probe_deadline.get_or_insert(tokio::time::Instant::now() + probe_timeout);
                     Some(Message::Ping(Default::default()))
                 }
                 Err(_) => break,
@@ -466,6 +615,24 @@ fn with<T>(shared: &Weak<Shared>, f: impl FnOnce(&Shared) -> T) -> Option<T> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn relay_urls_name_a_host_and_port() {
+        assert_eq!(
+            super::host_and_port("wss://nos.lol"),
+            Some(("nos.lol".into(), 443))
+        );
+        assert_eq!(
+            super::host_and_port("ws://10.0.0.2:7777"),
+            Some(("10.0.0.2".into(), 7777))
+        );
+        assert_eq!(
+            super::host_and_port("ws://relay.local"),
+            Some(("relay.local".into(), 80))
+        );
+        assert_eq!(super::host_and_port("not a url"), None);
+    }
+
     use super::*;
     use k256::schnorr::{Signature, VerifyingKey};
 

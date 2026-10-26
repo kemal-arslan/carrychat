@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+arti-client = { version = "0.34", default-features = false, features = ["tokio", "native-tls", "compression"] }
 data-encoding = "2"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 hmac = "0.12"
@@ -23,6 +24,7 @@ socket2 = { version = "0.6", features = ["all"] }
 thiserror = "2"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-tungstenite = { version = "0.30", features = ["native-tls"] }
+tor-rtcompat = { version = "0.34", default-features = false, features = ["tokio", "native-tls"] }
 
 [dev-dependencies]
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }

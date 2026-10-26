@@ -19,7 +19,7 @@ use tokio::sync::broadcast;
 
 use crate::engine::{Engine, Handled, Outcome};
 pub use crate::error::{Error, Result};
-pub use crate::internet::InternetConfig;
+pub use crate::internet::{InternetConfig, TorState};
 pub use crate::lan::{LanConfig, LanProblem};
 use crate::store::Store;
 
@@ -185,6 +185,9 @@ pub struct SharedCardView {
 pub struct Settings {
     /// Whether contacts learn when we read their messages.
     pub read_receipts: bool,
+    /// Whether the internet link goes over Tor. It takes effect when the
+    /// link starts.
+    pub tor: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -200,6 +203,8 @@ pub struct Status {
     pub internet_on: bool,
     /// The last reason a relay gave for refusing an event.
     pub internet_refusal: Option<String>,
+    /// Tor's state, when the internet link goes over Tor.
+    pub internet_tor: Option<TorState>,
     /// Own messages not delivered yet.
     pub outbox: usize,
     /// Bundles carried for other people.
@@ -335,6 +340,11 @@ impl Node {
 
     pub fn set_read_receipts(&self, on: bool) -> Result<()> {
         self.shared.engine().set_read_receipts(on)
+    }
+
+    /// Chooses whether the internet link goes over Tor from its next start.
+    pub fn set_tor(&self, on: bool) -> Result<()> {
+        self.shared.engine().set_tor(on)
     }
 
     /// Accepts a request: its sender becomes a contact.
@@ -551,6 +561,7 @@ impl Node {
                 .internet_on
                 .load(std::sync::atomic::Ordering::Relaxed),
             internet_refusal: self.shared.internet.refusal(),
+            internet_tor: self.shared.internet.tor_state(),
             outbox,
             carried,
         })
