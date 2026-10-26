@@ -3,10 +3,10 @@
 <plist version="1.0">
 <dict>
   <key>NSLocalNetworkUsageDescription</key>
-  <string>Kervan finds other Kervan computers on your network to pass messages when the internet is down.</string>
+  <string>CarryChat finds other CarryChat computers on your network to pass messages when the internet is down.</string>
   <key>NSBluetoothAlwaysUsageDescription</key>
-  <string>Kervan passes messages to nearby phones over Bluetooth when there is no network.</string>
+  <string>CarryChat passes messages to nearby phones over Bluetooth when there is no network.</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Kervan records the voice messages you choose to send.</string>
+  <string>CarryChat records the voice messages you choose to send.</string>
 </dict>
 </plist>

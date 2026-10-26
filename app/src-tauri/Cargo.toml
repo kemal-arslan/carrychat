@@ -1,6 +1,6 @@
 [package]
-name = "kervan-app"
-description = "Kervan app"
+name = "carrychat-app"
+description = "CarryChat app"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,7 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [lib]
-name = "kervan_app_lib"
+name = "carrychat_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -18,7 +18,7 @@ tauri-build = { version = "2", features = [] }
 # keep the @tauri-apps packages in package.json on the same minor versions.
 [dependencies]
 data-encoding = "2"
-kervan-node = { path = "../../crates/kervan-node" }
+carrychat-node = { path = "../../crates/carrychat-node" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = [] }
@@ -29,7 +29,7 @@ tauri-plugin-notification = "2"
 # Desktops connect to phones over Bluetooth through btleplug; Android has its
 # own Bluetooth code in the app.
 [target.'cfg(not(target_os = "android"))'.dependencies]
-kervan-node = { path = "../../crates/kervan-node", features = ["bluetooth"] }
+carrychat-node = { path = "../../crates/carrychat-node", features = ["bluetooth"] }
 
 # Android: posting notifications through the service while no screen is open,
 # and moving the bytes of Bluetooth connections, which Kotlin makes.

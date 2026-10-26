@@ -30,7 +30,7 @@
     <application
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
-        android:theme="@style/Theme.kervan_app"
+        android:theme="@style/Theme.carrychat_app"
         android:usesCleartextTraffic="${usesCleartextTraffic}">
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
@@ -47,7 +47,7 @@
         </activity>
 
         <service
-            android:name=".KervanService"
+            android:name=".CarryChatService"
             android:exported="false"
             android:foregroundServiceType="remoteMessaging|connectedDevice" />
 

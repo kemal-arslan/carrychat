@@ -1,13 +1,13 @@
 [workspace]
 resolver = "3"
-members = ["crates/kervan-proto", "crates/kervan-node", "crates/kervan-cli", "app/src-tauri"]
+members = ["crates/carrychat-proto", "crates/carrychat-node", "crates/carrychat-cli", "app/src-tauri"]
 # The desktop app needs system WebView libraries to build, so plain `cargo`
 # commands leave it out. Build it with `npm run tauri build` in app/.
-default-members = ["crates/kervan-proto", "crates/kervan-node", "crates/kervan-cli"]
+default-members = ["crates/carrychat-proto", "crates/carrychat-node", "crates/carrychat-cli"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.85"
 license = "MIT"
-repository = "https://github.com/kemal-arslan/kervan"
+repository = "https://github.com/kemal-arslan/carrychat"

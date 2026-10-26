@@ -1,6 +1,6 @@
-# Kervan protocol v0
+# CarryChat protocol v0
 
-**Status: draft.** Breaking changes are expected until v1. The reference implementation is [`crates/kervan-proto`](../crates/kervan-proto), and [`test-vectors.json`](test-vectors.json) pins its output so other implementations can check themselves against it.
+**Status: draft.** Breaking changes are expected until v1. The reference implementation is [`crates/carrychat-proto`](../crates/carrychat-proto), and [`test-vectors.json`](test-vectors.json) pins its output so other implementations can check themselves against it.
 
 ## 1. Goals
 
@@ -17,7 +17,7 @@ Not yet: video, and files over LoRa.
 - `||` is concatenation. Integers are unsigned big-endian. `u32(x)` is a 4-byte integer.
 - `H(x)` is SHA-256, `HMAC(k, x)` is HMAC-SHA256, `x[a..b]` is bytes `a` up to but not including `b`.
 - Times are unix seconds as `u32`. `day(t) = floor(t / 86400)`.
-- Labels such as `"kervan/v0/card"` are ASCII bytes without a terminator.
+- Labels such as `"carrychat/v0/card"` are ASCII bytes without a terminator.
 
 ## 3. Identity
 
@@ -27,7 +27,7 @@ Each user holds two independent key pairs:
 - an **X25519** key, used for pairwise key agreement.
 
 ```
-fingerprint = H("kervan/v0/fingerprint" || ed25519_pk || x25519_pk)[0..16]
+fingerprint = H("carrychat/v0/fingerprint" || ed25519_pk || x25519_pk)[0..16]
 ```
 
 The fingerprint is shown as lowercase RFC 4648 base32 without padding, in groups of four (`abcd efgh ijkl mnop qrst uvwx yz`). Two people compare fingerprints to verify each other.
@@ -41,9 +41,9 @@ The fingerprint is shown as lowercase RFC 4648 base32 without padding, in groups
 | 33 | 32 | X25519 public key |
 | 65 | 1 | name length `N`, 0 to 32 |
 | 66 | N | name, UTF-8 |
-| 66+N | 64 | Ed25519 signature over `"kervan/v0/card" \|\| bytes[0..66+N]` |
+| 66+N | 64 | Ed25519 signature over `"carrychat/v0/card" \|\| bytes[0..66+N]` |
 
-The text form is `kervan:` followed by the card in base64url without padding, short enough for a QR code. Receivers verify the signature (strict Ed25519 verification) and reject unknown versions.
+The text form is `carrychat:` followed by the card in base64url without padding, short enough for a QR code. Receivers verify the signature (strict Ed25519 verification) and reject unknown versions.
 
 v0 has no contact discovery over the network. One person gives their card to the other, in person or over a channel they already trust. The first message then carries the sender's card the other way (§5.5). Fingerprints are compared either way.
 
@@ -54,7 +54,7 @@ For a pair of contacts:
 ```
 shared   = X25519(own_secret, peer_public)       abort if all-zero (non-contributory)
 (P1, P2) = the two X25519 public keys, sorted bytewise ascending
-prk      = HKDF-Extract(salt = "kervan/v0/pair", ikm = shared)
+prk      = HKDF-Extract(salt = "carrychat/v0/pair", ikm = shared)
 K_enc    = HKDF-Expand(prk, "enc" || P1 || P2, 32)
 K_tag    = HKDF-Expand(prk, "tag" || P1 || P2, 32)
 K_ack    = HKDF-Expand(prk, "ack" || P1 || P2, 32)
@@ -95,7 +95,7 @@ A bundle is at most 4096 bytes.
 ```
 nonce      = 24 random bytes, never reused under the same K_enc
 ack_secret = HMAC(K_ack, nonce)[0..16]
-bundle_id  = H("kervan/v0/ack" || ack_secret)[0..8]
+bundle_id  = H("carrychat/v0/ack" || ack_secret)[0..8]
 tag        = tag(recipient_pk, day(created_at))
 aad        = the 46-byte header without the hop limit byte: bytes[0..1] || bytes[2..46]
 ciphertext = XChaCha20-Poly1305-Encrypt(K_enc, nonce, plaintext, aad)
@@ -145,12 +145,12 @@ An introduction is a first message to someone who does not have the sender's car
 ```
 e          = a fresh X25519 key pair, used once
 shared     = X25519(e_secret, recipient_pk)                abort if all-zero
-prk        = HKDF-Extract(salt = "kervan/v0/intro", ikm = shared)
+prk        = HKDF-Extract(salt = "carrychat/v0/intro", ikm = shared)
 K_enc      = HKDF-Expand(prk, "enc" || e_pk || recipient_pk, 32)
 K_ack      = HKDF-Expand(prk, "ack" || e_pk || recipient_pk, 32)
 ack_secret = HMAC(K_ack, nonce)[0..16]
-bundle_id  = H("kervan/v0/ack" || ack_secret)[0..8]
-signature  = Ed25519-Sign(sender's signing key, "kervan/v0/intro-signature"
+bundle_id  = H("carrychat/v0/ack" || ack_secret)[0..8]
+signature  = Ed25519-Sign(sender's signing key, "carrychat/v0/intro-signature"
                || e_pk || recipient_pk || nonce || u32(created_at) || text)
 plaintext  = 0x02 || u32(created_at) || u8(len(card)) || card || signature || text
 ciphertext = e_pk || XChaCha20-Poly1305-Encrypt(K_enc, nonce, plaintext, aad)
@@ -175,7 +175,7 @@ Pair bundles sealed with `K_enc` (§5.1) have no forward secrecy: whoever later 
 **Functions.**
 
 ```
-KDF_RK(rk, dh) = HKDF-SHA256(salt = rk, ikm = dh, info = "kervan/v1/ratchet", 64)  → (rk', ck)
+KDF_RK(rk, dh) = HKDF-SHA256(salt = rk, ikm = dh, info = "carrychat/v1/ratchet", 64)  → (rk', ck)
 KDF_CK(ck)     = (HMAC(ck, 0x02), HMAC(ck, 0x01))                                  → (ck', mk)
 ```
 
@@ -228,15 +228,15 @@ When a member joins, every other member sends it its current chain the same way,
 **Sealing.** Message `i` of a chain is sealed with the bundle header of §5:
 
 ```
-prk        = HKDF-Extract(salt = "kervan/v1/group", ikm = sender_key)
+prk        = HKDF-Extract(salt = "carrychat/v1/group", ikm = sender_key)
 K_gtag     = HKDF-Expand(prk, "tag", 32)
 K_ghdr     = HKDF-Expand(prk, "hdr", 32)
 (CK', mk)  = KDF_CK(CK)                                 as in §5.6; CK' is at iteration i + 1
 tag        = HMAC(K_gtag, u32(day(created_at)))[0..8]
-bundle_id  = H("kervan/v1/group" || nonce)[0..8]
+bundle_id  = H("carrychat/v1/group" || nonce)[0..8]
 header_ct  = u32(i) XOR XChaCha20(K_ghdr, nonce)[0..4]    keystream from block 0
 sealed     = XChaCha20-Poly1305-Encrypt(mk, nonce, plaintext, aad || header_ct)
-signature  = Ed25519-Sign(sk, "kervan/v1/group-signature" || aad || header_ct || sealed)
+signature  = Ed25519-Sign(sk, "carrychat/v1/group-signature" || aad || header_ct || sealed)
 ciphertext = header_ct || sealed || signature
 ```
 
@@ -259,7 +259,7 @@ A public channel is a conversation that anyone who knows its name can read and w
 **Keys.**
 
 ```
-prk     = HKDF-Extract(salt = "kervan/v1/channel", ikm = name || 0x00 || password)
+prk     = HKDF-Extract(salt = "carrychat/v1/channel", ikm = name || 0x00 || password)
 K_ch    = HKDF-Expand(prk, "enc", 32)
 K_chtag = HKDF-Expand(prk, "tag", 32)
 K_chid  = HKDF-Expand(prk, "id", 32)
@@ -268,15 +268,15 @@ tag(d)  = HMAC(K_chtag, u32(d))[0..8]
 
 `password` is UTF-8 and empty for a channel without one. Anyone who knows the name and password derives the same keys, so the tag tells members which bundles are the channel's and tells nobody else anything; it changes every day.
 
-**Authors.** Each author signs with an Ed25519 key of its own for that channel, so its posts in different channels cannot be linked to each other or to its card. The reference implementation derives it as `seed = HMAC(own Ed25519 secret, "kervan/v1/channel-key" || K_chid)`. Every post also carries a nickname of at most 20 bytes, chosen freely, so readers tell authors apart by the key, not the name.
+**Authors.** Each author signs with an Ed25519 key of its own for that channel, so its posts in different channels cannot be linked to each other or to its card. The reference implementation derives it as `seed = HMAC(own Ed25519 secret, "carrychat/v1/channel-key" || K_chid)`. Every post also carries a nickname of at most 20 bytes, chosen freely, so readers tell authors apart by the key, not the name.
 
 **Sealing.**
 
 ```
 plaintext  = kind || u32(created_at) || pk (32) || u8(len(nick)) || nick || body
-bundle_id  = H("kervan/v1/channel" || nonce)[0..8]
+bundle_id  = H("carrychat/v1/channel" || nonce)[0..8]
 sealed     = XChaCha20-Poly1305-Encrypt(K_ch, nonce, plaintext, aad)
-signature  = Ed25519-Sign(sk, "kervan/v1/channel-signature" || aad || sealed)
+signature  = Ed25519-Sign(sk, "carrychat/v1/channel-signature" || aad || sealed)
 ciphertext = sealed || signature
 ```
 
@@ -301,13 +301,13 @@ u8(len(mime)) || mime || u32(size) || K_f (32) || H(file) (32)
 **Chunks.** The file is cut into chunks of 4000 bytes, the last one shorter, so it has `n = ceil(size / 4000)` chunks. Chunk `i` is a bundle with the header of §5:
 
 ```
-prk        = HKDF-Extract(salt = "kervan/v1/file", ikm = K_f)
+prk        = HKDF-Extract(salt = "carrychat/v1/file", ikm = K_f)
 K_fenc     = HKDF-Expand(prk, "enc", 32)
 K_ftag     = HKDF-Expand(prk, "tag", 32)
 K_fack     = HKDF-Expand(prk, "ack", 32)
 tag        = HMAC(K_ftag, u32(i))[0..8]
 ack_secret = HMAC(K_fack, nonce)[0..16]
-bundle_id  = H("kervan/v0/ack" || ack_secret)[0..8]
+bundle_id  = H("carrychat/v0/ack" || ack_secret)[0..8]
 ciphertext = XChaCha20-Poly1305-Encrypt(K_fenc, nonce, file[4000·i .. 4000·(i+1)], aad)
 ```
 
@@ -321,7 +321,7 @@ ciphertext = XChaCha20-Poly1305-Encrypt(K_fenc, nonce, file[4000·i .. 4000·(i+
 
 A tombstone proves delivery. After opening a bundle, the recipient publishes `(bundle_id, ack_secret)`.
 
-Anyone holding the bundle checks `H("kervan/v0/ack" || ack_secret)[0..8] == bundle_id`, then deletes the bundle and stops forwarding it. The sender runs the same check and marks the message delivered. Only the two contacts know `K_ack`, so only they can produce `ack_secret` for a real bundle. Forging one means finding a preimage of a 64-bit truncated hash.
+Anyone holding the bundle checks `H("carrychat/v0/ack" || ack_secret)[0..8] == bundle_id`, then deletes the bundle and stops forwarding it. The sender runs the same check and marks the message delivered. Only the two contacts know `K_ack`, so only they can produce `ack_secret` for a real bundle. Forging one means finding a preimage of a 64-bit truncated hash.
 
 - A node forwards a tombstone only for a bundle id it holds or has seen. Anyone can build a self-consistent tombstone for an id they made up, so tombstones for unknown ids are dropped.
 - A node remembers tombstoned ids until the bundle would have expired, so a late copy is not accepted again.
@@ -361,19 +361,19 @@ These mappings are fixed when each transport is built (see the roadmap in the RE
 
 ### 9.1 Local network
 
-Implemented in `crates/kervan-node/src/lan.rs`.
+Implemented in `crates/carrychat-node/src/lan.rs`.
 
 **Discovery.** Every 3 seconds a node sends a 16-byte beacon to the multicast group `239.255.74.74`, port `47474`:
 
 | Offset | Size | Field |
 | --- | --- | --- |
-| 0 | 6 | `"KRVN" \|\| 0x00 \|\| 0x01` (magic, version, beacon) |
+| 0 | 6 | `"CRCH" \|\| 0x00 \|\| 0x01` (magic, version, beacon) |
 | 6 | 8 | session id, random per run |
 | 14 | 2 | TCP port, `u16` |
 
 The beacon carries no identity. On hearing a beacon from a node it is not connected to, the node with the smaller session id dials. The other node dials too after three beacons without a connection, in case its own beacons do not get through.
 
-**Sync.** Implemented in `crates/kervan-node/src/sync.rs`, and the same over Bluetooth LE (§9.5). Over TCP, every frame is prefixed with its `u16` length. Besides the frames of §7, three control frames exist:
+**Sync.** Implemented in `crates/carrychat-node/src/sync.rs`, and the same over Bluetooth LE (§9.5). Over TCP, every frame is prefixed with its `u16` length. Besides the frames of §7, three control frames exist:
 
 | Type | Layout |
 | --- | --- |
@@ -385,23 +385,23 @@ Both sides send HELLO first. A second connection between the same two nodes, ove
 
 ### 9.2 LoRa via Meshtastic
 
-Implemented in `crates/kervan-node/src/lora.rs`. Desktops and the command line reach the device over USB serial or TCP; phones will reach it over Bluetooth.
+Implemented in `crates/carrychat-node/src/lora.rs`. Desktops and the command line reach the device over USB serial or TCP; phones will reach it over Bluetooth.
 
 - **Device.** The node talks to a Meshtastic device with the Meshtastic client API, over USB serial at 115200 baud or over TCP: a device on the network, or meshtasticd, on port 4403. Both carry the API's stream framing, `0x94 0xC3 || u16 length || protobuf`. Before the first message on a serial port, the node sends 32 bytes of `0xC3`, which switch a device that is printing its log over to the API. It then asks for the configuration (`want_config_id`), reads the radio's modem settings and hop limit from it, and starts once `config_complete_id` arrives. A heartbeat every 5 minutes keeps the connection open. When the connection ends, the node connects again after 10 seconds.
 - **Packets.** Each frame is the payload of one Meshtastic `Data` packet, broadcast on the primary channel with the device's hop limit, MTU 233 bytes (`DATA_PAYLOAD_LEN`). Bundles longer than that travel as fragments (§7). During development it uses portnum `PRIVATE_APP` (256). A dedicated portnum will be requested once the format settles. Only bundles and tombstones go over LoRa, never file chunks.
-- **Channel.** The primary channel is the public one by default, so community devices with the same region and modem preset relay Kervan packets like any others. A primary channel of another name moves to another frequency, where they do not hear it. Kervan bundles are end-to-end encrypted already, so the public channel's shared key costs nothing.
+- **Channel.** The primary channel is the public one by default, so community devices with the same region and modem preset relay CarryChat packets like any others. A primary channel of another name moves to another frequency, where they do not hear it. CarryChat bundles are end-to-end encrypted already, so the public channel's shared key costs nothing.
 - **Split horizon.** The Meshtastic mesh rebroadcasts packets itself, with a hop limit of up to 7, so a node does not send over LoRa again a bundle or tombstone it heard there, whole or in fragments (§8). It passes them on to its other links. What a frame makes the node send, such as the receipt for a message to it, does go over LoRa.
 - **Airtime.** In the `EU_868` region Meshtastic uses 869.4–869.65 MHz, where the legal duty cycle limit is 10%, and every node in range shares that airtime. A node keeps its own airtime under 2.5% of the time, with bursts of at most 20 seconds, computing each packet's time on air from the device's modem settings and a 22-byte allowance for Meshtastic's header. On LongFast a full packet takes about 2.2 seconds, so a burst holds about nine. Its own bundles and tombstones go first. Up to 32 frames carried for others wait for airtime; past that, the oldest is dropped.
 
 ### 9.3 Internet via Nostr
 
-Implemented in `crates/kervan-node/src/internet.rs`.
+Implemented in `crates/carrychat-node/src/internet.rs`.
 
 - **Events.** Every bundle and tombstone travels as one Nostr event (NIP-01) of kind `9378`, a provisional number not registered with Nostr. The content is the frame (§7) in base64url without padding. A bundle event has the tag `["x", hex(tag)]`, a tombstone event `["b", hex(bundle_id)]`.
 - **Tags.** A pair bundle is posted under its recipient tag. An introduction, whose own tag is random, is posted under the recipient's mailbox tag, which anyone holding the recipient's card can compute:
 
   ```
-  mailbox_tag(pk, d) = HMAC(H("kervan/v0/mailbox" || pk), u32(d))[0..8]
+  mailbox_tag(pk, d) = HMAC(H("carrychat/v0/mailbox" || pk), u32(d))[0..8]
   ```
 
   `d` is the day the introduction was created.
@@ -418,17 +418,17 @@ The default relays are `wss://relay.damus.io`, `wss://nos.lol` and `wss://relay.
 
 ### 9.4 File
 
-Implemented in `crates/kervan-node/src/file.rs`, with the extension `.kervan`. A file is `"KRVN" || 0x00 || frames`, each frame prefixed with its `u16` length. Exporting writes the store's bundles and tombstones. Importing feeds every frame into the store, exactly as if it had arrived over any other link.
+Implemented in `crates/carrychat-node/src/file.rs`, with the extension `.carrychat`. A file is `"CRCH" || 0x00 || frames`, each frame prefixed with its `u16` length. Exporting writes the store's bundles and tombstones. Importing feeds every frame into the store, exactly as if it had arrived over any other link.
 
 ### 9.5 Bluetooth LE
 
-Implemented in `crates/kervan-node/src/bluetooth.rs` for desktops, through btleplug, and in the Android app (`BleLink.kt`), which hands the bytes of each connection to the node.
+Implemented in `crates/carrychat-node/src/bluetooth.rs` for desktops, through btleplug, and in the Android app (`BleLink.kt`), which hands the bytes of each connection to the node.
 
-- **Advertisement.** A node advertises the service `4b52564e-a0c5-4a3e-9b31-6f2d8e7c1a01`. Its scan response carries, as service data for that uuid, the node's 8-byte session id, the one of its local network beacons (§9.1). It advertises no name.
-- **Stream.** The service has one characteristic, `4b52564e-a0c5-4a3e-9b31-6f2d8e7c1a02`, with write, write without response and indicate. The node that connects (the GATT client) writes to it with response, and the node it connected to (the GATT server) sends indications on it, which makes a byte stream in each direction. Each write or indication carries up to MTU − 3 bytes of the stream, at most 512, and the next waits until the other side confirms the last. With more in flight, notifications filled a phone's Bluetooth queue until it could not answer the other side's writes, and the link dropped when an answer was 30 seconds late (the ATT timeout). A write longer than the MTU arrives as prepared writes and joins the stream when executed. Subscribing to the indications opens the stream; disconnecting ends it.
+- **Advertisement.** A node advertises the service `43524348-a0c5-4a3e-9b31-6f2d8e7c1a01`. Its scan response carries, as service data for that uuid, the node's 8-byte session id, the one of its local network beacons (§9.1). It advertises no name.
+- **Stream.** The service has one characteristic, `43524348-a0c5-4a3e-9b31-6f2d8e7c1a02`, with write, write without response and indicate. The node that connects (the GATT client) writes to it with response, and the node it connected to (the GATT server) sends indications on it, which makes a byte stream in each direction. Each write or indication carries up to MTU − 3 bytes of the stream, at most 512, and the next waits until the other side confirms the last. With more in flight, notifications filled a phone's Bluetooth queue until it could not answer the other side's writes, and the link dropped when an answer was 30 seconds late (the ATT timeout). A write longer than the MTU arrives as prepared writes and joins the stream when executed. Subscribing to the indications opens the stream; disconnecting ends it.
 - **Sync.** Over the stream runs the sync of §9.1: frames prefixed with their `u16` length, HELLO, HAVE, WANT, then pushes as they appear. A node already connected over the local network is not connected again over Bluetooth, and a connection to it that is made anyway closes after HELLO.
 - **Who connects.** As on the local network, the node with the smaller session id connects, and the other after three sightings without a connection. A node that cannot advertise connects regardless. Desktops cannot advertise through btleplug, so they connect to phones, and reach other desktops over the local network.
-- **Desktops** write with response, 512 bytes at a time: macOS drops writes without response when its queue is full, which would break the stream. Since a scan reports each device once, they look at the devices seen so far every 5 seconds and connect to the Kervan nodes among them that are not connected.
+- **Desktops** write with response, 512 bytes at a time: macOS drops writes without response when its queue is full, which would break the stream. Since a scan reports each device once, they look at the devices seen so far every 5 seconds and connect to the CarryChat nodes among them that are not connected.
 - **Android** runs the link in the foreground service that keeps the node alive, so it works while the app is closed. It asks for the Bluetooth permissions with `neverForLocation`.
 
 ## 10. Security
@@ -483,5 +483,5 @@ Implemented in `crates/kervan-node/src/bluetooth.rs` for desktops, through btlep
 | LoRa airtime budget | 2.5% of the time, bursts of at most 20 s |
 | Most fragments per bundle | 32 |
 | Reassembly timeout | 600 s |
-| Bluetooth LE service | `4b52564e-a0c5-4a3e-9b31-6f2d8e7c1a01` |
-| Bluetooth LE stream characteristic | `4b52564e-a0c5-4a3e-9b31-6f2d8e7c1a02` |
+| Bluetooth LE service | `43524348-a0c5-4a3e-9b31-6f2d8e7c1a01` |
+| Bluetooth LE stream characteristic | `43524348-a0c5-4a3e-9b31-6f2d8e7c1a02` |

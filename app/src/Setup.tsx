@@ -27,7 +27,7 @@ export function Setup({ onCreated }: { onCreated: (profile: Profile) => void }) 
     <div className="setup">
       <form className="setup-card" onSubmit={submit}>
         <Logo size={64} />
-        <h1>Kervan</h1>
+        <h1>CarryChat</h1>
         <p className="lede">{t.tagline}</p>
         <label htmlFor="name">{t.yourName}</label>
         <input

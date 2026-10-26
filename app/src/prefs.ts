@@ -1,6 +1,6 @@
 // Preferences that belong to this window rather than to the node.
 
-const NOTIFICATIONS_KEY = "kervan.notifications";
+const NOTIFICATIONS_KEY = "carrychat.notifications";
 
 export function notificationsEnabled(): boolean {
   try {

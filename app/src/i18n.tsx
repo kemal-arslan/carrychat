@@ -27,7 +27,7 @@ const en = {
   wantsToMessage: (name: string) => `${name} wants to message you.`,
   declined: (name: string) => `Declined ${name}. Their messages are deleted and new ones will be ignored.`,
   exported: (count: number) =>
-    `Saved ${count === 1 ? "1 item" : `${count} items`} to the file. Carry it to another Kervan device.`,
+    `Saved ${count === 1 ? "1 item" : `${count} items`} to the file. Carry it to another CarryChat device.`,
   imported: (received: number, delivered: number, carried: number, skipped: number) =>
     `Imported: ${received === 1 ? "1 new message" : `${received} new messages`}, ` +
     `${delivered === 1 ? "1 delivery receipt" : `${delivered} delivery receipts`}, ${carried} to carry for others` +
@@ -43,7 +43,7 @@ const en = {
   securePendingHint:
     "Until you have both written once, messages here use your pair key. A key taken from a device later could open them.",
   chatEmpty: (name: string) =>
-    `Nothing here yet. What you write waits on this device until a path to ${name} appears: another Kervan device on the network, the internet, or a file someone carries.`,
+    `Nothing here yet. What you write waits on this device until a path to ${name} appears: another CarryChat device on the network, the internet, or a file someone carries.`,
   waitingForPath: "Waiting for a path",
   delivered: "Delivered",
   read: "Read",
@@ -64,8 +64,8 @@ const en = {
   details: "Details…",
   torSetting: "Reach the internet over Tor",
   torHint:
-    "Relays then cannot see your IP address, and your network cannot see that you use Kervan. Messages take a little longer. While Tor does not work, Kervan does not use the internet at all; the local network and files still work.",
-  restartToApply: "Applies when Kervan starts again.",
+    "Relays then cannot see your IP address, and your network cannot see that you use CarryChat. Messages take a little longer. While Tor does not work, CarryChat does not use the internet at all; the local network and files still work.",
+  restartToApply: "Applies when CarryChat starts again.",
   bluetoothSetting: "Find nearby devices over Bluetooth",
   bluetoothHint: "Phones within a few dozen metres pass messages to each other with no network at all.",
   restartNow: "Restart now",
@@ -75,7 +75,7 @@ const en = {
 
   addTitle: "Add a contact",
   theirCard: "Their card",
-  addHint: "Paste the card they gave you. It starts with kervan:. They don't need yours: your first message carries it.",
+  addHint: "Paste the card they gave you. It starts with carrychat:. They don't need yours: your first message carries it.",
   cancel: "Cancel",
   add: "Add",
   addedTitle: (name: string) => `${name} is a contact`,
@@ -98,14 +98,14 @@ const en = {
   connectButton: "Connect",
 
   failedTitle: "The local network is not working",
-  failedIntro: "Kervan could not reach another device on this network:",
+  failedIntro: "CarryChat could not reach another device on this network:",
   failedHint:
-    "Check that both devices are on the same network and that the other device's firewall lets Kervan accept connections. Guest networks often keep devices from reaching each other.",
-  blockedTitle: "Let Kervan use the local network",
-  blockedIntro: "macOS is not letting Kervan reach other devices on this network, so messages cannot leave this Mac.",
+    "Check that both devices are on the same network and that the other device's firewall lets CarryChat accept connections. Guest networks often keep devices from reaching each other.",
+  blockedTitle: "Let CarryChat use the local network",
+  blockedIntro: "macOS is not letting CarryChat reach other devices on this network, so messages cannot leave this Mac.",
   blockedStep1: "Open System Settings → Privacy & Security → Local Network.",
-  blockedStep2: "Turn on Kervan.",
-  blockedStep3: "If this still shows as blocked after a few seconds, quit Kervan and open it again.",
+  blockedStep2: "Turn on CarryChat.",
+  blockedStep3: "If this still shows as blocked after a few seconds, quit CarryChat and open it again.",
   openSystemSettings: "Open System Settings",
 
   save: "Save",
@@ -118,7 +118,7 @@ const en = {
   eraseTitle: "Erase everything",
   eraseHint: "Deletes your identity, contacts and messages from this device. It cannot be undone.",
   eraseButton: "Erase everything…",
-  eraseConfirm: "Are you sure? Kervan starts again empty.",
+  eraseConfirm: "Are you sure? CarryChat starts again empty.",
   eraseNow: "Erase now",
 
   groups: "Groups",
@@ -192,7 +192,7 @@ const en = {
   recordVoice: "Record a voice message",
   stopRecording: "Stop and send",
   recording: (seconds: number) => `Recording… ${seconds} s, up to 2 minutes`,
-  micDenied: "Kervan cannot use the microphone. Allow it in System Settings → Privacy & Security → Microphone.",
+  micDenied: "CarryChat cannot use the microphone. Allow it in System Settings → Privacy & Security → Microphone.",
   fileTooBig: "Too large: a file can be 1 MB at most.",
   photo: "Photo",
   voiceMessage: "Voice message",
@@ -229,7 +229,7 @@ const en = {
   nearbyOffline: "No internet, but your messages can still go from hand to hand.",
   nearbyOnline: "Messages go to nearby devices and over the internet.",
   internetOnly: "Messages go over the internet.",
-  waitingHere: "Messages wait on this device until a path appears: a Kervan device nearby, the internet or a file.",
+  waitingHere: "Messages wait on this device until a path appears: a CarryChat device nearby, the internet or a file.",
   linksTitle: "Links",
   lanName: "Local network",
   bluetoothName: "Bluetooth",
@@ -248,7 +248,7 @@ const en = {
   exportRow: "Export to a file",
   exportRowHint: "Carry waiting messages on a USB stick",
   importRow: "Import a file",
-  importRowHint: "A file from another Kervan device",
+  importRowHint: "A file from another CarryChat device",
   connectRow: "Connect to an address",
   connectRowHint: "Reach a device on another network",
   queueTitle: "On this device",
@@ -325,7 +325,7 @@ const tr: Strings = {
 
   wantsToMessage: (name) => `${name} sana yazmak istiyor.`,
   declined: (name) => `${name} reddedildi. Mesajları silindi, yenileri yok sayılacak.`,
-  exported: (count) => `${count} öğe dosyaya kaydedildi. Dosyayı başka bir Kervan cihazına taşı.`,
+  exported: (count) => `${count} öğe dosyaya kaydedildi. Dosyayı başka bir CarryChat cihazına taşı.`,
   imported: (received, delivered, carried, skipped) =>
     `İçe aktarıldı: ${received} yeni mesaj, ${delivered} teslim kanıtı, başkaları için taşınacak ${carried} paket` +
     (skipped > 0 ? `, okunamayan ${skipped}.` : "."),
@@ -340,7 +340,7 @@ const tr: Strings = {
   securePendingHint:
     "İkiniz de birer kez yazana kadar mesajlar ortak anahtarınızla şifrelenir. Sonradan bir cihazdan alınan anahtar bunları açabilir.",
   chatEmpty: (name) =>
-    `Henüz bir şey yok. Yazdıkların ${name} kişisine bir yol bulunana kadar bu cihazda bekler: ağdaki başka bir Kervan cihazı, internet ya da birinin taşıdığı bir dosya.`,
+    `Henüz bir şey yok. Yazdıkların ${name} kişisine bir yol bulunana kadar bu cihazda bekler: ağdaki başka bir CarryChat cihazı, internet ya da birinin taşıdığı bir dosya.`,
   waitingForPath: "Yol bekleniyor",
   delivered: "Teslim edildi",
   read: "Okundu",
@@ -361,8 +361,8 @@ const tr: Strings = {
   details: "Ayrıntılar…",
   torSetting: "İnternete Tor üzerinden bağlan",
   torHint:
-    "Sunucular IP adresini, bağlı olduğun ağ da Kervan kullandığını göremez. Mesajlar biraz daha geç gider. Tor çalışmadığı sürece Kervan interneti hiç kullanmaz; yerel ağ ve dosyalar çalışmaya devam eder.",
-  restartToApply: "Kervan yeniden başlayınca geçerli olur.",
+    "Sunucular IP adresini, bağlı olduğun ağ da CarryChat kullandığını göremez. Mesajlar biraz daha geç gider. Tor çalışmadığı sürece CarryChat interneti hiç kullanmaz; yerel ağ ve dosyalar çalışmaya devam eder.",
+  restartToApply: "CarryChat yeniden başlayınca geçerli olur.",
   bluetoothSetting: "Yakındaki cihazları Bluetooth ile bul",
   bluetoothHint: "Birkaç on metre içindeki telefonlar, hiç ağ olmadan da birbirine mesaj aktarır.",
   restartNow: "Şimdi yeniden başlat",
@@ -372,7 +372,7 @@ const tr: Strings = {
 
   addTitle: "Kişi ekle",
   theirCard: "Kartı",
-  addHint: "Sana verdiği kartı yapıştır. kervan: ile başlar. Onun senin kartına ihtiyacı yok: ilk mesajın kartını da taşır.",
+  addHint: "Sana verdiği kartı yapıştır. carrychat: ile başlar. Onun senin kartına ihtiyacı yok: ilk mesajın kartını da taşır.",
   cancel: "Vazgeç",
   add: "Ekle",
   addedTitle: (name) => `${name} artık bir kişi`,
@@ -395,14 +395,14 @@ const tr: Strings = {
   connectButton: "Bağlan",
 
   failedTitle: "Yerel ağ çalışmıyor",
-  failedIntro: "Kervan bu ağdaki başka bir cihaza ulaşamadı:",
+  failedIntro: "CarryChat bu ağdaki başka bir cihaza ulaşamadı:",
   failedHint:
-    "İki cihazın aynı ağda olduğunu ve diğer cihazın güvenlik duvarının Kervan'a izin verdiğini kontrol et. Misafir ağları çoğu zaman cihazların birbirine ulaşmasını engeller.",
-  blockedTitle: "Kervan'ın yerel ağı kullanmasına izin ver",
-  blockedIntro: "macOS, Kervan'ın bu ağdaki diğer cihazlara ulaşmasına izin vermiyor; mesajlar bu Mac'ten çıkamıyor.",
+    "İki cihazın aynı ağda olduğunu ve diğer cihazın güvenlik duvarının CarryChat'e izin verdiğini kontrol et. Misafir ağları çoğu zaman cihazların birbirine ulaşmasını engeller.",
+  blockedTitle: "CarryChat'in yerel ağı kullanmasına izin ver",
+  blockedIntro: "macOS, CarryChat'in bu ağdaki diğer cihazlara ulaşmasına izin vermiyor; mesajlar bu Mac'ten çıkamıyor.",
   blockedStep1: "Sistem Ayarları → Gizlilik ve Güvenlik → Yerel Ağ'ı aç.",
-  blockedStep2: "Kervan'ı aç.",
-  blockedStep3: "Birkaç saniye sonra hâlâ engelli görünüyorsa Kervan'dan çık ve yeniden aç.",
+  blockedStep2: "CarryChat'i aç.",
+  blockedStep3: "Birkaç saniye sonra hâlâ engelli görünüyorsa CarryChat'ten çık ve yeniden aç.",
   openSystemSettings: "Sistem Ayarları'nı aç",
 
   save: "Kaydet",
@@ -415,7 +415,7 @@ const tr: Strings = {
   eraseTitle: "Her şeyi sil",
   eraseHint: "Kimliğini, kişilerini ve mesajlarını bu cihazdan siler. Geri alınamaz.",
   eraseButton: "Her şeyi sil…",
-  eraseConfirm: "Emin misin? Kervan boş olarak yeniden başlar.",
+  eraseConfirm: "Emin misin? CarryChat boş olarak yeniden başlar.",
   eraseNow: "Şimdi sil",
 
   groups: "Gruplar",
@@ -487,7 +487,7 @@ const tr: Strings = {
   recordVoice: "Sesli mesaj kaydet",
   stopRecording: "Durdur ve gönder",
   recording: (seconds) => `Kaydediliyor… ${seconds} sn, en fazla 2 dakika`,
-  micDenied: "Kervan mikrofonu kullanamıyor. Sistem Ayarları → Gizlilik ve Güvenlik → Mikrofon'dan izin ver.",
+  micDenied: "CarryChat mikrofonu kullanamıyor. Sistem Ayarları → Gizlilik ve Güvenlik → Mikrofon'dan izin ver.",
   fileTooBig: "Çok büyük: bir dosya en fazla 1 MB olabilir.",
   photo: "Fotoğraf",
   voiceMessage: "Sesli mesaj",
@@ -524,7 +524,7 @@ const tr: Strings = {
   nearbyOffline: "İnternet yok, mesajların yine de elden ele yola çıkabilir.",
   nearbyOnline: "Mesajlar yakındaki cihazlara ve internetten gidiyor.",
   internetOnly: "Mesajlar internetten gidiyor.",
-  waitingHere: "Mesajlar bir yol bulunana kadar bu cihazda bekler: yakında bir Kervan cihazı, internet ya da bir dosya.",
+  waitingHere: "Mesajlar bir yol bulunana kadar bu cihazda bekler: yakında bir CarryChat cihazı, internet ya da bir dosya.",
   linksTitle: "Bağlantılar",
   lanName: "Yerel ağ",
   bluetoothName: "Bluetooth",
@@ -543,7 +543,7 @@ const tr: Strings = {
   exportRow: "Dosyaya aktar",
   exportRowHint: "Bekleyen mesajları bellekle taşı",
   importRow: "Dosya al",
-  importRowHint: "Başka bir Kervan cihazından gelen dosya",
+  importRowHint: "Başka bir CarryChat cihazından gelen dosya",
   connectRow: "Adrese bağlan",
   connectRowHint: "Başka bir ağdaki cihaza ulaş",
   queueTitle: "Bu cihazda",
@@ -595,7 +595,7 @@ const tr: Strings = {
   themeDark: "Koyu",
 };
 
-const STORAGE_KEY = "kervan.language";
+const STORAGE_KEY = "carrychat.language";
 const strings: Record<Language, Strings> = { en, tr };
 
 function systemLanguage(): Language {

@@ -1,16 +1,16 @@
 //! The app: a thin layer of commands over a [`Node`]. Node events are
-//! forwarded to the window as `kervan-event`.
+//! forwarded to the window as `carrychat-event`.
 
 use std::io::Write;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use data_encoding::BASE64;
-use kervan_node::{
+use carrychat_node::{
     ChannelView, ContactView, GroupMessageView, GroupView, ImportReport, InternetConfig, Journey,
     LanConfig, MessageView, MutedView, Node, PostView, Profile, Settings, Status,
 };
+use data_encoding::BASE64;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_fs::{FilePath, FsExt, OpenOptions};
 
@@ -78,7 +78,7 @@ fn launch(app: &AppHandle, node: &Node, dir: &Path) {
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         while let Ok(event) = events.recv().await {
-            let _ = handle.emit("kervan-event", event);
+            let _ = handle.emit("carrychat-event", event);
         }
     });
     #[cfg(target_os = "android")]
@@ -87,7 +87,7 @@ fn launch(app: &AppHandle, node: &Node, dir: &Path) {
     }
     let handle = app.clone();
     start_links(node, dir, move |error| {
-        let _ = handle.emit("kervan-error", error);
+        let _ = handle.emit("carrychat-error", error);
     });
 }
 
@@ -157,7 +157,7 @@ fn erase_everything(app: AppHandle, state: State<'_, AppState>) -> CommandResult
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .take();
-    kervan_node::erase(&state.dir).map_err(text)?;
+    carrychat_node::erase(&state.dir).map_err(text)?;
     app.restart()
 }
 
@@ -498,8 +498,8 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
-            // KERVAN_DIR lets two copies run side by side for testing.
-            let dir = match std::env::var_os("KERVAN_DIR") {
+            // CARRYCHAT_DIR lets two copies run side by side for testing.
+            let dir = match std::env::var_os("CARRYCHAT_DIR") {
                 Some(dir) => PathBuf::from(dir),
                 None => app.path().app_data_dir()?,
             };
@@ -567,7 +567,7 @@ pub fn run() {
             open_network_settings,
         ])
         .build(tauri::generate_context!())
-        .expect("error while building Kervan")
+        .expect("error while building CarryChat")
         .run(|_app, _event| {
             #[cfg(target_os = "android")]
             android::on_run_event(_event);

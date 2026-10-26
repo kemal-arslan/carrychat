@@ -8,7 +8,7 @@
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
     <!-- Behind the status and navigation bars: the surface colour of styles.css. -->
-    <color name="kervan_bars">#FFFFFFFF</color>
-    <color name="kervan_bars_light">#FFFFFFFF</color>
-    <color name="kervan_bars_dark">#FF121214</color>
+    <color name="carrychat_bars">#FFFFFFFF</color>
+    <color name="carrychat_bars_light">#FFFFFFFF</color>
+    <color name="carrychat_bars_dark">#FF121214</color>
 </resources>

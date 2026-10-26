@@ -852,6 +852,80 @@ dependencies = [
 ]
 
 [[package]]
+name = "carrychat-app"
+version = "0.1.0"
+dependencies = [
+ "carrychat-node",
+ "data-encoding",
+ "jni 0.21.1",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-fs",
+ "tauri-plugin-notification",
+ "tokio",
+]
+
+[[package]]
+name = "carrychat-cli"
+version = "0.1.0"
+dependencies = [
+ "carrychat-node",
+ "carrychat-proto",
+ "clap",
+ "tokio",
+]
+
+[[package]]
+name = "carrychat-node"
+version = "0.1.0"
+dependencies = [
+ "arti-client",
+ "btleplug",
+ "carrychat-proto",
+ "data-encoding",
+ "futures-util",
+ "hmac",
+ "if-addrs",
+ "k256",
+ "openssl",
+ "prost",
+ "rand_core 0.6.4",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serialport",
+ "sha2",
+ "socket2",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-tungstenite",
+ "tor-rtcompat",
+ "uuid",
+]
+
+[[package]]
+name = "carrychat-proto"
+version = "0.1.0"
+dependencies = [
+ "chacha20 0.9.1",
+ "chacha20poly1305",
+ "data-encoding",
+ "ed25519-dalek",
+ "hkdf",
+ "hmac",
+ "rand_core 0.6.4",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.21",
+ "x25519-dalek",
+ "zeroize",
+]
+
+[[package]]
 name = "cast"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3256,80 +3330,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb26cec98cce3a3d96cbb7bced3c4b16e3d13f27ec56dbd62cbc8f39cfb9d653"
 dependencies = [
  "cpufeatures 0.2.17",
-]
-
-[[package]]
-name = "kervan-app"
-version = "0.1.0"
-dependencies = [
- "data-encoding",
- "jni 0.21.1",
- "kervan-node",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-fs",
- "tauri-plugin-notification",
- "tokio",
-]
-
-[[package]]
-name = "kervan-cli"
-version = "0.1.0"
-dependencies = [
- "clap",
- "kervan-node",
- "kervan-proto",
- "tokio",
-]
-
-[[package]]
-name = "kervan-node"
-version = "0.1.0"
-dependencies = [
- "arti-client",
- "btleplug",
- "data-encoding",
- "futures-util",
- "hmac",
- "if-addrs",
- "k256",
- "kervan-proto",
- "openssl",
- "prost",
- "rand_core 0.6.4",
- "rusqlite",
- "serde",
- "serde_json",
- "serialport",
- "sha2",
- "socket2",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "tokio-tungstenite",
- "tor-rtcompat",
- "uuid",
-]
-
-[[package]]
-name = "kervan-proto"
-version = "0.1.0"
-dependencies = [
- "chacha20 0.9.1",
- "chacha20poly1305",
- "data-encoding",
- "ed25519-dalek",
- "hkdf",
- "hmac",
- "rand_core 0.6.4",
- "serde_json",
- "sha2",
- "thiserror 2.0.21",
- "x25519-dalek",
- "zeroize",
 ]
 
 [[package]]

@@ -1,4 +1,4 @@
-//! Android: a foreground service (`KervanService`) keeps the process, and
+//! Android: a foreground service (`CarryChatService`) keeps the process, and
 //! the node in it, running after the screen closes, and starts them after
 //! the phone starts. These are the Rust pieces of that: one node for the
 //! process, opened by the screen or by the service, staying alive without a
@@ -11,10 +11,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
+use carrychat_node::{Event, FileView, Link, Node};
 use jni::objects::{GlobalRef, JByteArray, JClass, JObject, JString, JValue};
 use jni::sys::{jboolean, jbyteArray, jint, JNI_FALSE, JNI_TRUE};
 use jni::{JNIEnv, JavaVM};
-use kervan_node::{Event, FileView, Link, Node};
 use tauri::{AppHandle, Manager, RunEvent, WebviewWindowBuilder};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
@@ -29,7 +29,7 @@ static DIR: OnceLock<PathBuf> = OnceLock::new();
 static LINKS: AtomicBool = AtomicBool::new(false);
 
 /// The Java side, for posting notifications. Tauri's notification plugin
-/// needs a screen, so while there is none they go through `KervanService`.
+/// needs a screen, so while there is none they go through `CarryChatService`.
 static JAVA: OnceLock<Java> = OnceLock::new();
 
 struct Java {
@@ -54,7 +54,7 @@ pub fn keep(app: &AppHandle) {
 }
 
 /// The node in `dir`, opened unless the service opened it already.
-pub fn open(dir: &Path) -> kervan_node::Result<Option<Node>> {
+pub fn open(dir: &Path) -> carrychat_node::Result<Option<Node>> {
     let _ = DIR.set(dir.to_owned());
     let mut slot = lock(&NODE);
     if slot.is_none() {
@@ -89,7 +89,7 @@ pub fn claim_links(node: &Node) -> bool {
 /// phone starts with no screen at all. Returns whether a node runs: false
 /// before an identity exists.
 #[no_mangle]
-pub extern "system" fn Java_dev_kemalarslan_kervan_Core_start(
+pub extern "system" fn Java_dev_kemalarslan_carrychat_Core_start(
     mut env: JNIEnv,
     _class: JClass,
     dir: JString,
@@ -116,14 +116,14 @@ pub extern "system" fn Java_dev_kemalarslan_kervan_Core_start(
     JNI_TRUE
 }
 
-/// Finds `KervanService`, which posts notifications. The app's classes can
+/// Finds `CarryChatService`, which posts notifications. The app's classes can
 /// only be looked up from a thread Java started.
 fn remember_service(env: &mut JNIEnv) {
     if JAVA.get().is_some() {
         return;
     }
     let java = env.get_java_vm().and_then(|vm| {
-        let class = env.find_class("dev/kemalarslan/kervan/KervanService")?;
+        let class = env.find_class("dev/kemalarslan/carrychat/CarryChatService")?;
         Ok(Java {
             vm,
             service: env.new_global_ref(class)?,
@@ -187,7 +187,7 @@ fn load_notifications(dir: &Path) {
 /// one gets its window from setup; one that opens in a process that outlived
 /// its screen gets the window the configuration describes.
 #[no_mangle]
-pub extern "system" fn Java_dev_kemalarslan_kervan_MainActivity_attachScreen(
+pub extern "system" fn Java_dev_kemalarslan_carrychat_MainActivity_attachScreen(
     mut env: JNIEnv,
     _activity: JObject,
 ) {
@@ -268,7 +268,7 @@ fn notify(node: &Node, event: &Event) {
     }
 }
 
-/// `KervanService.notifyMessage(title, body)`.
+/// `CarryChatService.notifyMessage(title, body)`.
 fn post(title: &str, body: &str) -> jni::errors::Result<()> {
     let Some(java) = JAVA.get() else {
         return Ok(());
@@ -341,7 +341,7 @@ fn session_of(env: &JNIEnv, bytes: &JByteArray) -> Option<u64> {
 /// `Ble.session()`: the session id to advertise, or null while the node does
 /// not use Bluetooth.
 #[no_mangle]
-pub extern "system" fn Java_dev_kemalarslan_kervan_Ble_session(
+pub extern "system" fn Java_dev_kemalarslan_carrychat_Ble_session(
     env: JNIEnv,
     class: JClass,
 ) -> jbyteArray {
@@ -361,7 +361,7 @@ pub extern "system" fn Java_dev_kemalarslan_kervan_Ble_session(
 
 /// `Ble.shouldConnect(peer)`: whether to connect to a node seen advertising.
 #[no_mangle]
-pub extern "system" fn Java_dev_kemalarslan_kervan_Ble_shouldConnect(
+pub extern "system" fn Java_dev_kemalarslan_carrychat_Ble_shouldConnect(
     env: JNIEnv,
     _class: JClass,
     peer: JByteArray,
@@ -378,7 +378,7 @@ pub extern "system" fn Java_dev_kemalarslan_kervan_Ble_shouldConnect(
 
 /// `Ble.dialEnded(peer)`: a connection to that node could not be made.
 #[no_mangle]
-pub extern "system" fn Java_dev_kemalarslan_kervan_Ble_dialEnded(
+pub extern "system" fn Java_dev_kemalarslan_carrychat_Ble_dialEnded(
     env: JNIEnv,
     _class: JClass,
     peer: JByteArray,
@@ -392,7 +392,7 @@ pub extern "system" fn Java_dev_kemalarslan_kervan_Ble_dialEnded(
 /// is the session id of the node this side connected to, null if the other
 /// side connected.
 #[no_mangle]
-pub extern "system" fn Java_dev_kemalarslan_kervan_Ble_opened(
+pub extern "system" fn Java_dev_kemalarslan_carrychat_Ble_opened(
     env: JNIEnv,
     _class: JClass,
     id: jint,
@@ -440,7 +440,7 @@ pub extern "system" fn Java_dev_kemalarslan_kervan_Ble_opened(
 
 /// `Ble.received(id, data)`: bytes of a connection's stream.
 #[no_mangle]
-pub extern "system" fn Java_dev_kemalarslan_kervan_Ble_received(
+pub extern "system" fn Java_dev_kemalarslan_carrychat_Ble_received(
     env: JNIEnv,
     _class: JClass,
     id: jint,
@@ -456,7 +456,7 @@ pub extern "system" fn Java_dev_kemalarslan_kervan_Ble_received(
 
 /// `Ble.closed(id)`: the connection is gone.
 #[no_mangle]
-pub extern "system" fn Java_dev_kemalarslan_kervan_Ble_closed(
+pub extern "system" fn Java_dev_kemalarslan_carrychat_Ble_closed(
     _env: JNIEnv,
     _class: JClass,
     id: jint,

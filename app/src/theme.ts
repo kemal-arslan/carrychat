@@ -2,13 +2,13 @@
 
 export type ThemeChoice = "system" | "light" | "dark";
 
-const STORAGE_KEY = "kervan.theme";
+const STORAGE_KEY = "carrychat.theme";
 const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
 
 declare global {
   interface Window {
     /** On Android, the activity colours the status and navigation bars. */
-    KervanAndroid?: { setDark(dark: boolean): void };
+    CarryChatAndroid?: { setDark(dark: boolean): void };
   }
 }
 
@@ -36,7 +36,7 @@ export function applyTheme(): void {
   const choice = themeChoice();
   const dark = choice === "dark" || (choice === "system" && systemDark.matches);
   document.documentElement.dataset.theme = dark ? "dark" : "light";
-  window.KervanAndroid?.setDark(dark);
+  window.CarryChatAndroid?.setDark(dark);
 }
 
 systemDark.addEventListener("change", applyTheme);

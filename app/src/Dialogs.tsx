@@ -76,7 +76,7 @@ export function AddContactDialog({ onClose, onAdded }: { onClose: () => void; on
           rows={5}
           value={card}
           onChange={(event) => setCard(event.target.value)}
-          placeholder="kervan:…"
+          placeholder="carrychat:…"
           autoFocus
         />
         <p className={error ? "hint error" : "hint"}>{error ?? t.addHint}</p>

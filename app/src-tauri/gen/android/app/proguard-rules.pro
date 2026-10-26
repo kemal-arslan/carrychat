@@ -22,13 +22,13 @@
 
 # The Rust side finds these classes by name and calls into them over JNI,
 # which R8 cannot see.
--keep class dev.kemalarslan.kervan.KervanService { *; }
--keep class dev.kemalarslan.kervan.KervanService$Companion { *; }
--keep class dev.kemalarslan.kervan.Ble { *; }
--keep class dev.kemalarslan.kervan.Core { *; }
+-keep class dev.kemalarslan.carrychat.CarryChatService { *; }
+-keep class dev.kemalarslan.carrychat.CarryChatService$Companion { *; }
+-keep class dev.kemalarslan.carrychat.Ble { *; }
+-keep class dev.kemalarslan.carrychat.Core { *; }
 
 # The page calls these through the WebView's JavaScript bridge.
 -keepattributes JavascriptInterface
--keepclassmembers class dev.kemalarslan.kervan.MainActivity$Bars {
+-keepclassmembers class dev.kemalarslan.carrychat.MainActivity$Bars {
     @android.webkit.JavascriptInterface <methods>;
 }

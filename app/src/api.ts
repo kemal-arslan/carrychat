@@ -247,7 +247,7 @@ export interface Api {
   onError(handler: (message: string) => void): Promise<() => void>;
 }
 
-const FILE_FILTERS = [{ name: "Kervan", extensions: ["kervan"] }];
+const FILE_FILTERS = [{ name: "CarryChat", extensions: ["carrychat"] }];
 
 function torPreview(): TorState | null {
   const state = new URLSearchParams(location.search).get("tor");
@@ -266,7 +266,7 @@ function fileName(file: FileView): string {
     "audio/webm": "webm",
     "audio/ogg": "ogg",
   };
-  return `kervan-${file.id}.${extension[file.mime] ?? "bin"}`;
+  return `carrychat-${file.id}.${extension[file.mime] ?? "bin"}`;
 }
 
 /** Object URLs of files that arrived, made once each. */
@@ -352,7 +352,7 @@ function desktopApi(): Api {
     status: () => call("status"),
     async exportFile() {
       const day = new Date().toISOString().slice(0, 10);
-      const path = await save({ defaultPath: `kervan-${day}.kervan`, filters: FILE_FILTERS });
+      const path = await save({ defaultPath: `carrychat-${day}.carrychat`, filters: FILE_FILTERS });
       return path ? call<number>("export_file", { path }) : null;
     },
     async importFile() {
@@ -368,8 +368,8 @@ function desktopApi(): Api {
       if (granted) sendNotification({ title, body });
     },
     setNotifications: (on, language) => call("set_notifications", { on, language }),
-    onEvent: (handler) => listen<NodeEvent>("kervan-event", (event) => handler(event.payload)),
-    onError: (handler) => listen<string>("kervan-error", (event) => handler(event.payload)),
+    onEvent: (handler) => listen<NodeEvent>("carrychat-event", (event) => handler(event.payload)),
+    onError: (handler) => listen<string>("carrychat-error", (event) => handler(event.payload)),
   };
 }
 
@@ -423,7 +423,7 @@ function previewApi(): Api {
     me: false,
     admin,
     contactId,
-    card: `kervan:${fingerprint.replaceAll(" ", "")}`,
+    card: `carrychat:${fingerprint.replaceAll(" ", "")}`,
   });
   const groups: Group[] = [
     {
@@ -505,7 +505,7 @@ function previewApi(): Api {
     post(202, null, "b3oiuvmj", "Ne kadar lazım? İki tane getirebilirim.", 5000),
     {
       ...post(203, "Selin", "x7tk2pdu", "", 3600),
-      sharedCard: { name: "Selin Kaya", fingerprint: "n5df 2kqa 7mvx oe3c wl4t zyrb ka", card: "kervan:selin" },
+      sharedCard: { name: "Selin Kaya", fingerprint: "n5df 2kqa 7mvx oe3c wl4t zyrb ka", card: "carrychat:selin" },
     },
     { ...post(204, "gönüllü", "q4m27hxa", "Ne kadar çok o kadar iyi. Teşekkürler!", 600), read: false },
   ];
@@ -542,7 +542,7 @@ function previewApi(): Api {
       profile = {
         name,
         fingerprint: "b3oi uvmj hsk3 wflg ofyx lmwu ci",
-        card: "kervan:ANBKsjJ0K7SrOhNovUYV5ObQIkq3GgFrr4UgozLJd4c3BSpQdzrI2Rdz8tyWYuEvDe_pFeQVuKHI4gpaPWqyuEMFYWxpY2XdVELCbsBqOz0qO_dKG4ggm5THqxr3I5G2SZI9XsHtAcZk67tdtelzFtx3SYKB-TSNiDYR9ZlQBS4bMi8v4aIF",
+        card: "carrychat:ANBKsjJ0K7SrOhNovUYV5ObQIkq3GgFrr4UgozLJd4c3BSpQdzrI2Rdz8tyWYuEvDe_pFeQVuKHI4gpaPWqyuEMFYWxpY2XdVELCbsBqOz0qO_dKG4ggm5THqxr3I5G2SZI9XsHtAcZk67tdtelzFtx3SYKB-TSNiDYR9ZlQBS4bMi8v4aIF",
       };
       return profile;
     },
@@ -554,7 +554,7 @@ function previewApi(): Api {
       return summarize();
     },
     async addContact(card) {
-      if (!card.trim().startsWith("kervan:")) throw new Error("invalid card prefix");
+      if (!card.trim().startsWith("carrychat:")) throw new Error("invalid card prefix");
       const fromGroup = groups.flatMap((group) => group.members).find((candidate) => candidate.card === card);
       if (fromGroup) {
         const added = contact(nextId++, fromGroup.name, fromGroup.fingerprint);

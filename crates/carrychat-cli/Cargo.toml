@@ -1,0 +1,18 @@
+[package]
+name = "carrychat-cli"
+description = "Command-line CarryChat node, for headless relays and testing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "carrychat"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "env"] }
+carrychat-node = { path = "../carrychat-node", features = ["bluetooth"] }
+carrychat-proto = { path = "../carrychat-proto" }
+tokio = { version = "1", features = ["io-std", "io-util", "macros", "rt-multi-thread", "signal"] }

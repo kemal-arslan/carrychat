@@ -1,0 +1,49 @@
+[package]
+name = "carrychat-node"
+description = "Message store, forwarding and links of a CarryChat node"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+arti-client = { version = "0.34", default-features = false, features = ["tokio", "native-tls", "compression"] }
+btleplug = { version = "0.11", optional = true }
+data-encoding = "2"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+hmac = "0.12"
+if-addrs = "0.15"
+k256 = { version = "0.13", features = ["schnorr"] }
+carrychat-proto = { path = "../carrychat-proto" }
+prost = "0.13"
+rand_core = { version = "0.6", features = ["getrandom"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+socket2 = { version = "0.6", features = ["all"] }
+thiserror = "2"
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio-tungstenite = { version = "0.30", features = ["native-tls"] }
+tor-rtcompat = { version = "0.34", default-features = false, features = ["tokio", "native-tls"] }
+
+uuid = { version = "1", optional = true }
+
+[features]
+# Bluetooth LE (§9.5) through the operating system's stack, where btleplug
+# supports it. Android has its own, in the app.
+bluetooth = ["dep:btleplug", "dep:uuid"]
+
+[dev-dependencies]
+prost = "0.13"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+tempfile = "3"
+
+# USB serial for LoRa devices, without libudev, which only lists ports.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+serialport = { version = "4", default-features = false }
+
+# Android has no system OpenSSL for native-tls (relays, Tor): build it in.
+[target.'cfg(target_os = "android")'.dependencies]
+openssl = { version = "0.10", features = ["vendored"] }

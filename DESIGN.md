@@ -1,7 +1,7 @@
 ---
 # gstack: design-md-format=spec
-name: Kervan
-description: A light, quiet messenger. White surfaces, one blue accent, one typeface, and the few things only Kervan shows (how a message travels, which links are open) drawn in the same plain language.
+name: CarryChat
+description: A light, quiet messenger. White surfaces, one blue accent, one typeface, and the few things only CarryChat shows (how a message travels, which links are open) drawn in the same plain language.
 colors:
   accent: "#2F5BFF"
   on-accent: "#FFFFFF"
@@ -116,11 +116,11 @@ components:
     rounded: "{rounded.lg}"
 ---
 
-# Kervan
+# CarryChat
 
 ## Overview
 
-**Creative North Star:** a clean phone app that stays out of the way. People open Kervan to read and send a few words, often on a weak battery and without internet; the interface should feel familiar within seconds and never look alarming.
+**Creative North Star:** a clean phone app that stays out of the way. People open CarryChat to read and send a few words, often on a weak battery and without internet; the interface should feel familiar within seconds and never look alarming.
 **Product context:** an offline-first, end-to-end encrypted messenger for Android, macOS, Windows and Linux. Messages are stored and carried device to device, over the local network, Bluetooth, LoRa, the internet or a file, until a path to the recipient appears. They may arrive in seconds or in days.
 **Mode per surface:** Operate everywhere: the chat list, a conversation, the composer, contacts, the network tab, settings and sheets.
 **Reference sites:** current mobile messenger work on dribbble.com (light chat lists, floating action buttons, filter chips, bottom sheets), and Material 3 navigation on Android.
