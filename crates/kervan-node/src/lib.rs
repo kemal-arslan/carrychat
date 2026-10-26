@@ -8,6 +8,7 @@ pub mod engine;
 mod error;
 pub mod file;
 pub mod internet;
+mod journey;
 pub mod lan;
 pub mod lora;
 pub mod store;
@@ -24,6 +25,7 @@ use tokio::sync::broadcast;
 use crate::engine::{Engine, Handled, Outcome};
 pub use crate::error::{Error, Result};
 pub use crate::internet::{InternetConfig, TorState};
+pub use crate::journey::{Journey, Step, Via};
 pub use crate::lan::{LanConfig, LanProblem};
 pub use crate::lora::LoraDevice;
 use crate::store::Store;
@@ -52,6 +54,8 @@ pub struct ContactView {
     pub request: bool,
     /// Messages from them we have not read.
     pub unread: usize,
+    /// Our messages to them that have not arrived yet.
+    pub waiting: usize,
     /// Whether a ratchet session runs both ways (§5.6): forward secrecy.
     pub secure: bool,
     /// Whether they have our card, so they can join our groups.
@@ -73,6 +77,9 @@ pub struct MessageView {
     pub read: bool,
     /// The file it offers, for a photo or voice message.
     pub file: Option<FileView>,
+    /// For outgoing messages: the links it has left this device by so far,
+    /// in the order first used.
+    pub via: Vec<Via>,
 }
 
 /// A file offered in a message (§5.9), and how much of it is here.
@@ -243,6 +250,9 @@ pub enum Event {
     MessageReceived { message: MessageView },
     #[serde(rename_all = "camelCase")]
     MessageDelivered { contact_id: i64, message_id: i64 },
+    /// One of our messages left this device by a link it had not used yet.
+    #[serde(rename_all = "camelCase")]
+    MessageMoved { contact_id: i64, message_id: i64 },
     #[serde(rename_all = "camelCase")]
     PeersChanged { lan: usize, bluetooth: usize },
     /// The Meshtastic device of the LoRa link connected or went away.
@@ -408,6 +418,11 @@ impl Node {
 
     pub fn messages(&self, contact_id: i64) -> Result<Vec<MessageView>> {
         self.shared.engine().messages(contact_id)
+    }
+
+    /// Where one of our messages went, from writing to reading.
+    pub fn journey(&self, message_id: i64) -> Result<Journey> {
+        self.shared.engine().journey(message_id)
     }
 
     /// Sends a text message over every link that is up, and keeps it until
@@ -637,6 +652,9 @@ impl Node {
     /// caller that writes it somewhere other than a path.
     pub fn export_bytes(&self) -> Result<(Vec<u8>, usize)> {
         let frames = self.shared.engine().export_frames(now())?;
+        for frame in &frames {
+            self.shared.handed_off(frame, Via::File, 0);
+        }
         Ok((file::encode(&frames), frames.len()))
     }
 
@@ -818,9 +836,13 @@ impl Shared {
     /// Sends our new frames, a file's offer and chunks, on every link.
     fn send_own_frames(&self, frames: &[(Frame, kervan_proto::pair::RecipientTag)]) {
         for (frame, tag) in frames {
-            self.peers.broadcast(&frame.to_bytes(), None);
+            for (peer, link) in self.peers.broadcast(&frame.to_bytes(), None) {
+                self.handed_off(frame, link.into(), peer);
+            }
             self.internet.post_bundle(frame, tag);
-            self.lora.send(frame, true);
+            if self.lora.send(frame, true) {
+                self.handed_off(frame, Via::Lora, 0);
+            }
         }
         self.internet.probe();
     }

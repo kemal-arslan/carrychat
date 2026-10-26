@@ -1,4 +1,13 @@
-import { HashIcon, UserPlusIcon, UsersThreeIcon } from "@phosphor-icons/react";
+import {
+  CheckIcon,
+  ChecksIcon,
+  HashIcon,
+  HourglassMediumIcon,
+  LockSimpleIcon,
+  ShieldCheckIcon,
+  UserPlusIcon,
+  UsersThreeIcon,
+} from "@phosphor-icons/react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import QRCode from "qrcode";
 import {
@@ -6,14 +15,17 @@ import {
   type Channel,
   type Contact,
   type Group,
+  type Journey,
   type LanProblem,
   type Member,
+  type Message,
   type Muted,
   type Profile,
 } from "./api";
-import { MAX_NAME_BYTES, utf8Length } from "./format";
+import { MAX_NAME_BYTES, clockTime, fullTime, utf8Length } from "./format";
 import { useI18n } from "./i18n";
 import { Sheet } from "./Sheet";
+import { ViaIcon } from "./Via";
 
 const Dialog = Sheet;
 
@@ -600,6 +612,108 @@ export function ContactInfoDialog({ contact, onClose }: { contact: Contact; onCl
           {t.done}
         </button>
       </div>
+    </Dialog>
+  );
+}
+
+/** Where one of our messages went: each link it left by, and when it arrived and was read. */
+export function JourneyDialog({ message, name, onClose }: { message: Message; name: string; onClose: () => void }) {
+  const { t, language } = useI18n();
+  const [journey, setJourney] = useState<Journey | null>(null);
+
+  useEffect(() => {
+    api.journey(message.id).then(setJourney);
+  }, [message.id, message.via.length, message.delivered, message.read]);
+
+  if (!journey) return null;
+  const arrived = journey.deliveredAt !== null;
+  const took = (arrived ? journey.deliveredAt! : Date.now() / 1000) - journey.createdAt;
+  const devices = journey.steps
+    .filter((step) => step.via === "lan" || step.via === "bluetooth")
+    .reduce((sum, step) => sum + step.count, 0);
+  const internet = journey.steps.some((step) => step.via === "internet");
+  const time = (unix: number) => <time title={fullTime(unix, language)}>{clockTime(unix, language)}</time>;
+
+  return (
+    <Dialog title={t.journeyTitle} onClose={onClose}>
+      <div className="journey-quote">
+        <span className="mini-bubble">{message.body || t.file}</span>
+        <span>{fullTime(message.createdAt, language)}</span>
+      </div>
+      <div className="journey-stats">
+        <div className="stat hero">
+          <b>{t.duration(took)}</b>
+          <span>{arrived ? t.statArrivedIn : t.statOnTheWay}</span>
+        </div>
+        <div className="stat">
+          <b>{devices}</b>
+          <span>{t.statDevices}</span>
+        </div>
+        <div className="stat">
+          <b>{internet ? t.statWithInternet : t.statWithoutInternet}</b>
+          <span>{arrived ? t.statArrived : t.statOnTheWay}</span>
+        </div>
+      </div>
+      <ol className="journey-steps">
+        <li>
+          <span className="node">
+            <LockSimpleIcon size={15} weight="bold" />
+          </span>
+          <span className="row-text">
+            <b>{t.journeyWritten}</b>
+            <span>{t.journeyWrittenHint}</span>
+          </span>
+          {time(journey.createdAt)}
+        </li>
+        {journey.steps.map((step) => (
+          <li key={step.via}>
+            <span className="node">
+              <ViaIcon via={step.via} size={15} />
+            </span>
+            <span className="row-text">
+              <b>{t.journeyStep(step.via)}</b>
+              <span>{t.journeyStepHint(step.via, step.count)}</span>
+            </span>
+            {time(step.at)}
+          </li>
+        ))}
+        {arrived ? (
+          <li>
+            <span className="node done">
+              <CheckIcon size={15} weight="bold" />
+            </span>
+            <span className="row-text">
+              <b>{t.journeyArrived(name)}</b>
+            </span>
+            {time(journey.deliveredAt!)}
+          </li>
+        ) : (
+          <li className="pending">
+            <span className="node waiting">
+              <HourglassMediumIcon size={15} weight="bold" />
+            </span>
+            <span className="row-text">
+              <b>{t.journeyNotYet}</b>
+              <span>{t.journeyNotYetHint}</span>
+            </span>
+          </li>
+        )}
+        {journey.readAt !== null && (
+          <li>
+            <span className="node done">
+              <ChecksIcon size={15} weight="bold" />
+            </span>
+            <span className="row-text">
+              <b>{t.read}</b>
+            </span>
+            {time(journey.readAt)}
+          </li>
+        )}
+      </ol>
+      <p className="journey-note">
+        <ShieldCheckIcon size={16} weight="fill" />
+        {t.journeyCarriers}
+      </p>
     </Dialog>
   );
 }

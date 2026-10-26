@@ -67,12 +67,16 @@ impl Peers {
             .count()
     }
 
-    pub(crate) fn broadcast(&self, frame: &[u8], except: Option<u64>) {
-        for (session, (_, outbox)) in lock(&self.connected).iter() {
-            if Some(*session) != except {
-                let _ = outbox.send(frame.to_vec());
+    /// Sends a frame to every connected node but `except`. Returns the nodes
+    /// it went to, and over which link.
+    pub(crate) fn broadcast(&self, frame: &[u8], except: Option<u64>) -> Vec<(u64, Link)> {
+        let mut sent = Vec::new();
+        for (session, (link, outbox)) in lock(&self.connected).iter() {
+            if Some(*session) != except && outbox.send(frame.to_vec()).is_ok() {
+                sent.push((*session, *link));
             }
         }
+        sent
     }
 
     /// Whether to connect to a node just seen nearby. The node with the
@@ -160,7 +164,7 @@ pub(crate) async fn run<R, W>(
     let heartbeat = tokio::spawn(heartbeat(outbox.clone()));
     while let Ok(Ok(frame)) = tokio::time::timeout(READ_TIMEOUT, read_frame(&mut reader)).await {
         // A frame that does not parse is skipped, as on every link.
-        let _ = handle_frame(&shared, peer, &outbox, &frame);
+        let _ = handle_frame(&shared, peer, link, &outbox, &frame);
     }
 
     heartbeat.abort();
@@ -191,7 +195,13 @@ fn initial_sync(shared: &Shared) -> Result<Vec<Vec<u8>>> {
     Ok(frames)
 }
 
-fn handle_frame(shared: &Shared, peer: u64, outbox: &Outbox, frame: &[u8]) -> Result<()> {
+fn handle_frame(
+    shared: &Shared,
+    peer: u64,
+    link: Link,
+    outbox: &Outbox,
+    frame: &[u8],
+) -> Result<()> {
     match frame.first() {
         Some(&HAVE) => {
             let missing = shared.engine().missing(&parse_ids(frame)?)?;
@@ -200,8 +210,11 @@ fn handle_frame(shared: &Shared, peer: u64, outbox: &Outbox, frame: &[u8]) -> Re
             }
         }
         Some(&WANT) => {
-            for frame in shared.engine().frames_for(&parse_ids(frame)?, now())? {
-                let _ = outbox.send(frame.to_bytes());
+            let frames = shared.engine().frames_for(&parse_ids(frame)?, now())?;
+            for frame in frames {
+                if outbox.send(frame.to_bytes()).is_ok() {
+                    shared.handed_off(&frame, link.into(), peer);
+                }
             }
         }
         Some(&HELLO) => {}

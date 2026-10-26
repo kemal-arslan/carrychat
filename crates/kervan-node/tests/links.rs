@@ -3,7 +3,7 @@
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::time::Duration;
 
-use kervan_node::{Event, LanConfig, Link, Node};
+use kervan_node::{Event, LanConfig, Link, Node, Via};
 use tempfile::TempDir;
 use tokio::sync::broadcast;
 
@@ -211,6 +211,56 @@ async fn a_platform_link_syncs_like_the_local_network() {
     .await
     .expect("the second connection should close");
     assert_eq!(alice.node.status().unwrap().bluetooth_peers, 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_keeps_the_ways_it_left_by() {
+    let alice = node("alice");
+    let bob = node("bob");
+    let carol = node("carol");
+    let (bob_id, _) = introduce(&alice.node, &bob.node);
+    let stick = TempDir::new().unwrap();
+    let file = stick.path().join("messages.kervan");
+
+    let sent = alice.node.send_text(bob_id, "Yoldayım").unwrap();
+    assert!(sent.via.is_empty());
+    assert_eq!(alice.node.contacts().unwrap()[0].waiting, 1);
+
+    alice.node.export_file(&file).unwrap();
+    let mut alice_events = alice.node.subscribe();
+    // Carol, nearby, takes it over Bluetooth to carry it on.
+    let _link = platform_link(&alice.node, &carol.node);
+    let moved = next_event(&mut alice_events, |event| {
+        matches!(event, Event::MessageMoved { .. })
+    })
+    .await;
+    assert_eq!(
+        moved,
+        Event::MessageMoved {
+            contact_id: bob_id,
+            message_id: sent.id
+        }
+    );
+    assert_eq!(
+        alice.node.messages(bob_id).unwrap()[0].via,
+        vec![Via::File, Via::Bluetooth]
+    );
+
+    // The file reaches Bob; his receipt comes back on another file.
+    assert_eq!(bob.node.import_file(&file).unwrap().received, 1);
+    bob.node.export_file(&file).unwrap();
+    assert_eq!(alice.node.import_file(&file).unwrap().delivered, 1);
+
+    let journey = alice.node.journey(sent.id).unwrap();
+    assert_eq!(journey.created_at, sent.created_at);
+    assert!(journey.delivered_at.is_some());
+    let ways: Vec<(Via, usize)> = journey
+        .steps
+        .iter()
+        .map(|step| (step.via, step.count))
+        .collect();
+    assert_eq!(ways, vec![(Via::File, 1), (Via::Bluetooth, 1)]);
+    assert_eq!(alice.node.contacts().unwrap()[0].waiting, 0);
 }
 
 #[tokio::test(flavor = "multi_thread")]

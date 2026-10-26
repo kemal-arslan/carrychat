@@ -1,4 +1,4 @@
-import { CaretRightIcon, MagnifyingGlassIcon, QrCodeIcon, XIcon } from "@phosphor-icons/react";
+import { CaretRightIcon, HourglassMediumIcon, MagnifyingGlassIcon, QrCodeIcon, XIcon } from "@phosphor-icons/react";
 import { useState } from "react";
 import type { Channel, Contact, Group, Status } from "./api";
 import { Avatar } from "./Avatar";
@@ -16,9 +16,11 @@ type Item = {
   lastAt: number | null;
   unread: number;
   request: boolean;
+  /** Our messages here that have not arrived yet. */
+  waiting: number;
 };
 
-type Filter = "all" | "unread" | "group" | "channel";
+type Filter = "all" | "unread" | "waiting" | "group" | "channel";
 
 type Props = {
   contacts: Contact[];
@@ -50,6 +52,7 @@ export function ChatList({ contacts, groups, channels, status, active, onOpen, o
         lastAt: contact.lastAt,
         unread: contact.unread,
         request: contact.request,
+        waiting: contact.waiting,
       })),
     ...groups.map((group) => ({
       kind: "group" as const,
@@ -59,6 +62,7 @@ export function ChatList({ contacts, groups, channels, status, active, onOpen, o
       lastAt: group.lastAt,
       unread: group.unread,
       request: false,
+      waiting: 0,
     })),
     ...channels.map((channel) => ({
       kind: "channel" as const,
@@ -68,6 +72,7 @@ export function ChatList({ contacts, groups, channels, status, active, onOpen, o
       lastAt: channel.lastAt,
       unread: channel.unread,
       request: false,
+      waiting: 0,
     })),
   ].sort(
     (a, b) =>
@@ -79,15 +84,22 @@ export function ChatList({ contacts, groups, channels, status, active, onOpen, o
   const needle = query?.trim().toLocaleLowerCase(language) ?? "";
   const shown = items.filter(
     (item) =>
-      (filter === "all" || (filter === "unread" ? item.unread > 0 || item.request : item.kind === filter)) &&
+      (filter === "all" ||
+        (filter === "unread"
+          ? item.unread > 0 || item.request
+          : filter === "waiting"
+            ? item.waiting > 0
+            : item.kind === filter)) &&
       (needle === "" || item.name.toLocaleLowerCase(language).includes(needle)),
   );
   const unreadCount = items.filter((item) => item.unread > 0 || item.request).length;
+  const waitingCount = items.filter((item) => item.waiting > 0).length;
   const line = summary(status, t);
 
   const chips: { filter: Filter; label: string; count?: number }[] = [
     { filter: "all", label: t.filterAll },
     { filter: "unread", label: t.filterUnread, count: unreadCount },
+    { filter: "waiting", label: t.filterWaiting, count: waitingCount },
     { filter: "group", label: t.groups },
     { filter: "channel", label: t.channels },
   ];
@@ -168,6 +180,9 @@ export function ChatList({ contacts, groups, channels, status, active, onOpen, o
                   )}
                 </span>
                 <span className="row-bottom">
+                  {item.waiting > 0 && (
+                    <HourglassMediumIcon className="waiting-mark" size={14} weight="bold" aria-label={t.onTheWay} />
+                  )}
                   <span className="preview">{item.preview}</span>
                   {item.unread > 0 && !isActive && <span className="badge">{item.unread}</span>}
                 </span>

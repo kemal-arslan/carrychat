@@ -30,6 +30,7 @@ import {
   ConnectDialog,
   ContactInfoDialog,
   JoinChannelDialog,
+  JourneyDialog,
   MembersDialog,
   MyCardDialog,
   NetworkDialog,
@@ -66,6 +67,7 @@ type DialogName =
   | "connect"
   | "network"
   | "contactInfo"
+  | "journey"
   | "newGroup"
   | "members"
   | "joinChannel"
@@ -87,6 +89,8 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
   const [status, setStatus] = useState<Status | null>(null);
   const [dialog, setDialog] = useState<DialogName | null>(null);
   const [tab, setTab] = useState<Tab>("chats");
+  // The message whose journey is open.
+  const [journeyId, setJourneyId] = useState<number | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
@@ -245,6 +249,10 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
           setMessages((current) =>
             current.map((message) => (message.id === event.messageId ? { ...message, delivered: true } : message)),
           );
+          refreshContacts();
+        } else if (event.type === "messageMoved") {
+          // A message left by a new link: its bubble shows the link.
+          if (event.contactId === selectedRef.current) api.messages(event.contactId).then(setMessages);
         } else if (event.type === "messagesRead") {
           const read = new Set(event.messageIds);
           setMessages((current) =>
@@ -562,6 +570,10 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
             onAccept={accept}
             onDecline={decline}
             onInfo={() => setDialog("contactInfo")}
+            onJourney={(message) => {
+              setJourneyId(message.id);
+              setDialog("journey");
+            }}
             onBack={narrow ? back : undefined}
           />
         ) : (
@@ -578,6 +590,13 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
       )}
       {dialog === "contactInfo" && contact && (
         <ContactInfoDialog contact={contact} onClose={() => setDialog(null)} />
+      )}
+      {dialog === "journey" && contact && messages.some((message) => message.id === journeyId) && (
+        <JourneyDialog
+          message={messages.find((message) => message.id === journeyId)!}
+          name={contact.name}
+          onClose={() => setDialog(null)}
+        />
       )}
       {dialog === "add" && (
         <AddContactDialog

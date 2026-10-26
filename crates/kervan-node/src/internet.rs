@@ -3,6 +3,8 @@
 //! reconnects on its own; what one connection receives is handled like a
 //! frame from any other link.
 
+use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
@@ -16,7 +18,7 @@ use data_encoding::{BASE64URL_NOPAD, HEXLOWER};
 use futures_util::{SinkExt, StreamExt};
 use hmac::{Hmac, Mac};
 use k256::schnorr::SigningKey;
-use kervan_proto::bundle::MAX_TTL_SECS;
+use kervan_proto::bundle::{BundleId, MAX_TTL_SECS};
 use kervan_proto::frame::Frame;
 use kervan_proto::pair::RecipientTag;
 use kervan_proto::DAY_SECS;
@@ -27,6 +29,7 @@ use tokio_tungstenite::tungstenite::http::Uri;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::engine::{Handled, Outcome};
+use crate::journey::Via;
 use crate::{now, Error, Event, Result, Shared};
 
 /// The Nostr event kind of Kervan frames. Provisional, not registered.
@@ -113,7 +116,13 @@ pub(crate) struct Internet {
     tor_state: Mutex<Option<TorState>>,
     /// The Tor client, once it has started.
     tor: watch::Sender<Option<Arc<Tor>>>,
+    /// The bundle each posted event carries, by event id, so a relay's OK
+    /// tells which bundle it took.
+    posted: Mutex<HashMap<String, BundleId>>,
 }
+
+/// Events remembered for their OK at most; past that the memory starts over.
+const MAX_POSTED: usize = 4096;
 
 impl Internet {
     pub(crate) fn new() -> Self {
@@ -127,7 +136,25 @@ impl Internet {
             refusal: Mutex::default(),
             tor_state: Mutex::default(),
             tor: watch::channel(None).0,
+            posted: Mutex::default(),
         }
+    }
+
+    /// The `EVENT` message for a bundle or chunk frame, remembering which
+    /// bundle the event carries.
+    fn event_for(&self, secret: &[u8; 32], frame: &Frame, tag: &RecipientTag) -> Option<String> {
+        let (id, message) = bundle_event(secret, frame, tag)?;
+        if let Frame::Bundle(bundle) = frame {
+            let mut posted = self
+                .posted
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if posted.len() >= MAX_POSTED {
+                posted.clear();
+            }
+            posted.insert(id, bundle.id);
+        }
+        Some(message)
     }
 
     pub(crate) fn tor_state(&self) -> Option<TorState> {
@@ -164,7 +191,7 @@ impl Internet {
         let Some(secret) = self.secret.get() else {
             return;
         };
-        let Some(event) = bundle_event(secret, frame, tag) else {
+        let Some(event) = self.event_for(secret, frame, tag) else {
             return;
         };
         let queue = match frame {
@@ -285,8 +312,9 @@ fn host_and_port(url: &str) -> Option<(String, u16)> {
     Some((host, port))
 }
 
-/// The `EVENT` message that posts a bundle or chunk frame under `tag`.
-fn bundle_event(secret: &[u8; 32], frame: &Frame, tag: &RecipientTag) -> Option<String> {
+/// The id and `EVENT` message of the event that posts a bundle or chunk
+/// frame under `tag`.
+fn bundle_event(secret: &[u8; 32], frame: &Frame, tag: &RecipientTag) -> Option<(String, String)> {
     let (Frame::Bundle(bundle) | Frame::Chunk(bundle)) = frame else {
         return None;
     };
@@ -296,7 +324,8 @@ fn bundle_event(secret: &[u8; 32], frame: &Frame, tag: &RecipientTag) -> Option<
         vec![vec!["x".to_owned(), HEXLOWER.encode(tag)]],
         BASE64URL_NOPAD.encode(&frame.to_bytes()),
     );
-    Some(json!(["EVENT", event]).to_string())
+    let id = event["id"].as_str().unwrap_or_default().to_owned();
+    Some((id, json!(["EVENT", event]).to_string()))
 }
 
 /// A Nostr event (NIP-01) signed with a one-time key derived from `secret`
@@ -338,6 +367,12 @@ pub fn signed_event(
 }
 
 async fn relay_loop(shared: Weak<Shared>, url: String, keepalive: Duration, over_tor: bool) {
+    // A number for the relay, to count the relays that took a message.
+    let relay = {
+        let mut hasher = DefaultHasher::new();
+        url.hash(&mut hasher);
+        hasher.finish()
+    };
     let mut retry = FIRST_RETRY;
     loop {
         let Some((mut outgoing, mut chunks, mut renew, mut probe, mut tor)) =
@@ -378,7 +413,15 @@ async fn relay_loop(shared: Weak<Shared>, url: String, keepalive: Duration, over
             .await;
             match connected {
                 Ok(Some((socket, _))) => {
-                    run_relay(&shared, socket, &mut channels, keepalive, TOR_PROBE_TIMEOUT).await;
+                    run_relay(
+                        &shared,
+                        relay,
+                        socket,
+                        &mut channels,
+                        keepalive,
+                        TOR_PROBE_TIMEOUT,
+                    )
+                    .await;
                     true
                 }
                 _ => false,
@@ -391,7 +434,15 @@ async fn relay_loop(shared: Weak<Shared>, url: String, keepalive: Duration, over
             .await;
             match connected {
                 Ok(Ok((socket, _))) => {
-                    run_relay(&shared, socket, &mut channels, keepalive, PROBE_TIMEOUT).await;
+                    run_relay(
+                        &shared,
+                        relay,
+                        socket,
+                        &mut channels,
+                        keepalive,
+                        PROBE_TIMEOUT,
+                    )
+                    .await;
                     true
                 }
                 _ => false,
@@ -415,6 +466,7 @@ struct Channels<'a> {
 
 async fn run_relay<S>(
     shared: &Weak<Shared>,
+    relay: u64,
     socket: S,
     channels: &mut Channels<'_>,
     keepalive: Duration,
@@ -462,7 +514,7 @@ async fn run_relay<S>(
                     last_heard = Instant::now();
                     probe_deadline = None;
                     if let Message::Text(text) = message {
-                        with(shared, |shared| receive(shared, &text));
+                        with(shared, |shared| receive(shared, relay, &text));
                     }
                     None
                 }
@@ -535,7 +587,7 @@ fn greeting(shared: &Shared) -> (Vec<String>, Vec<String>) {
     // What it carries for others and could not post while offline.
     frames.extend(engine.take_uploads(now()).unwrap_or_default());
     for (frame, tag) in frames {
-        if let Some(event) = bundle_event(&secret, &frame, &tag) {
+        if let Some(event) = shared.internet.event_for(&secret, &frame, &tag) {
             match frame {
                 Frame::Chunk(_) => chunks.push(event),
                 _ => messages.push(event),
@@ -573,7 +625,8 @@ fn subscription(shared: &Shared) -> Option<String> {
 }
 
 /// Handles one message from a relay.
-fn receive(shared: &Shared, text: &str) {
+/// Handles a message from the relay numbered `relay`.
+fn receive(shared: &Shared, relay: u64, text: &str) {
     let Ok(Value::Array(parts)) = serde_json::from_str::<Value>(text) else {
         return;
     };
@@ -602,6 +655,17 @@ fn receive(shared: &Shared, text: &str) {
         }
         Some("OK") => {
             let accepted = parts.get(2).and_then(Value::as_bool).unwrap_or(true);
+            let carried = parts.get(1).and_then(Value::as_str).and_then(|id| {
+                let posted = shared
+                    .internet
+                    .posted
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                posted.get(id).copied()
+            });
+            if let Some(bundle) = carried.filter(|_| accepted) {
+                shared.handed_off_id(bundle, Via::Internet, relay);
+            }
             let reason = parts.get(3).and_then(Value::as_str).unwrap_or_default();
             let mut refusal = shared
                 .internet

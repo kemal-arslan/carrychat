@@ -7,6 +7,7 @@ use kervan_proto::identity::ContactCard;
 use kervan_proto::ratchet::SkippedKey;
 use rusqlite::{params, Connection, OptionalExtension};
 
+use crate::journey::{Journey, Step, Via};
 use crate::{MessageView, Result};
 
 mod channels;
@@ -178,6 +179,15 @@ const MIGRATIONS: &[&str] = &[
      ALTER TABLE channel_posts ADD COLUMN file_ref INTEGER;",
     // Whether a carried bundle has gone up to the internet relays.
     "ALTER TABLE bundles ADD COLUMN uploaded INTEGER NOT NULL DEFAULT 0;",
+    // Where our own messages went: each link, and the device or relay that
+    // took a message over it, the first time.
+    "CREATE TABLE handoffs (
+         bundle_id BLOB NOT NULL,
+         via TEXT NOT NULL,
+         peer INTEGER NOT NULL,
+         at INTEGER NOT NULL,
+         PRIMARY KEY (bundle_id, via, peer)
+     );",
 ];
 
 /// Skipped keys kept per contact, at most; the oldest go first.
@@ -432,6 +442,11 @@ impl Store {
             .execute("DELETE FROM skipped_keys WHERE contact_id = ?", [id])?;
         self.conn
             .execute("DELETE FROM sessions WHERE contact_id = ?", [id])?;
+        self.conn.execute(
+            "DELETE FROM handoffs WHERE bundle_id IN
+                 (SELECT bundle_id FROM messages WHERE contact_id = ? AND outgoing = 1)",
+            [id],
+        )?;
         self.conn
             .execute("DELETE FROM messages WHERE contact_id = ?", [id])?;
         self.conn
@@ -495,15 +510,20 @@ impl Store {
             delivered: false,
             read: false,
             file: None,
+            via: Vec::new(),
         }))
     }
 
     pub fn messages(&self, contact_id: i64) -> Result<Vec<MessageView>> {
         let mut statement = self.conn.prepare(
-            "SELECT id, outgoing, body, created_at, delivered_at IS NOT NULL, read_at IS NOT NULL
+            "SELECT id, outgoing, body, created_at, delivered_at IS NOT NULL, read_at IS NOT NULL,
+                 (SELECT GROUP_CONCAT(via) FROM
+                     (SELECT via FROM handoffs WHERE handoffs.bundle_id = messages.bundle_id
+                      GROUP BY via ORDER BY MIN(at), MIN(rowid)))
              FROM messages WHERE contact_id = ? ORDER BY created_at, id",
         )?;
         let rows = statement.query_map([contact_id], |row| {
+            let via: Option<String> = row.get(6)?;
             Ok(MessageView {
                 id: row.get(0)?,
                 contact_id,
@@ -513,9 +533,109 @@ impl Store {
                 delivered: row.get(4)?,
                 read: row.get(5)?,
                 file: None,
+                via: via
+                    .unwrap_or_default()
+                    .split(',')
+                    .filter_map(Via::parse)
+                    .collect(),
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Notes that one of our messages, still on its way, went to `peer` over
+    /// `via`. Returns its contact and message id when `via` is new for it.
+    pub fn record_handoff(
+        &self,
+        id: BundleId,
+        via: Via,
+        peer: u64,
+        now: u32,
+    ) -> Result<Option<(i64, i64)>> {
+        let Some((contact_id, message_id)) = self
+            .conn
+            .query_row(
+                "SELECT contact_id, id FROM messages
+                 WHERE bundle_id = ? AND outgoing = 1 AND delivered_at IS NULL",
+                [id.0],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+        else {
+            return Ok(None);
+        };
+        let new_way = !self.conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM handoffs WHERE bundle_id = ? AND via = ?)",
+            params![id.0, via.as_str()],
+            |row| row.get::<_, bool>(0),
+        )?;
+        // Session ids are random 64-bit numbers; SQLite keeps them signed.
+        self.conn.execute(
+            "INSERT OR IGNORE INTO handoffs (bundle_id, via, peer, at) VALUES (?, ?, ?, ?)",
+            params![id.0, via.as_str(), peer as i64, now],
+        )?;
+        Ok(new_way.then_some((contact_id, message_id)))
+    }
+
+    /// The way one of our messages went, from writing to reading.
+    pub fn journey(&self, message_id: i64) -> Result<Option<Journey>> {
+        let Some((bundle_id, created_at, delivered_at, read_at)) = self
+            .conn
+            .query_row(
+                "SELECT bundle_id, created_at, delivered_at, read_at FROM messages
+                 WHERE id = ? AND outgoing = 1",
+                [message_id],
+                |row| {
+                    Ok((
+                        row.get::<_, Vec<u8>>(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                    ))
+                },
+            )
+            .optional()?
+        else {
+            return Ok(None);
+        };
+        let mut statement = self.conn.prepare(
+            "SELECT via, COUNT(*), MIN(at) FROM handoffs WHERE bundle_id = ?
+             GROUP BY via ORDER BY MIN(at), MIN(rowid)",
+        )?;
+        let steps = statement
+            .query_map([bundle_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, usize>(1)?,
+                    row.get(2)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .filter_map(|(via, count, at)| {
+                Some(Step {
+                    via: Via::parse(&via)?,
+                    count,
+                    at,
+                })
+            })
+            .collect();
+        Ok(Some(Journey {
+            created_at,
+            delivered_at,
+            read_at,
+            steps,
+        }))
+    }
+
+    /// Our messages to a contact that have not arrived yet.
+    pub fn waiting_count(&self, contact_id: i64) -> Result<usize> {
+        Ok(self.conn.query_row(
+            "SELECT COUNT(*) FROM messages
+             WHERE contact_id = ? AND outgoing = 1 AND delivered_at IS NULL",
+            [contact_id],
+            |row| row.get(0),
+        )?)
     }
 
     pub fn last_message(&self, contact_id: i64) -> Result<Option<(String, u32)>> {

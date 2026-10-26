@@ -254,6 +254,51 @@ const en = {
   queueTitle: "On this device",
   myCardHint: "Show it so others can add you",
   theme: "Appearance",
+  filterWaiting: "On the way",
+  onTheWay: "On the way",
+  loraName: "LoRa radio",
+  fileName: "File",
+  journeyTitle: "The message's journey",
+  journeyWritten: "Written and encrypted",
+  journeyWrittenHint: "On this device",
+  journeyStep: (via: string) =>
+    ({
+      lan: "Left over the local network",
+      bluetooth: "Left over Bluetooth",
+      internet: "Went out to the internet",
+      lora: "Sent by LoRa radio",
+      file: "Written to a file",
+    })[via] ?? via,
+  journeyStepHint: (via: string, count: number) =>
+    via === "internet"
+      ? count === 1
+        ? "Left on 1 relay"
+        : `Left on ${count} relays`
+      : via === "lora"
+        ? "Handed to the radio"
+        : via === "file"
+          ? "Someone can carry it on"
+          : count === 1
+            ? "Handed to 1 device nearby"
+            : `Handed to ${count} devices nearby`,
+  journeyArrived: (name: string) => `Reached ${name}`,
+  journeyNotYet: "Not arrived yet",
+  journeyNotYetHint: "It goes on as soon as a path appears.",
+  journeyCarriers: "Devices that carry it cannot read it; they only pass it on.",
+  statOnTheWay: "on the way",
+  statArrivedIn: "to arrive",
+  statDevices: "devices nearby",
+  statWithInternet: "Internet",
+  statWithoutInternet: "No internet",
+  statArrived: "arrived",
+  duration: (seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    if (days > 0) return `${days} d ${hours % 24} h`;
+    if (hours > 0) return `${hours} h ${minutes % 60} min`;
+    return minutes > 0 ? `${minutes} min` : "< 1 min";
+  },
   themeSystem: "System",
   themeLight: "Light",
   themeDark: "Dark",
@@ -504,6 +549,47 @@ const tr: Strings = {
   queueTitle: "Bu cihazda",
   myCardHint: "Seni eklemeleri için göster",
   theme: "Görünüm",
+  filterWaiting: "Yolda",
+  onTheWay: "Yolda",
+  loraName: "LoRa telsizi",
+  fileName: "Dosya",
+  journeyTitle: "Mesajın yolculuğu",
+  journeyWritten: "Yazıldı ve şifrelendi",
+  journeyWrittenHint: "Bu cihazda",
+  journeyStep: (via) =>
+    ({
+      lan: "Yerel ağdan yola çıktı",
+      bluetooth: "Bluetooth ile yola çıktı",
+      internet: "İnternete çıktı",
+      lora: "LoRa telsiziyle gönderildi",
+      file: "Dosyaya yazıldı",
+    })[via] ?? via,
+  journeyStepHint: (via, count) =>
+    via === "internet"
+      ? `${count} sunucuya bırakıldı`
+      : via === "lora"
+        ? "Telsize verildi"
+        : via === "file"
+          ? "Biri onu taşıyabilir"
+          : `Yakındaki ${count} cihaza verildi`,
+  journeyArrived: (name) => `${name} kişisine ulaştı`,
+  journeyNotYet: "Henüz ulaşmadı",
+  journeyNotYetHint: "Bir yol bulununca devam edecek.",
+  journeyCarriers: "Taşıyan cihazlar mesajı okuyamaz, yalnızca iletir.",
+  statOnTheWay: "yolda",
+  statArrivedIn: "sürede ulaştı",
+  statDevices: "yakın cihaz",
+  statWithInternet: "İnternetle",
+  statWithoutInternet: "İnternetsiz",
+  statArrived: "ulaştı",
+  duration: (seconds) => {
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    if (days > 0) return `${days} gün ${hours % 24} sa`;
+    if (hours > 0) return `${hours} sa ${minutes % 60} dk`;
+    return minutes > 0 ? `${minutes} dk` : "1 dk'dan az";
+  },
   themeSystem: "Sistem",
   themeLight: "Açık",
   themeDark: "Koyu",

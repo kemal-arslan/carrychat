@@ -8,8 +8,8 @@ use std::sync::Mutex;
 
 use data_encoding::BASE64;
 use kervan_node::{
-    ChannelView, ContactView, GroupMessageView, GroupView, ImportReport, InternetConfig, LanConfig,
-    MessageView, MutedView, Node, PostView, Profile, Settings, Status,
+    ChannelView, ContactView, GroupMessageView, GroupView, ImportReport, InternetConfig, Journey,
+    LanConfig, MessageView, MutedView, Node, PostView, Profile, Settings, Status,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_fs::{FilePath, FsExt, OpenOptions};
@@ -167,6 +167,11 @@ fn decline_contact(state: State<'_, AppState>, contact_id: i64) -> CommandResult
 #[tauri::command]
 fn messages(state: State<'_, AppState>, contact_id: i64) -> CommandResult<Vec<MessageView>> {
     state.node()?.messages(contact_id).map_err(text)
+}
+
+#[tauri::command]
+fn journey(state: State<'_, AppState>, message_id: i64) -> CommandResult<Journey> {
+    state.node()?.journey(message_id).map_err(text)
 }
 
 #[tauri::command]
@@ -516,6 +521,7 @@ pub fn run() {
             set_read_receipts,
             erase_everything,
             messages,
+            journey,
             send_message,
             groups,
             group_messages,

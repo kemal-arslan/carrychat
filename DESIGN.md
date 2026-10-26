@@ -173,18 +173,17 @@ Flat. Surfaces are told apart by fill (surface vs surface-muted) and hairlines (
 
 - **Buttons:** primary (accent fill), secondary (surface-muted fill), danger (error text on surface-muted; solid error only for the final confirmation). Focus-visible draws a 2px accent ring offset by 2px; pressed darkens by 6%; disabled drops to 40% opacity.
 - **Message states** (outgoing):
-  - Waiting for a path: the bubble is white with a dashed accent outline, and its footer says "Waiting for a path" with an hourglass. It is calm, not an error.
+  - Waiting for a path: the bubble is white with a dashed accent outline, and its footer says "Waiting for a path" with an hourglass. It is calm, not an error. Once it has left by some link but not arrived, the footer says "On the way".
   - Delivered: a single check. Read: a double check.
-  - Tapping a bubble shows its full time.
+  - The footer shows a small icon for each link the message left by, in the order first used.
+- **Message journey:** tapping one of our bubbles opens a sheet with how long it was on the way, how many nearby devices took it, whether the internet was used, and a timeline: written, each link it left by with the number of devices or relays and the time, arrived, read. A message that has not arrived ends the timeline with a dashed hourglass node.
+- **On the way:** the chat list has a filter for conversations with messages that have not arrived, which show an hourglass before their last message.
 - **Composer:** an attach button, a pill-shaped field that grows to five lines, and one round accent button that is a microphone while the field is empty and a send arrow once there is text. The packet count appears above the field only when the text needs more than one radio packet, or when something is wrong.
 - **Link summary** (chat list): a coloured dot (green when any link is open, grey when none) and one sentence, such as "No internet · 3 devices nearby".
 - **Network rows:** icon tile, name, state in words (green when live), and a switch where the link can be turned on or off. Changes that need a restart show one restart row.
 - **Sheets:** every dialog is a bottom sheet with a grab handle, a 20px title and its actions at the bottom, full width on phones and 440px wide, centred, on desktops. They close by dragging down, tapping the scrim or Escape.
 - **Empty states** say what to do next in one sentence.
-- **Planned, needing core support:**
-  - A "Nearby" row of contacts reachable right now, which needs the node to learn who is behind a nearby device without exposing identities to strangers.
-  - Link icons on each bubble and a "message journey" sheet (when it left, over which link, to how many devices, when it arrived and was read), which need the node to record hand-offs per message.
-  - An "On the way" filter, which needs the last message's state in the chat list.
+- **Planned, needing core support:** a "Nearby" row of contacts reachable right now, which needs the node to learn who is behind a nearby device without exposing identities to strangers.
 
 ## Do's and Don'ts
 

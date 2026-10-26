@@ -19,6 +19,8 @@ export type Contact = {
   request: boolean;
   /** Messages from them not read yet. */
   unread: number;
+  /** Our messages to them that have not arrived yet. */
+  waiting: number;
   /** A ratchet session runs both ways, so messages have forward secrecy. */
   secure: boolean;
   /** They have our card, so they can join our groups. */
@@ -117,6 +119,20 @@ export type Message = {
   /** Outgoing: they read it. Incoming: we read it. */
   read: boolean;
   file: FileView | null;
+  /** Outgoing: the links it left this device by so far. */
+  via: Via[];
+};
+
+/** A way a message left this device. */
+export type Via = "lan" | "bluetooth" | "internet" | "lora" | "file";
+
+/** One of our messages from writing to reading. */
+export type Journey = {
+  createdAt: number;
+  deliveredAt: number | null;
+  readAt: number | null;
+  /** Each link it left by, in the order first used: how many devices or relays took it, and when. */
+  steps: { via: Via; count: number; at: number }[];
 };
 
 export type Settings = { readReceipts: boolean; tor: boolean; bluetooth: boolean };
@@ -153,6 +169,7 @@ export type ImportReport = {
 export type NodeEvent =
   | { type: "messageReceived"; message: Message }
   | { type: "messageDelivered"; contactId: number; messageId: number }
+  | { type: "messageMoved"; contactId: number; messageId: number }
   | { type: "messagesRead"; contactId: number; messageIds: number[] }
   | { type: "contactChanged"; contact: Contact }
   | { type: "peersChanged"; lan: number; bluetooth: number }
@@ -175,6 +192,8 @@ export interface Api {
   acceptContact(contactId: number): Promise<Contact>;
   declineContact(contactId: number): Promise<void>;
   messages(contactId: number): Promise<Message[]>;
+  /** Where one of our messages went. */
+  journey(messageId: number): Promise<Journey>;
   sendMessage(contactId: number, text: string): Promise<Message>;
   markRead(contactId: number): Promise<void>;
   groups(): Promise<Group[]>;
@@ -288,6 +307,7 @@ function desktopApi(): Api {
     declineContact: (contactId) => call("decline_contact", { contactId }),
     messages: (contactId) => call("messages", { contactId }),
     sendMessage: (contactId, text) => call("send_message", { contactId, text }),
+    journey: (messageId) => call("journey", { messageId }),
     markRead: (contactId) => call("mark_read", { contactId }),
     groups: () => call("groups"),
     groupMessages: (groupId) => call("group_messages", { groupId }),
@@ -368,6 +388,7 @@ function previewApi(): Api {
     lastAt: null,
     request,
     unread: 0,
+    waiting: 0,
     secure,
     hasOurCard: !request,
   });
@@ -385,6 +406,7 @@ function previewApi(): Api {
     delivered: outgoing && done,
     read: done,
     file: null,
+    via: outgoing ? (done ? ["bluetooth", "lan"] : ["bluetooth"]) : [],
   });
   const messages: Message[] = [
     message(1, 1, false, "Elektrik geldi mi sizde?", 5400),
@@ -508,6 +530,7 @@ function previewApi(): Api {
         lastMessage: last?.body ?? null,
         lastAt: last?.createdAt ?? null,
         unread: own.filter((message) => !message.outgoing && !message.read).length,
+        waiting: own.filter((message) => message.outgoing && !message.delivered).length,
       };
     });
   return {
@@ -558,9 +581,23 @@ function previewApi(): Api {
     async messages(contactId) {
       return messages.filter((message) => message.contactId === contactId).map((message) => ({ ...message }));
     },
+    async journey(messageId) {
+      const sent = messages.find((message) => message.id === messageId)!;
+      const at = (seconds: number) => sent.createdAt + seconds;
+      return {
+        createdAt: sent.createdAt,
+        deliveredAt: sent.delivered ? at(5800) : null,
+        readAt: sent.read ? at(6700) : null,
+        steps: sent.via.map((via, index) => ({ via, count: via === "bluetooth" ? 2 : 1, at: at(60 + index * 1900) })),
+      };
+    },
     async sendMessage(contactId, text) {
-      const sent = { ...message(nextId++, contactId, true, text.trim(), 0, false) };
+      const sent = { ...message(nextId++, contactId, true, text.trim(), 0, false), via: [] as Via[] };
       messages.push(sent);
+      setTimeout(() => {
+        sent.via = ["lan"];
+        emit({ type: "messageMoved", contactId, messageId: sent.id });
+      }, 1000);
       setTimeout(() => {
         sent.delivered = true;
         emit({ type: "messageDelivered", contactId, messageId: sent.id });

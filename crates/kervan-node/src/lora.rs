@@ -108,18 +108,19 @@ impl Lora {
 
     /// Queues a frame for the radio. Only bundles and tombstones go over
     /// LoRa: never file chunks. `own` frames, the node's bundles and
-    /// tombstones, go before ones it carries for others.
-    pub(crate) fn send(&self, frame: &Frame, own: bool) {
+    /// tombstones, go before ones it carries for others. Returns whether it
+    /// was queued for a connected device.
+    pub(crate) fn send(&self, frame: &Frame, own: bool) -> bool {
         if !self.started.load(Ordering::Relaxed) {
-            return;
+            return false;
         }
         let packets = match frame {
             Frame::Bundle(bundle) => match frames_for(bundle, meshtastic::MTU) {
                 Ok(frames) => frames.iter().map(Frame::to_bytes).collect(),
-                Err(_) => return,
+                Err(_) => return false,
             },
             Frame::Tombstone { .. } => vec![frame.to_bytes()],
-            Frame::Fragment(_) | Frame::Chunk(_) => return,
+            Frame::Fragment(_) | Frame::Chunk(_) => return false,
         };
         {
             let mut queue = lock(&self.queue);
@@ -135,6 +136,7 @@ impl Lora {
             }
         }
         self.wake.notify_one();
+        self.connected()
     }
 }
 

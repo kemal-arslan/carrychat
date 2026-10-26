@@ -411,6 +411,11 @@ async fn run_node(
                 Ok(Event::MessageDelivered { contact_id, .. }) => {
                     println!("✓ delivered to {}", names(contact_id));
                 }
+                Ok(Event::MessageMoved { contact_id, message_id }) => {
+                    if let Some(step) = node.journey(message_id).ok().and_then(|journey| journey.steps.last().cloned()) {
+                        println!("→ on its way to {} over {}", names(contact_id), step.via.as_str());
+                    }
+                }
                 Ok(Event::LoraChanged { connected }) => println!(
                     "· LoRa device {}",
                     if connected { "connected" } else { "gone" }

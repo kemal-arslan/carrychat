@@ -15,6 +15,7 @@ use kervan_proto::ratchet::{Opened, Role, Session};
 use kervan_proto::{day_of, DAY_SECS};
 use rand_core::OsRng;
 
+use crate::journey::{Journey, Via};
 use crate::store::{FileTable, Store};
 use crate::{ContactView, Error, Event, MessageView, Profile, Result, Settings};
 
@@ -249,6 +250,23 @@ impl Engine {
             message.file = self.attached(FileTable::Messages, message.id)?;
         }
         Ok(messages)
+    }
+
+    /// Notes where one of our messages went; see [`Store::record_handoff`].
+    pub fn record_handoff(
+        &self,
+        id: BundleId,
+        via: Via,
+        peer: u64,
+        now: u32,
+    ) -> Result<Option<(i64, i64)>> {
+        self.store.record_handoff(id, via, peer, now)
+    }
+
+    pub fn journey(&self, message_id: i64) -> Result<Journey> {
+        self.store
+            .journey(message_id)?
+            .ok_or(Error::Invalid("unknown message"))
     }
 
     /// Seals a text message. The returned frame is ready to send on any link.
@@ -1028,6 +1046,7 @@ impl Engine {
             last_at: last.map(|(_, at)| at),
             request: contact.request,
             unread: self.store.unread_count(contact_id)?,
+            waiting: self.store.waiting_count(contact_id)?,
             secure: contact.session.is_established(),
             has_our_card: contact.introduced,
         })
