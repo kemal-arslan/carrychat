@@ -5,6 +5,7 @@ import { Avatar } from "./Avatar";
 import { MAX_NAME_BYTES, utf8Length } from "./format";
 import { useI18n, type LanguageChoice } from "./i18n";
 import { notificationsEnabled, setNotificationsEnabled } from "./prefs";
+import { setThemeChoice, themeChoice, type ThemeChoice } from "./theme";
 
 type Props = {
   profile: Profile;
@@ -18,6 +19,7 @@ export function Me({ profile, onRenamed, onCard }: Props) {
   const [name, setName] = useState(profile.name);
   const [readReceipts, setReadReceipts] = useState<boolean | null>(null);
   const [notifications, setNotifications] = useState(notificationsEnabled);
+  const [theme, setTheme] = useState(themeChoice);
   const [confirmErase, setConfirmErase] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const trimmed = name.trim();
@@ -116,6 +118,24 @@ export function Me({ profile, onRenamed, onCard }: Props) {
       </div>
 
       <div className="group spaced">
+        <label className="row-item">
+          <span className="row-text">
+            <b>{t.theme}</b>
+          </span>
+          <select
+            value={theme}
+            onChange={(event) => {
+              const next = event.target.value as ThemeChoice;
+              setTheme(next);
+              setThemeChoice(next);
+            }}
+            aria-label={t.theme}
+          >
+            <option value="system">{t.themeSystem}</option>
+            <option value="light">{t.themeLight}</option>
+            <option value="dark">{t.themeDark}</option>
+          </select>
+        </label>
         <label className="row-item">
           <span className="row-text">
             <b>{t.language}</b>

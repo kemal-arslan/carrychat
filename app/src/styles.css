@@ -28,22 +28,20 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --accent-text: #7b96ff;
-    --accent-tint: #1b2340;
-    --surface: #121214;
-    --surface-muted: #1d1d20;
-    --line: #232327;
-    --text: #f2f2f3;
-    --text-muted: #9a9ba1;
-    --text-faint: #5f6067;
-    --success: #4ade80;
-    --error: #f87171;
-    --scrim: rgb(0 0 0 / 0.55);
-    --sheet: #1a1a1d;
-    color-scheme: dark;
-  }
+:root[data-theme="dark"] {
+  --accent-text: #7b96ff;
+  --accent-tint: #1b2340;
+  --surface: #121214;
+  --surface-muted: #1d1d20;
+  --line: #232327;
+  --text: #f2f2f3;
+  --text-muted: #9a9ba1;
+  --text-faint: #5f6067;
+  --success: #4ade80;
+  --error: #f87171;
+  --scrim: rgb(0 0 0 / 0.55);
+  --sheet: #1a1a1d;
+  color-scheme: dark;
 }
 
 * {
@@ -669,11 +667,9 @@ input[type="checkbox"] {
   line-height: 1;
 }
 
-@media (prefers-color-scheme: dark) {
-  .avatar {
-    color: color-mix(in oklab, var(--hue) 65%, white);
-    background: color-mix(in oklab, var(--hue) 24%, var(--surface));
-  }
+:root[data-theme="dark"] .avatar {
+  color: color-mix(in oklab, var(--hue) 65%, white);
+  background: color-mix(in oklab, var(--hue) 24%, var(--surface));
 }
 
 /* Grouped rows, as in settings. */

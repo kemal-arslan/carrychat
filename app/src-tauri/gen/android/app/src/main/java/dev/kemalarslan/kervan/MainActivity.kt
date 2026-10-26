@@ -2,21 +2,51 @@ package dev.kemalarslan.kervan
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.os.Bundle
 import android.view.View
+import android.webkit.JavascriptInterface
+import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 
 class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+    // The theme the page last chose, until the page loads and says again.
+    val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+    if (prefs.contains(DARK)) paintBars(prefs.getBoolean(DARK, false))
     keepClearOfSystemBars(findViewById(android.R.id.content))
     attachScreen()
     askForPermissions()
     KervanService.start(this)
+  }
+
+  override fun onWebViewCreate(webView: WebView) {
+    webView.addJavascriptInterface(Bars(), "KervanAndroid")
+  }
+
+  /** Lets the page give the status and navigation bars its light or dark theme. */
+  inner class Bars {
+    @JavascriptInterface
+    fun setDark(dark: Boolean) {
+      getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(DARK, dark).apply()
+      runOnUiThread { paintBars(dark) }
+    }
+  }
+
+  private fun paintBars(dark: Boolean) {
+    window.setBackgroundDrawable(
+      ColorDrawable(getColor(if (dark) R.color.kervan_bars_dark else R.color.kervan_bars_light))
+    )
+    WindowInsetsControllerCompat(window, window.decorView).apply {
+      isAppearanceLightStatusBars = !dark
+      isAppearanceLightNavigationBars = !dark
+    }
   }
 
   /** Back on the list keeps the app running behind other apps, as Home does. */
@@ -62,5 +92,10 @@ class MainActivity : TauriActivity() {
       padded.setPadding(bars.left, bars.top, bars.right, bars.bottom)
       WindowInsetsCompat.CONSUMED
     }
+  }
+
+  private companion object {
+    const val PREFS = "kervan"
+    const val DARK = "dark_bars"
   }
 }

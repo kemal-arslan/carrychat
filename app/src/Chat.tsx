@@ -1,11 +1,11 @@
 import { CheckIcon, ChecksIcon, HourglassMediumIcon, ShieldCheckIcon, ShieldIcon } from "@phosphor-icons/react";
-import { Fragment, useEffect, useRef } from "react";
+import { Fragment, useRef } from "react";
 import type { Contact, Message } from "./api";
 import { Composer } from "./Composer";
 import { FileBubble } from "./FileBubble";
 import { PAIR_OVERHEAD, fullTime, shortTime } from "./format";
 import { useI18n } from "./i18n";
-import { ChatHeader, bubbleClass, useThreadLayout } from "./Thread";
+import { ChatHeader, bubbleClass, useStickToBottom, useThreadLayout } from "./Thread";
 
 type Props = {
   contact: Contact;
@@ -25,9 +25,7 @@ export function Chat({ contact, messages, onSend, onSendFile, onAccept, onDeclin
   const list = useRef<HTMLOListElement>(null);
   const layout = useThreadLayout(messages);
 
-  useEffect(() => {
-    list.current?.scrollTo({ top: list.current.scrollHeight });
-  }, [messages, contact.id]);
+  useStickToBottom(list, contact.id, messages[messages.length - 1]?.id);
 
   function state(message: Message) {
     if (message.read)

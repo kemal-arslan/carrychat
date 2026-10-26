@@ -253,6 +253,10 @@ const en = {
   connectRowHint: "Reach a device on another network",
   queueTitle: "On this device",
   myCardHint: "Show it so others can add you",
+  theme: "Appearance",
+  themeSystem: "System",
+  themeLight: "Light",
+  themeDark: "Dark",
 };
 
 type Strings = typeof en;
@@ -499,6 +503,10 @@ const tr: Strings = {
   connectRowHint: "Başka bir ağdaki cihaza ulaş",
   queueTitle: "Bu cihazda",
   myCardHint: "Seni eklemeleri için göster",
+  theme: "Görünüm",
+  themeSystem: "Sistem",
+  themeLight: "Açık",
+  themeDark: "Koyu",
 };
 
 const STORAGE_KEY = "kervan.language";

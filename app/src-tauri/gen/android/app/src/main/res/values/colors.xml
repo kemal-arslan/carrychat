@@ -7,6 +7,8 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
-    <!-- Behind the status and navigation bars: the sidebar colour of styles.css. -->
-    <color name="kervan_bars">#FFEFE8DA</color>
+    <!-- Behind the status and navigation bars: the surface colour of styles.css. -->
+    <color name="kervan_bars">#FFFFFFFF</color>
+    <color name="kervan_bars_light">#FFFFFFFF</color>
+    <color name="kervan_bars_dark">#FF121214</color>
 </resources>

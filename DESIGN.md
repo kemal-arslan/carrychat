@@ -134,7 +134,7 @@ components:
 ## Colors
 
 **Strategy:** Restrained. Neutrals carry the interface; the accent marks what can be acted on and what is mine: primary buttons, the outgoing bubble, unread counts, the active tab and the floating button. Success green appears only for a live link ("2 devices nearby") and a verified contact. Error red is kept for real failures (a link that does not work, a message too long), never for a message that is waiting.
-**Light or dark:** the app follows the system. Light is the primary design: it reads well outdoors and matches what people expect from a messenger. The night theme uses flat dark greys (no tint, no gradient) and keeps the same hierarchy: surface, then surface-muted for bubbles and fields, then line for separators. The accent fill stays the same so white text on it keeps its contrast; accent used as text on the dark surface switches to the lighter accent-text-night.
+**Light or dark:** the app follows the system unless the user picks Light or Dark under Me, and on Android the status and navigation bars take the same surface colour. Light is the primary design: it reads well outdoors and matches what people expect from a messenger. The night theme uses flat dark greys (no tint, no gradient) and keeps the same hierarchy: surface, then surface-muted for bubbles and fields, then line for separators. The accent fill stays the same so white text on it keeps its contrast; accent used as text on the dark surface switches to the lighter accent-text-night.
 White on the accent is 5.2:1. Text-muted on surface is 5.0:1; text-faint is for timestamps and placeholders only.
 
 ## Typography

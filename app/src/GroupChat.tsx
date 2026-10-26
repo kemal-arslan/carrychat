@@ -1,11 +1,11 @@
 import { DotsThreeVerticalIcon } from "@phosphor-icons/react";
-import { Fragment, useEffect, useRef } from "react";
+import { Fragment, useRef } from "react";
 import type { Group, GroupMessage } from "./api";
 import { Composer } from "./Composer";
 import { FileBubble } from "./FileBubble";
 import { GROUP_OVERHEAD, fullTime, shortTime } from "./format";
 import { useI18n } from "./i18n";
-import { ChatHeader, bubbleClass, useThreadLayout } from "./Thread";
+import { ChatHeader, bubbleClass, useStickToBottom, useThreadLayout } from "./Thread";
 
 type Props = {
   group: Group;
@@ -21,9 +21,7 @@ export function GroupChat({ group, messages, onSend, onSendFile, onMembers, onBa
   const list = useRef<HTMLOListElement>(null);
   const layout = useThreadLayout(messages);
 
-  useEffect(() => {
-    list.current?.scrollTo({ top: list.current.scrollHeight });
-  }, [messages, group.id]);
+  useStickToBottom(list, group.id, messages[messages.length - 1]?.id);
 
   return (
     <section className="chat" aria-label={group.name}>

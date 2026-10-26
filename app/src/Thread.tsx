@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
 import { Avatar } from "./Avatar";
 import { BackButton } from "./BackButton";
 import { useI18n, type Language } from "./i18n";
@@ -75,6 +75,42 @@ export function useThreadLayout<T extends Item>(items: T[]) {
       tail: !next || !sameRun(item, next),
     };
   });
+}
+
+/**
+ * Keeps a conversation at its newest message: on opening, when one is added,
+ * and while photos above it load and grow, unless the reader scrolled up.
+ */
+export function useStickToBottom(list: RefObject<HTMLElement | null>, conversation: unknown, last: unknown) {
+  const atEnd = useRef(true);
+
+  useLayoutEffect(() => {
+    const element = list.current;
+    if (!element) return;
+    element.scrollTop = element.scrollHeight;
+    atEnd.current = true;
+  }, [list, conversation, last]);
+
+  useEffect(() => {
+    const element = list.current;
+    if (!element) return;
+    // Only the reader moves the view up; content growing below never does.
+    let lastTop = element.scrollTop;
+    const scrolled = () => {
+      if (element.scrollTop < lastTop - 2) atEnd.current = false;
+      else if (element.scrollHeight - element.scrollTop - element.clientHeight < 64) atEnd.current = true;
+      lastTop = element.scrollTop;
+    };
+    const grown = new ResizeObserver(() => {
+      if (atEnd.current) element.scrollTop = element.scrollHeight;
+    });
+    for (const child of element.children) grown.observe(child);
+    element.addEventListener("scroll", scrolled, { passive: true });
+    return () => {
+      grown.disconnect();
+      element.removeEventListener("scroll", scrolled);
+    };
+  }, [list, conversation, last]);
 }
 
 export function bubbleClass(outgoing: boolean, first: boolean, tail: boolean, extra?: string): string {

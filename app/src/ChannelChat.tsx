@@ -1,11 +1,11 @@
 import { DotsThreeVerticalIcon } from "@phosphor-icons/react";
-import { Fragment, useEffect, useRef } from "react";
+import { Fragment, useRef } from "react";
 import type { Channel, Post } from "./api";
 import { Composer } from "./Composer";
 import { FileBubble } from "./FileBubble";
 import { CHANNEL_OVERHEAD, fullTime, shortTime, utf8Length } from "./format";
 import { useI18n } from "./i18n";
-import { ChatHeader, bubbleClass, useThreadLayout } from "./Thread";
+import { ChatHeader, bubbleClass, useStickToBottom, useThreadLayout } from "./Thread";
 
 type Props = {
   channel: Channel;
@@ -24,9 +24,7 @@ export function ChannelChat({ channel, posts, onSend, onSendFile, onSettings, on
   // Authors are told apart by key, so a run is one author's posts.
   const layout = useThreadLayout(posts.map((post) => ({ ...post, sender: post.author })));
 
-  useEffect(() => {
-    list.current?.scrollTo({ top: list.current.scrollHeight });
-  }, [posts, channel.id]);
+  useStickToBottom(list, channel.id, posts[posts.length - 1]?.id);
 
   return (
     <section className="chat" aria-label={`#${channel.name}`}>
