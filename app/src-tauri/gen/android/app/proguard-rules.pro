@@ -25,6 +25,7 @@
 -keep class dev.kemalarslan.kervan.KervanService { *; }
 -keep class dev.kemalarslan.kervan.KervanService$Companion { *; }
 -keep class dev.kemalarslan.kervan.Ble { *; }
+-keep class dev.kemalarslan.kervan.Core { *; }
 
 # The page calls these through the WebView's JavaScript bridge.
 -keepattributes JavascriptInterface

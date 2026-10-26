@@ -1,14 +1,17 @@
 //! Android: a foreground service (`KervanService`) keeps the process, and
-//! the node in it, running after the screen closes. These are the Rust
-//! pieces of that: staying alive without a window, making a window again
-//! for a screen that opens later, announcing messages while there is no
-//! page to do it, and syncing over the Bluetooth connections that the
-//! service's `BleLink` makes (§9.5).
+//! the node in it, running after the screen closes, and starts them after
+//! the phone starts. These are the Rust pieces of that: one node for the
+//! process, opened by the screen or by the service, staying alive without a
+//! window, making a window again for a screen that opens later, announcing
+//! messages while there is no page to do it, and syncing over the Bluetooth
+//! connections that the service's `BleLink` makes (§9.5).
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
-use jni::objects::{GlobalRef, JByteArray, JClass, JObject, JValue};
+use jni::objects::{GlobalRef, JByteArray, JClass, JObject, JString, JValue};
 use jni::sys::{jboolean, jbyteArray, jint, JNI_FALSE, JNI_TRUE};
 use jni::{JNIEnv, JavaVM};
 use kervan_node::{Event, FileView, Link, Node};
@@ -17,6 +20,13 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
 static APP: OnceLock<AppHandle> = OnceLock::new();
+
+/// The process's node and the folder it keeps its data in.
+static NODE: Mutex<Option<Node>> = Mutex::new(None);
+static DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// Whether the links have started; they run once for the process.
+static LINKS: AtomicBool = AtomicBool::new(false);
 
 /// The Java side, for posting notifications. Tauri's notification plugin
 /// needs a screen, so while there is none they go through `KervanService`.
@@ -43,6 +53,93 @@ pub fn keep(app: &AppHandle) {
     let _ = APP.set(app.clone());
 }
 
+/// The node in `dir`, opened unless the service opened it already.
+pub fn open(dir: &Path) -> kervan_node::Result<Option<Node>> {
+    let _ = DIR.set(dir.to_owned());
+    let mut slot = lock(&NODE);
+    if slot.is_none() {
+        *slot = Node::open(dir)?;
+    }
+    Ok(slot.clone())
+}
+
+/// A node made on the first run, for the service to find.
+pub fn adopt(dir: &Path, node: &Node) {
+    let _ = DIR.set(dir.to_owned());
+    *lock(&NODE) = Some(node.clone());
+}
+
+/// True for the first caller, which then starts the links; from then on the
+/// process also announces messages that arrive while no page is open.
+pub fn claim_links(node: &Node) -> bool {
+    if LINKS.swap(true, Ordering::SeqCst) {
+        return false;
+    }
+    let mut events = node.subscribe();
+    let node = node.clone();
+    tauri::async_runtime::spawn(async move {
+        while let Ok(event) = events.recv().await {
+            notify(&node, &event);
+        }
+    });
+    true
+}
+
+/// `Core.start(dir)`, which the service calls as it starts, also after the
+/// phone starts with no screen at all. Returns whether a node runs: false
+/// before an identity exists.
+#[no_mangle]
+pub extern "system" fn Java_dev_kemalarslan_kervan_Core_start(
+    mut env: JNIEnv,
+    _class: JClass,
+    dir: JString,
+) -> jboolean {
+    remember_service(&mut env);
+    let Ok(dir) = env
+        .get_string(&dir)
+        .map(|dir| PathBuf::from(String::from(dir)))
+    else {
+        return JNI_FALSE;
+    };
+    let node = match open(&dir) {
+        Ok(Some(node)) => node,
+        Ok(None) => return JNI_FALSE,
+        Err(error) => {
+            eprintln!("Could not open the node: {error}");
+            return JNI_FALSE;
+        }
+    };
+    load_notifications(&dir);
+    if claim_links(&node) {
+        crate::start_links(&node, &dir, |error| eprintln!("{error}"));
+    }
+    JNI_TRUE
+}
+
+/// Finds `KervanService`, which posts notifications. The app's classes can
+/// only be looked up from a thread Java started.
+fn remember_service(env: &mut JNIEnv) {
+    if JAVA.get().is_some() {
+        return;
+    }
+    let java = env.get_java_vm().and_then(|vm| {
+        let class = env.find_class("dev/kemalarslan/kervan/KervanService")?;
+        Ok(Java {
+            vm,
+            service: env.new_global_ref(class)?,
+        })
+    });
+    match java {
+        Ok(java) => {
+            let _ = JAVA.set(java);
+        }
+        Err(error) => {
+            let _ = env.exception_clear();
+            eprintln!("Could not reach the service: {error}");
+        }
+    }
+}
+
 /// Closing the screen closes the last window, which would end the process
 /// and the node with it; the service is there to keep both running.
 pub fn on_run_event(event: RunEvent) {
@@ -55,9 +152,34 @@ pub fn on_run_event(event: RunEvent) {
 }
 
 pub fn set_notifications(on: bool, language: &str) {
-    *NOTIFICATIONS.lock().unwrap_or_else(PoisonError::into_inner) = Notifications {
+    let settings = Notifications {
         on,
         turkish: language == "tr",
+    };
+    *NOTIFICATIONS.lock().unwrap_or_else(PoisonError::into_inner) = settings;
+    // Kept for after the phone starts, when there is no page to say it.
+    if let Some(dir) = DIR.get() {
+        let line = format!(
+            "{} {}",
+            if settings.on { "on" } else { "off" },
+            if settings.turkish { "tr" } else { "en" }
+        );
+        if let Err(error) = std::fs::write(dir.join(NOTIFICATIONS_FILE), line) {
+            eprintln!("Could not keep the notification setting: {error}");
+        }
+    }
+}
+
+const NOTIFICATIONS_FILE: &str = "notifications";
+
+fn load_notifications(dir: &Path) {
+    let Ok(line) = std::fs::read_to_string(dir.join(NOTIFICATIONS_FILE)) else {
+        return;
+    };
+    let mut words = line.split_whitespace();
+    *NOTIFICATIONS.lock().unwrap_or_else(PoisonError::into_inner) = Notifications {
+        on: words.next() != Some("off"),
+        turkish: words.next() == Some("tr"),
     };
 }
 
@@ -69,25 +191,7 @@ pub extern "system" fn Java_dev_kemalarslan_kervan_MainActivity_attachScreen(
     mut env: JNIEnv,
     _activity: JObject,
 ) {
-    // The app's classes can only be looked up from a thread Java started.
-    if JAVA.get().is_none() {
-        let java = env.get_java_vm().and_then(|vm| {
-            let class = env.find_class("dev/kemalarslan/kervan/KervanService")?;
-            Ok(Java {
-                vm,
-                service: env.new_global_ref(class)?,
-            })
-        });
-        match java {
-            Ok(java) => {
-                let _ = JAVA.set(java);
-            }
-            Err(error) => {
-                let _ = env.exception_clear();
-                eprintln!("Could not reach the service: {error}");
-            }
-        }
-    }
+    remember_service(&mut env);
     let Some(app) = APP.get() else {
         return;
     };
@@ -110,9 +214,13 @@ pub extern "system" fn Java_dev_kemalarslan_kervan_MainActivity_attachScreen(
 }
 
 /// Announces a message while no page is open; an open page does it itself.
-pub fn notify(app: &AppHandle, node: &Node, event: &Event) {
+fn notify(node: &Node, event: &Event) {
     let settings = *NOTIFICATIONS.lock().unwrap_or_else(PoisonError::into_inner);
-    if !settings.on || !app.webview_windows().is_empty() {
+    if !settings.on
+        || APP
+            .get()
+            .is_some_and(|app| !app.webview_windows().is_empty())
+    {
         return;
     }
     let (title, body) = match event {

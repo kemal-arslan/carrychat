@@ -41,7 +41,9 @@ class KervanService : Service() {
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     if (intent?.action == ACTION_STOP) {
-      // Turning Kervan off ends the process, and the node in it.
+      // Turning Kervan off ends the process, and the node in it, and keeps
+      // it off after the phone restarts, until the app is opened again.
+      setTurnedOff(this, true)
       ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
       stopSelf()
       Process.killProcess(Process.myPid())
@@ -69,8 +71,16 @@ class KervanService : Service() {
     } else {
       ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(), 0)
     }
-    // Started again without the app, the process would have no node in it.
-    return START_NOT_STICKY
+    // The node starts here when no screen started it: after the phone
+    // starts, or when Android restarts the service. Before there is an
+    // identity there is nothing to run, unless a screen is open to make one.
+    val running = Core.start(applicationContext.dataDir.absolutePath)
+    if (!running && intent?.getBooleanExtra(EXTRA_FROM_SCREEN, false) != true) {
+      ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+      stopSelf()
+      return START_NOT_STICKY
+    }
+    return START_STICKY
   }
 
   override fun onDestroy() {
@@ -159,8 +169,32 @@ class KervanService : Service() {
       manager.notify(nextMessageId.getAndIncrement(), notification)
     }
 
-    fun start(context: Context) {
-      ContextCompat.startForegroundService(context, Intent(context, KervanService::class.java))
+    private const val EXTRA_FROM_SCREEN = "dev.kemalarslan.kervan.FROM_SCREEN"
+
+    fun start(context: Context, fromScreen: Boolean = false) {
+      val intent = Intent(context, KervanService::class.java).putExtra(EXTRA_FROM_SCREEN, fromScreen)
+      ContextCompat.startForegroundService(context, intent)
+    }
+
+    private const val PREFS = "kervan"
+    private const val TURNED_OFF = "turned_off"
+
+    /** Whether the user turned Kervan off from its notification. */
+    fun turnedOff(context: Context): Boolean =
+      context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(TURNED_OFF, false)
+
+    fun setTurnedOff(context: Context, off: Boolean) {
+      context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(TURNED_OFF, off).apply()
     }
   }
+}
+
+/** The Rust side, which runs the node. */
+object Core {
+  init {
+    System.loadLibrary("kervan_app_lib")
+  }
+
+  /** Opens the node in [dir] and starts its links, unless they already run. */
+  @JvmStatic external fun start(dir: String): Boolean
 }

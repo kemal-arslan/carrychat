@@ -23,7 +23,8 @@ class MainActivity : TauriActivity() {
     keepClearOfSystemBars(findViewById(android.R.id.content))
     attachScreen()
     askForPermissions()
-    KervanService.start(this)
+    KervanService.setTurnedOff(this, false)
+    KervanService.start(this, fromScreen = true)
   }
 
   override fun onWebViewCreate(webView: WebView) {

@@ -38,9 +38,9 @@ fn text(error: impl ToString) -> String {
     error.to_string()
 }
 
-/// Starts the local network, internet and Bluetooth links and forwards node
-/// events to the window.
-fn launch(app: &AppHandle, node: &Node, dir: &Path) {
+/// Starts the local network, internet and Bluetooth links. `report` hears
+/// what could not start.
+pub(crate) fn start_links(node: &Node, dir: &Path, report: impl Fn(String) + Send + 'static) {
     let settings = node.settings().ok();
     // Tor keeps its state next to the node's, and is used if chosen.
     let internet = InternetConfig {
@@ -51,38 +51,43 @@ fn launch(app: &AppHandle, node: &Node, dir: &Path) {
         ..InternetConfig::default()
     };
     let bluetooth = settings.is_none_or(|settings| settings.bluetooth);
-    let mut events = node.subscribe();
-    let handle = app.clone();
-    #[cfg(target_os = "android")]
-    let names = node.clone();
-    tauri::async_runtime::spawn(async move {
-        while let Ok(event) = events.recv().await {
-            #[cfg(target_os = "android")]
-            android::notify(&handle, &names, &event);
-            let _ = handle.emit("kervan-event", event);
-        }
-    });
     let node = node.clone();
-    let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         if let Err(error) = node.start(LanConfig::default()).await {
-            let _ = handle.emit(
-                "kervan-error",
-                format!("Local network link is off: {error}"),
-            );
+            report(format!("Local network link is off: {error}"));
         }
         if let Err(error) = node.start_internet(internet) {
-            let _ = handle.emit("kervan-error", format!("Internet link is off: {error}"));
+            report(format!("Internet link is off: {error}"));
         }
         // On Android the service runs Bluetooth, and asks the node for it.
         #[cfg(not(target_os = "android"))]
         if bluetooth {
             if let Err(error) = node.start_bluetooth().await {
-                let _ = handle.emit("kervan-error", format!("Bluetooth is off: {error}"));
+                report(format!("Bluetooth is off: {error}"));
             }
         }
         #[cfg(target_os = "android")]
         android::set_bluetooth(&node, bluetooth);
+    });
+}
+
+/// Forwards node events to the window, and starts the links unless they
+/// already run: on Android the service may have started them at boot.
+fn launch(app: &AppHandle, node: &Node, dir: &Path) {
+    let mut events = node.subscribe();
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        while let Ok(event) = events.recv().await {
+            let _ = handle.emit("kervan-event", event);
+        }
+    });
+    #[cfg(target_os = "android")]
+    if !android::claim_links(node) {
+        return;
+    }
+    let handle = app.clone();
+    start_links(node, dir, move |error| {
+        let _ = handle.emit("kervan-error", error);
     });
 }
 
@@ -102,6 +107,8 @@ fn create_profile(
         return Err("Choose a name".to_owned());
     }
     let node = Node::create(&state.dir, name).map_err(text)?;
+    #[cfg(target_os = "android")]
+    android::adopt(&state.dir, &node);
     launch(&app, &node, &state.dir);
     let profile = node.profile();
     *state
@@ -498,6 +505,10 @@ pub fn run() {
             };
             #[cfg(target_os = "android")]
             android::keep(app.handle());
+            // On Android the service may have opened it already, at boot.
+            #[cfg(target_os = "android")]
+            let node = android::open(&dir)?;
+            #[cfg(not(target_os = "android"))]
             let node = Node::open(&dir)?;
             if let Some(node) = &node {
                 launch(app.handle(), node, &dir);
