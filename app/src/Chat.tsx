@@ -1,10 +1,11 @@
-import { useEffect, useRef } from "react";
+import { CheckIcon, ChecksIcon, HourglassMediumIcon, ShieldCheckIcon, ShieldIcon } from "@phosphor-icons/react";
+import { Fragment, useEffect, useRef } from "react";
 import type { Contact, Message } from "./api";
-import { BackButton } from "./BackButton";
 import { Composer } from "./Composer";
 import { FileBubble } from "./FileBubble";
 import { PAIR_OVERHEAD, fullTime, shortTime } from "./format";
 import { useI18n } from "./i18n";
+import { ChatHeader, bubbleClass, useThreadLayout } from "./Thread";
 
 type Props = {
   contact: Contact;
@@ -13,57 +14,83 @@ type Props = {
   onSendFile: (mime: string, bytes: Uint8Array) => Promise<void>;
   onAccept: () => void;
   onDecline: () => void;
+  /** Shows the contact's fingerprint and how private the conversation is. */
+  onInfo: () => void;
   /** Set on a phone, where the conversation covers the list. */
   onBack?: () => void;
 };
 
-export function Chat({ contact, messages, onSend, onSendFile, onAccept, onDecline, onBack }: Props) {
+export function Chat({ contact, messages, onSend, onSendFile, onAccept, onDecline, onInfo, onBack }: Props) {
   const { t, language } = useI18n();
   const list = useRef<HTMLOListElement>(null);
+  const layout = useThreadLayout(messages);
 
   useEffect(() => {
     list.current?.scrollTo({ top: list.current.scrollHeight });
   }, [messages, contact.id]);
 
   function state(message: Message) {
-    if (message.read) return ["read", t.read];
-    if (message.delivered) return ["delivered", t.delivered];
-    return ["waiting", t.waitingForPath];
+    if (message.read)
+      return (
+        <span className="state" title={t.read} aria-label={t.read}>
+          <ChecksIcon size={15} weight="bold" />
+        </span>
+      );
+    if (message.delivered)
+      return (
+        <span className="state" title={t.delivered} aria-label={t.delivered}>
+          <CheckIcon size={15} weight="bold" />
+        </span>
+      );
+    return (
+      <span className="state waiting">
+        <HourglassMediumIcon size={13} weight="bold" />
+        {t.waitingForPath}
+      </span>
+    );
   }
 
   return (
     <section className="chat" aria-label={contact.name}>
-      <header className="chat-header">
-        {onBack && <BackButton onBack={onBack} />}
-        <h2>{contact.name}</h2>
-        <span className="fingerprint" title={t.compareFingerprint}>
-          {contact.fingerprint}
-        </span>
-        {!contact.request && (
-          <span
-            className={contact.secure ? "secrecy on" : "secrecy"}
-            title={contact.secure ? t.secureHint : t.securePendingHint}
-          >
-            {contact.secure ? t.secure : t.securePending}
-          </span>
-        )}
-      </header>
+      <ChatHeader
+        name={contact.name}
+        kind="contact"
+        onBack={onBack}
+        onTitle={onInfo}
+        sub={
+          contact.request ? (
+            t.requestTag
+          ) : (
+            <>
+              {contact.secure ? <ShieldCheckIcon size={13} weight="fill" className="secure" /> : <ShieldIcon size={13} />}
+              {contact.secure ? t.secure : t.securePending}
+            </>
+          )
+        }
+      />
 
       <ol className="messages" ref={list}>
         {messages.length === 0 && <li className="messages-empty">{t.chatEmpty(contact.name)}</li>}
-        {messages.map((message) => {
-          const [stateClass, stateLabel] = state(message);
-          return (
-            <li key={message.id} className={message.outgoing ? "bubble outgoing" : "bubble incoming"}>
+        {layout.map(({ item: message, day, first, tail }) => (
+          <Fragment key={message.id}>
+            {day && <li className="day">{day}</li>}
+            <li
+              className={bubbleClass(
+                message.outgoing,
+                first,
+                tail,
+                message.outgoing && !message.delivered && !message.read ? "waiting" : undefined,
+              )}
+            >
               {message.file && <FileBubble file={message.file} />}
               {message.body && <p>{message.body}</p>}
               <footer>
                 <time title={fullTime(message.createdAt, language)}>{shortTime(message.createdAt, language)}</time>
-                {message.outgoing && <span className={`state ${stateClass}`}>{stateLabel}</span>}
+                {message.outgoing && state(message)}
               </footer>
             </li>
-          );
-        })}
+          </Fragment>
+        ))}
       </ol>
 
       {contact.request ? (

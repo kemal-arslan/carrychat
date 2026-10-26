@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { HashIcon, UserPlusIcon, UsersThreeIcon } from "@phosphor-icons/react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import QRCode from "qrcode";
 import {
   api,
@@ -11,21 +12,10 @@ import {
   type Profile,
 } from "./api";
 import { MAX_NAME_BYTES, utf8Length } from "./format";
-import { useI18n, type LanguageChoice } from "./i18n";
-import { notificationsEnabled, setNotificationsEnabled } from "./prefs";
+import { useI18n } from "./i18n";
+import { Sheet } from "./Sheet";
 
-function Dialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
-  const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    ref.current?.showModal();
-  }, []);
-  return (
-    <dialog ref={ref} onClose={onClose} onCancel={onClose} aria-label={title}>
-      <h2>{title}</h2>
-      {children}
-    </dialog>
-  );
-}
+const Dialog = Sheet;
 
 function errorText(failure: unknown): string {
   return String(failure).replace(/^Error: /, "");
@@ -225,174 +215,6 @@ export function NetworkDialog({ problem, onClose }: { problem: LanProblem; onClo
         <button className="primary" onClick={openSettings} autoFocus>
           {t.openSystemSettings}
         </button>
-      </div>
-    </Dialog>
-  );
-}
-
-export function SettingsDialog({
-  profile,
-  onClose,
-  onRenamed,
-}: {
-  profile: Profile;
-  onClose: () => void;
-  onRenamed: (profile: Profile) => void;
-}) {
-  const { t, choice, setChoice, language } = useI18n();
-  const [name, setName] = useState(profile.name);
-  const [readReceipts, setReadReceipts] = useState<boolean | null>(null);
-  // Tor as the link started with it, and as now chosen.
-  const [torAtStart, setTorAtStart] = useState<boolean | null>(null);
-  const [tor, setTor] = useState(false);
-  const [bluetoothAtStart, setBluetoothAtStart] = useState<boolean | null>(null);
-  const [bluetooth, setBluetooth] = useState(true);
-  const [notifications, setNotifications] = useState(notificationsEnabled);
-  const [confirmErase, setConfirmErase] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const trimmed = name.trim();
-  const tooLong = utf8Length(trimmed) > MAX_NAME_BYTES;
-
-  useEffect(() => {
-    api.settings().then((settings) => {
-      setReadReceipts(settings.readReceipts);
-      setTorAtStart(settings.tor);
-      setTor(settings.tor);
-      setBluetoothAtStart(settings.bluetooth);
-      setBluetooth(settings.bluetooth);
-    });
-  }, []);
-
-  async function rename(event: FormEvent) {
-    event.preventDefault();
-    setError(null);
-    try {
-      onRenamed(await api.rename(trimmed));
-    } catch (failure) {
-      setError(errorText(failure));
-    }
-  }
-
-  async function toggleReadReceipts(on: boolean) {
-    setReadReceipts(on);
-    await api.setReadReceipts(on).catch((failure) => setError(errorText(failure)));
-  }
-
-  async function toggleTor(on: boolean) {
-    setTor(on);
-    await api.setTor(on).catch((failure) => setError(errorText(failure)));
-  }
-
-  async function toggleBluetooth(on: boolean) {
-    setBluetooth(on);
-    await api.setBluetooth(on).catch((failure) => setError(errorText(failure)));
-  }
-
-  const needsRestart =
-    (torAtStart !== null && tor !== torAtStart) || (bluetoothAtStart !== null && bluetooth !== bluetoothAtStart);
-
-  function toggleNotifications(on: boolean) {
-    setNotifications(on);
-    setNotificationsEnabled(on);
-    api.setNotifications(on, language);
-  }
-
-  async function erase() {
-    try {
-      await api.eraseEverything();
-    } catch (failure) {
-      setError(errorText(failure));
-    }
-  }
-
-  return (
-    <Dialog title={t.settingsTitle} onClose={onClose}>
-      <form onSubmit={rename}>
-        <label htmlFor="rename">{t.yourName}</label>
-        <div className="inline-field">
-          <input id="rename" value={name} onChange={(event) => setName(event.target.value)} aria-invalid={tooLong} />
-          <button className="primary" disabled={tooLong || trimmed === "" || trimmed === profile.name}>
-            {t.save}
-          </button>
-        </div>
-        <p className={tooLong ? "hint error" : "hint"}>{tooLong ? t.nameTooLong : t.renameHint}</p>
-      </form>
-
-      <h3 className="settings-section">{t.privacy}</h3>
-      <label className="toggle">
-        <input
-          type="checkbox"
-          checked={readReceipts ?? true}
-          disabled={readReceipts === null}
-          onChange={(event) => toggleReadReceipts(event.target.checked)}
-        />
-        {t.readReceipts}
-      </label>
-      <label className="toggle">
-        <input
-          type="checkbox"
-          checked={notifications}
-          onChange={(event) => toggleNotifications(event.target.checked)}
-        />
-        {t.notifications}
-      </label>
-      <label className="toggle">
-        <input
-          type="checkbox"
-          checked={tor}
-          disabled={torAtStart === null}
-          onChange={(event) => toggleTor(event.target.checked)}
-        />
-        {t.torSetting}
-      </label>
-      <p className="hint">{t.torHint}</p>
-      <label className="toggle">
-        <input
-          type="checkbox"
-          checked={bluetooth}
-          disabled={bluetoothAtStart === null}
-          onChange={(event) => toggleBluetooth(event.target.checked)}
-        />
-        {t.bluetoothSetting}
-      </label>
-      <p className="hint">{t.bluetoothHint}</p>
-      {needsRestart && (
-        <div className="inline-field">
-          <p className="hint">{t.restartToApply}</p>
-          <button className="primary" type="button" onClick={() => api.restart()}>
-            {t.restartNow}
-          </button>
-        </div>
-      )}
-
-      <label htmlFor="language">{t.language}</label>
-      <select id="language" value={choice} onChange={(event) => setChoice(event.target.value as LanguageChoice)}>
-        <option value="system">{t.languageSystem}</option>
-        <option value="en">English</option>
-        <option value="tr">Türkçe</option>
-      </select>
-
-      <h3 className="settings-section danger">{t.eraseTitle}</h3>
-      <p className="hint">{confirmErase ? t.eraseConfirm : t.eraseHint}</p>
-      {error && <p className="hint error">{error}</p>}
-      <div className="dialog-actions">
-        {confirmErase ? (
-          <>
-            <button onClick={() => setConfirmErase(false)}>{t.cancel}</button>
-            <button className="danger" onClick={erase}>
-              {t.eraseNow}
-            </button>
-          </>
-        ) : (
-          <>
-            <button className="danger-outline" onClick={() => setConfirmErase(true)}>
-              {t.eraseButton}
-            </button>
-            <button className="primary" onClick={onClose}>
-              {t.close}
-            </button>
-          </>
-        )}
       </div>
     </Dialog>
   );
@@ -725,6 +547,55 @@ export function ChannelSettingsDialog({
             {t.leaveChannel}
           </button>
         )}
+        <button className="primary" onClick={onClose}>
+          {t.done}
+        </button>
+      </div>
+    </Dialog>
+  );
+}
+
+type NewChoice = "add" | "newGroup" | "joinChannel";
+
+/** What the floating button on the chat list starts. */
+export function NewDialog({ onClose, onChoose }: { onClose: () => void; onChoose: (choice: NewChoice) => void }) {
+  const { t } = useI18n();
+  const choices: { choice: NewChoice; icon: ReactNode; title: string; hint: string }[] = [
+    { choice: "add", icon: <UserPlusIcon size={22} />, title: t.addContact, hint: t.addContactHint },
+    { choice: "newGroup", icon: <UsersThreeIcon size={22} />, title: t.newGroup, hint: t.newGroupHint },
+    { choice: "joinChannel", icon: <HashIcon size={22} />, title: t.joinChannel, hint: t.joinChannelHint },
+  ];
+  return (
+    <Dialog title={t.newTitle} onClose={onClose}>
+      <div className="group">
+        {choices.map((item) => (
+          <button key={item.choice} className="row-item" onClick={() => onChoose(item.choice)}>
+            <span className="tile">{item.icon}</span>
+            <span className="row-text">
+              <b>{item.title}</b>
+              <span>{item.hint}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </Dialog>
+  );
+}
+
+/** A contact's fingerprint and how private the conversation is. */
+export function ContactInfoDialog({ contact, onClose }: { contact: Contact; onClose: () => void }) {
+  const { t } = useI18n();
+  return (
+    <Dialog title={contact.name} onClose={onClose}>
+      <p className="hint">{t.compareFingerprint}</p>
+      <p className="fingerprint large">{contact.fingerprint}</p>
+      {!contact.request && (
+        <>
+          <h3 className="settings-section">{contact.secure ? t.secure : t.securePending}</h3>
+          <p className="hint">{contact.secure ? t.secureHint : t.securePendingHint}</p>
+        </>
+      )}
+      <div className="dialog-actions">
         <button className="primary" onClick={onClose}>
           {t.done}
         </button>

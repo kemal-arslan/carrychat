@@ -1,10 +1,11 @@
-import { useEffect, useRef } from "react";
+import { DotsThreeVerticalIcon } from "@phosphor-icons/react";
+import { Fragment, useEffect, useRef } from "react";
 import type { Group, GroupMessage } from "./api";
-import { BackButton } from "./BackButton";
 import { Composer } from "./Composer";
 import { FileBubble } from "./FileBubble";
 import { GROUP_OVERHEAD, fullTime, shortTime } from "./format";
 import { useI18n } from "./i18n";
+import { ChatHeader, bubbleClass, useThreadLayout } from "./Thread";
 
 type Props = {
   group: Group;
@@ -18,6 +19,7 @@ type Props = {
 export function GroupChat({ group, messages, onSend, onSendFile, onMembers, onBack }: Props) {
   const { t, language } = useI18n();
   const list = useRef<HTMLOListElement>(null);
+  const layout = useThreadLayout(messages);
 
   useEffect(() => {
     list.current?.scrollTo({ top: list.current.scrollHeight });
@@ -25,28 +27,32 @@ export function GroupChat({ group, messages, onSend, onSendFile, onMembers, onBa
 
   return (
     <section className="chat" aria-label={group.name}>
-      <header className="chat-header">
-        {onBack && <BackButton onBack={onBack} />}
-        <h2>{group.name}</h2>
-        <button className="members-link" onClick={onMembers}>
-          {t.membersCount(group.members.length)}
+      <ChatHeader
+        name={group.name}
+        kind="group"
+        onBack={onBack}
+        onTitle={onMembers}
+        sub={`${t.membersCount(group.members.length)} · ${t.groupSecure}`}
+      >
+        <button className="icon-button" onClick={onMembers} aria-label={t.membersTitle(group.name)} title={t.membersTitle(group.name)}>
+          <DotsThreeVerticalIcon size={22} weight="bold" />
         </button>
-        <span className="secrecy on" title={t.groupSecureHint}>
-          {t.groupSecure}
-        </span>
-      </header>
+      </ChatHeader>
 
       <ol className="messages" ref={list}>
         {messages.length === 0 && <li className="messages-empty">{t.groupChatEmpty(group.name)}</li>}
-        {messages.map((message) => (
-          <li key={message.id} className={message.outgoing ? "bubble outgoing" : "bubble incoming"}>
-            {message.sender && <span className="sender">{message.sender}</span>}
-            {message.file && <FileBubble file={message.file} />}
-            {message.body && <p>{message.body}</p>}
-            <footer>
-              <time title={fullTime(message.createdAt, language)}>{shortTime(message.createdAt, language)}</time>
-            </footer>
-          </li>
+        {layout.map(({ item: message, day, first, tail }) => (
+          <Fragment key={message.id}>
+            {day && <li className="day">{day}</li>}
+            <li className={bubbleClass(message.outgoing, first, tail)}>
+              {message.sender && first && <span className="sender">{message.sender}</span>}
+              {message.file && <FileBubble file={message.file} />}
+              {message.body && <p>{message.body}</p>}
+              <footer>
+                <time title={fullTime(message.createdAt, language)}>{shortTime(message.createdAt, language)}</time>
+              </footer>
+            </li>
+          </Fragment>
         ))}
       </ol>
 

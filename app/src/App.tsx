@@ -1,3 +1,12 @@
+import {
+  BroadcastIcon,
+  ChatCircleIcon,
+  PencilSimpleIcon,
+  UserCircleIcon,
+  UserPlusIcon,
+  UsersIcon,
+  type Icon,
+} from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
@@ -14,24 +23,27 @@ import {
 } from "./api";
 import { ChannelChat } from "./ChannelChat";
 import { Chat } from "./Chat";
+import { ChatList } from "./ChatList";
 import {
   AddContactDialog,
   ChannelSettingsDialog,
   ConnectDialog,
+  ContactInfoDialog,
   JoinChannelDialog,
   MembersDialog,
   MyCardDialog,
   NetworkDialog,
+  NewDialog,
   NewGroupDialog,
-  SettingsDialog,
 } from "./Dialogs";
 import { GroupChat } from "./GroupChat";
-import { shortTime } from "./format";
 import { useI18n } from "./i18n";
 import { Logo } from "./Logo";
+import { Me } from "./Me";
+import { Network } from "./Network";
+import { People } from "./People";
 import { notificationsEnabled } from "./prefs";
 import { Setup } from "./Setup";
-import { StatusBar } from "./StatusBar";
 
 export default function App() {
   const [profile, setProfile] = useState<Profile | null | undefined>(undefined);
@@ -48,15 +60,18 @@ export default function App() {
 type Notice = { text: string; action?: { label: string; run: () => void } };
 
 type DialogName =
+  | "new"
   | "add"
   | "card"
   | "connect"
   | "network"
-  | "settings"
+  | "contactInfo"
   | "newGroup"
   | "members"
   | "joinChannel"
   | "channelSettings";
+
+type Tab = "chats" | "people" | "network" | "me";
 
 function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: Profile) => void }) {
   const { t, language } = useI18n();
@@ -71,6 +86,7 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
   const [posts, setPosts] = useState<Post[]>([]);
   const [status, setStatus] = useState<Status | null>(null);
   const [dialog, setDialog] = useState<DialogName | null>(null);
+  const [tab, setTab] = useState<Tab>("chats");
   const [notice, setNotice] = useState<Notice | null>(null);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
@@ -420,134 +436,100 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
     }
   }
 
-  const requests = contacts.filter((item) => item.request);
-  const accepted = contacts.filter((item) => !item.request);
+  const unread = [...contacts, ...groups, ...channels].filter((item) => item.unread > 0 || ("request" in item && item.request)).length;
+  const active = channel
+    ? { kind: "channel" as const, id: channel.id }
+    : group
+      ? { kind: "group" as const, id: group.id }
+      : contact
+        ? { kind: "contact" as const, id: contact.id }
+        : null;
 
-  function contactRow(item: Contact) {
-    return (
-      <button
-        key={item.id}
-        className={item.id === selected ? "contact active" : "contact"}
-        onClick={() => selectContact(item.id)}
-      >
-        <span className="avatar" aria-hidden>
-          {item.name.slice(0, 1).toLocaleUpperCase(language)}
-        </span>
-        <span className="who">
-          <span className="name">{item.name}</span>
-          <span className="preview">{item.lastMessage === null ? t.noMessagesYet : item.lastMessage || t.file}</span>
-        </span>
-        <span className="meta">
-          {item.lastAt !== null && <time>{shortTime(item.lastAt, language)}</time>}
-          {item.unread > 0 && item.id !== selected && <span className="badge">{item.unread}</span>}
-        </span>
-      </button>
-    );
-  }
-
-  function groupRow(item: Group) {
-    return (
-      <button
-        key={item.id}
-        className={item.id === selectedGroup ? "contact active" : "contact"}
-        onClick={() => selectGroup(item.id)}
-      >
-        <span className="avatar group" aria-hidden>
-          {item.name.slice(0, 1).toLocaleUpperCase(language)}
-        </span>
-        <span className="who">
-          <span className="name">{item.name}</span>
-          <span className="preview">
-            {item.lastMessage === null ? t.membersCount(item.members.length) : item.lastMessage || t.file}
-          </span>
-        </span>
-        <span className="meta">
-          {item.lastAt !== null && <time>{shortTime(item.lastAt, language)}</time>}
-          {item.unread > 0 && item.id !== selectedGroup && <span className="badge">{item.unread}</span>}
-        </span>
-      </button>
-    );
-  }
-
-  function channelRow(item: Channel) {
-    return (
-      <button
-        key={item.id}
-        className={item.id === selectedChannel ? "contact active" : "contact"}
-        onClick={() => selectChannel(item.id)}
-      >
-        <span className="avatar channel" aria-hidden>
-          #
-        </span>
-        <span className="who">
-          <span className="name">{item.name}</span>
-          <span className="preview">{item.lastMessage === null ? t.postingAs(item.nick) : item.lastMessage || t.file}</span>
-        </span>
-        <span className="meta">
-          {item.lastAt !== null && <time>{shortTime(item.lastAt, language)}</time>}
-          {item.unread > 0 && item.id !== selectedChannel && <span className="badge">{item.unread}</span>}
-        </span>
-      </button>
-    );
-  }
+  const tabs: { tab: Tab; label: string; icon: Icon; badge?: number }[] = [
+    { tab: "chats", label: t.tabChats, icon: ChatCircleIcon, badge: unread },
+    { tab: "people", label: t.contacts, icon: UsersIcon },
+    { tab: "network", label: t.tabNetwork, icon: BroadcastIcon },
+    { tab: "me", label: t.tabMe, icon: UserCircleIcon },
+  ];
 
   return (
-    <div className={["shell", narrow && "narrow", (channel || group || contact) && "open"].filter(Boolean).join(" ")}>
-      <aside className="sidebar">
-        <header className="brand">
-          <Logo size={32} />
-          <div>
-            <strong>Kervan</strong>
-            <span>{profile.name}</span>
-          </div>
-          <button className="icon-button" onClick={() => setDialog("settings")} aria-label={t.settings} title={t.settings}>
-            <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
-              <path
-                fill="currentColor"
-                d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3.3h-4l-.4 2.6a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.5 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"
-                transform="translate(-1 0)"
-              />
-            </svg>
-          </button>
-        </header>
-        <nav className="contacts" aria-label={t.contacts}>
-          {requests.length > 0 && (
-            <>
-              <h3 className="section-title">{t.requests}</h3>
-              {requests.map(contactRow)}
-            </>
+    <div className={["shell", narrow && "narrow", active && "open"].filter(Boolean).join(" ")}>
+      <aside className="side">
+        <div className="side-body">
+          {tab === "chats" && (
+            <ChatList
+              contacts={contacts}
+              groups={groups}
+              channels={channels}
+              status={status}
+              active={narrow ? null : active}
+              onOpen={(kind, id) =>
+                kind === "contact" ? selectContact(id) : kind === "group" ? selectGroup(id) : selectChannel(id)
+              }
+              onNetwork={() => setTab("network")}
+              onCard={() => setDialog("card")}
+            />
           )}
-          {accepted.length > 0 && (
-            <div className="section-row">
-              <h3 className="section-title">{t.groups}</h3>
-              <button className="icon-button small" onClick={() => setDialog("newGroup")} aria-label={t.newGroup} title={t.newGroup}>
-                +
+          {tab === "people" && (
+            <People
+              contacts={contacts}
+              activeId={narrow ? null : selected}
+              onOpen={selectContact}
+              onAdd={() => setDialog("add")}
+              onCard={() => setDialog("card")}
+            />
+          )}
+          {tab === "network" && (
+            <Network
+              status={status}
+              preview={api.preview}
+              onNetworkHelp={() => setDialog("network")}
+              onConnect={() => setDialog("connect")}
+              onImport={importFile}
+              onExport={exportFile}
+            />
+          )}
+          {tab === "me" && (
+            <Me
+              profile={profile}
+              onCard={() => setDialog("card")}
+              onRenamed={(renamed) => {
+                onProfile(renamed);
+                show(t.renamed);
+              }}
+            />
+          )}
+        </div>
+        {(tab === "chats" || tab === "people") && (
+          <button
+            className="fab"
+            onClick={() => setDialog(tab === "chats" ? "new" : "add")}
+            aria-label={tab === "chats" ? t.newTitle : t.addContact}
+            title={tab === "chats" ? t.newTitle : t.addContact}
+          >
+            {tab === "chats" ? <PencilSimpleIcon size={24} weight="bold" /> : <UserPlusIcon size={24} weight="bold" />}
+          </button>
+        )}
+        <nav className="tabbar">
+          {tabs.map((item) => {
+            const on = item.tab === tab;
+            const TabIcon = item.icon;
+            return (
+              <button
+                key={item.tab}
+                className={on ? "tab on" : "tab"}
+                aria-current={on ? "page" : undefined}
+                onClick={() => setTab(item.tab)}
+              >
+                <span className="pill">
+                  <TabIcon size={22} weight={on ? "fill" : "regular"} />
+                  {item.badge !== undefined && item.badge > 0 && <span className="tab-badge">{item.badge}</span>}
+                </span>
+                {item.label}
               </button>
-            </div>
-          )}
-          {groups.map(groupRow)}
-          <div className="section-row">
-            <h3 className="section-title">{t.channels}</h3>
-            <button
-              className="icon-button small"
-              onClick={() => setDialog("joinChannel")}
-              aria-label={t.joinChannel}
-              title={t.joinChannel}
-            >
-              +
-            </button>
-          </div>
-          {channels.map(channelRow)}
-          {(requests.length > 0 || accepted.length > 0) && <h3 className="section-title">{t.contacts}</h3>}
-          {accepted.map(contactRow)}
-          {contacts.length === 0 && <p className="sidebar-empty">{t.sidebarEmpty}</p>}
+            );
+          })}
         </nav>
-        <footer className="sidebar-actions">
-          <button className="primary" onClick={() => setDialog("add")}>
-            {t.addContact}
-          </button>
-          <button onClick={() => setDialog("card")}>{t.myCard}</button>
-        </footer>
       </aside>
 
       <main className="conversation">
@@ -579,6 +561,7 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
             onSendFile={sendFile}
             onAccept={accept}
             onDecline={decline}
+            onInfo={() => setDialog("contactInfo")}
             onBack={narrow ? back : undefined}
           />
         ) : (
@@ -590,15 +573,12 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
         )}
       </main>
 
-      <StatusBar
-        status={status}
-        preview={api.preview}
-        onNetworkHelp={() => setDialog("network")}
-        onConnect={() => setDialog("connect")}
-        onImport={importFile}
-        onExport={exportFile}
-      />
-
+      {dialog === "new" && (
+        <NewDialog onClose={() => setDialog(null)} onChoose={(choice) => setDialog(choice)} />
+      )}
+      {dialog === "contactInfo" && contact && (
+        <ContactInfoDialog contact={contact} onClose={() => setDialog(null)} />
+      )}
       {dialog === "add" && (
         <AddContactDialog
           onClose={() => setDialog(null)}
@@ -668,16 +648,6 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
         />
       )}
       {dialog === "card" && <MyCardDialog profile={profile} onClose={() => setDialog(null)} />}
-      {dialog === "settings" && (
-        <SettingsDialog
-          profile={profile}
-          onClose={() => setDialog(null)}
-          onRenamed={(renamed) => {
-            onProfile(renamed);
-            show(t.renamed);
-          }}
-        />
-      )}
       {dialog === "network" && status?.lanProblem && (
         <NetworkDialog problem={status.lanProblem} onClose={() => setDialog(null)} />
       )}

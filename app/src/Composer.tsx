@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
+import { ImageIcon, MicrophoneIcon, PaperPlaneRightIcon, StopIcon } from "@phosphor-icons/react";
+import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { maxMessageBytes, onePacketBytes, radioPackets, utf8Length } from "./format";
 import { useI18n } from "./i18n";
 import { MAX_RECORDING_SECS, canRecord, shrinkPhoto, startRecording, type Recorder } from "./media";
@@ -27,6 +28,7 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
   const [recording, setRecording] = useState<Recording | null>(null);
   const [seconds, setSeconds] = useState(0);
   const photoInput = useRef<HTMLInputElement>(null);
+  const field = useRef<HTMLTextAreaElement>(null);
   const recordingRef = useRef<Recording | null>(null);
   recordingRef.current = recording;
 
@@ -42,6 +44,14 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
       setRecording(null);
     };
   }, [conversation]);
+
+  // The field grows with the text, up to about five lines.
+  useLayoutEffect(() => {
+    const element = field.current;
+    if (!element) return;
+    element.style.height = "auto";
+    element.style.height = `${Math.min(element.scrollHeight, 132)}px`;
+  }, [draft]);
 
   // The timer while recording, which also stops a recording that runs too long.
   useEffect(() => {
@@ -120,73 +130,68 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
     }
   }
 
+  const note =
+    error ??
+    (recording
+      ? t.recording(seconds)
+      : tooLong
+        ? t.tooLong(bytes, max)
+        : bytes > onePacketBytes(overhead)
+          ? packets === 1
+            ? t.onePacket(bytes)
+            : t.packets(bytes, packets)
+          : null);
+  const empty = bytes === 0;
+
   return (
     <div className="composer">
-      <textarea
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        onKeyDown={onKeyDown}
-        placeholder={placeholder}
-        rows={2}
-        aria-label={placeholder}
-      />
+      {note && <p className={error || tooLong ? "meter error" : recording ? "meter recording" : "meter"}>{note}</p>}
       <div className="composer-row">
-        <span className={tooLong ? "meter error" : bytes > onePacketBytes(overhead) ? "meter warn" : "meter"}>
-          {error ??
-            (recording
-              ? t.recording(seconds)
-              : tooLong
-                ? t.tooLong(bytes, max)
-                : bytes === 0
-                  ? TOUCH
-                    ? ""
-                    : t.composerHint
-                  : packets === 1
-                    ? t.onePacket(bytes)
-                    : t.packets(bytes, packets))}
-        </span>
         {onSendFile && (
           <>
             <input ref={photoInput} type="file" accept="image/*" hidden onChange={pickPhoto} />
             <button
-              className="attach"
+              className="icon-button attach"
               onClick={() => photoInput.current?.click()}
               disabled={sending || recording !== null}
               title={t.attachPhoto}
               aria-label={t.attachPhoto}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
-                <path
-                  fill="currentColor"
-                  d="M9 4 7.2 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3.2L15 4H9zm3 4.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9zm0 2a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"
-                />
-              </svg>
+              <ImageIcon size={24} />
             </button>
-            {canRecord() && (
-              <button
-                className={recording ? "attach recording" : "attach"}
-                onClick={recording ? stopRecording : record}
-                disabled={sending}
-                title={recording ? t.stopRecording : t.recordVoice}
-                aria-label={recording ? t.stopRecording : t.recordVoice}
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
-                  {recording ? (
-                    <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" />
-                  ) : (
-                    <path
-                      fill="currentColor"
-                      d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V21h2v-3.1A7 7 0 0 0 19 11h-2z"
-                    />
-                  )}
-                </svg>
-              </button>
-            )}
           </>
         )}
-        <button className="primary" onClick={send} disabled={bytes === 0 || tooLong || sending || recording !== null}>
-          {t.send}
-        </button>
+        <textarea
+          ref={field}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder={placeholder}
+          title={TOUCH ? undefined : t.composerHint}
+          rows={1}
+          aria-label={placeholder}
+        />
+        {(empty || recording !== null) && onSendFile && canRecord() ? (
+          <button
+            className={recording ? "send recording" : "send"}
+            onClick={recording ? stopRecording : record}
+            disabled={sending}
+            title={recording ? t.stopRecording : t.recordVoice}
+            aria-label={recording ? t.stopRecording : t.recordVoice}
+          >
+            {recording ? <StopIcon size={20} weight="fill" /> : <MicrophoneIcon size={21} weight="fill" />}
+          </button>
+        ) : (
+          <button
+            className="send"
+            onClick={send}
+            disabled={empty || tooLong || sending || recording !== null}
+            title={t.send}
+            aria-label={t.send}
+          >
+            <PaperPlaneRightIcon size={20} weight="fill" />
+          </button>
+        )}
       </div>
     </div>
   );

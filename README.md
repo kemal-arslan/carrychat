@@ -45,7 +45,7 @@ npm install
 npm run tauri dev
 ```
 
-Create your identity and give your card (**My card**, also as a QR code) to the people you want to hear from, or add theirs with **Add contact**. Only one side needs the other's card: the first message introduces the sender, and the recipient accepts the request. The **+** next to **Groups** starts a group with contacts you have written to, and the one next to **Channels** joins a public channel. Kervan computers on the same network find each other by themselves, and while there is internet, messages also go through public Nostr relays, so computers on different networks reach each other. If your network blocks that, use **Connect…** with the other computer's address. **Export file…** writes everything waiting to be delivered to a `.kervan` file that someone can carry to another Kervan computer and import there.
+Create your identity and give your card (**My card**, also as a QR code, under **Me** or the QR button) to the people you want to hear from, or add theirs with **Add contact** on **People**. Only one side needs the other's card: the first message introduces the sender, and the recipient accepts the request. The pencil button on **Chats** also starts a group with contacts you have written to, or joins a public channel. Kervan devices on the same network find each other by themselves, and while there is internet, messages also go through public Nostr relays, so devices on different networks reach each other. The **Network** tab shows each link: if your network blocks them, use **Connect to an address** there with the other device's address, and **Export to a file** writes everything waiting to be delivered to a `.kervan` file that someone can carry to another Kervan device and import there.
 
 `npm run dev` opens the interface in a browser with sample data, without building the app.
 
@@ -109,7 +109,7 @@ On a phone Kervan keeps running after its screen is closed, with an ongoing noti
 | [`kervan-proto`](crates/kervan-proto) | Wire format and cryptography, no I/O |
 | [`kervan-node`](crates/kervan-node) | Message store, forwarding, local network and file links |
 | [`kervan-cli`](crates/kervan-cli) | The `kervan` command |
-| [`app`](app) | The desktop and Android app (Tauri and React) |
+| [`app`](app) | The desktop and Android app (Tauri and React); its look follows [DESIGN.md](DESIGN.md) |
 
 ## Security
 
