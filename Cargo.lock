@@ -3260,7 +3260,7 @@ dependencies = [
 
 [[package]]
 name = "kervan-app"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "data-encoding",
  "jni 0.21.1",
@@ -3277,7 +3277,7 @@ dependencies = [
 
 [[package]]
 name = "kervan-cli"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "clap",
  "kervan-node",
@@ -3287,7 +3287,7 @@ dependencies = [
 
 [[package]]
 name = "kervan-node"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "arti-client",
  "btleplug",
@@ -3316,7 +3316,7 @@ dependencies = [
 
 [[package]]
 name = "kervan-proto"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chacha20 0.9.1",
  "chacha20poly1305",
