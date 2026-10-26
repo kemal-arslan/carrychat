@@ -6,7 +6,7 @@ Kervan is a store-and-forward messenger. Each message is sealed into a bundle of
 
 [![CI](https://github.com/kemal-arslan/kervan/actions/workflows/ci.yml/badge.svg)](https://github.com/kemal-arslan/kervan/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/kemalarslan)
 
-> **Status: early.** Kervan works today over the local network, Bluetooth, the internet (Nostr relays) and by file, from a desktop app, an Android app or the command line. The LoRa radio link comes next. Nothing is packaged yet. See the [roadmap](#roadmap).
+> **Status: early.** Kervan works today over the local network, Bluetooth, the internet (Nostr relays) and by file, from a desktop app, an Android app or the command line. The LoRa radio link is written and waits for its first field test on real devices. Nothing is packaged yet. See the [roadmap](#roadmap).
 
 ## How it works
 
@@ -63,6 +63,7 @@ kervan save-file 3 photo.jpg                 # a file that arrived, by the numbe
 kervan run                                   # deliver, receive and relay (local network and internet)
 kervan run --tor                             # the same, with the internet only over Tor
 kervan run --bluetooth                       # also reach nearby phones over Bluetooth
+kervan run --lora /dev/cu.usbserial-0001     # and LoRa through a Meshtastic device (or tcp:host:4403)
 kervan export messages.kervan                # or carry everything on a USB stick
 kervan group create Mahalle Deniz Mehmet     # you become the group's admin
 kervan group send Mahalle "Su dağıtımı okulun önünde."
@@ -81,7 +82,7 @@ kervan erase --yes                           # delete identity, contacts and mes
 
 1. **Protocol v0, reference implementation, test vectors** (done)
 2. **Local network link, message store, desktop app, command line, USB export and import** (done)
-3. LoRa link through a Meshtastic radio over USB
+3. **LoRa link through a Meshtastic radio** (written: the command line uses a device over USB or TCP; field tests and the apps come next)
 4. **Internet link over Nostr** (done). Computers with internet also pass on what they carry for computers without it. Fetching for those computers is still open.
 5. **Android app and Bluetooth link** (done). iOS app, HF radio
 

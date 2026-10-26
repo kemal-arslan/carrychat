@@ -385,10 +385,13 @@ Both sides send HELLO first. A second connection between the same two nodes, ove
 
 ### 9.2 LoRa via Meshtastic
 
-- The app talks to a Meshtastic node over USB serial (Bluetooth and TCP also work) with the Meshtastic client API.
-- Each frame is the payload of one Meshtastic `Data` packet sent to broadcast, MTU 233 bytes (`DATA_PAYLOAD_LEN`). During development it uses portnum `PRIVATE_APP` (256). A dedicated portnum will be requested once the format settles.
-- The Meshtastic mesh rebroadcasts packets itself, with a hop limit of up to 7, so Kervan nodes do not re-flood LoRa traffic (§8).
-- In the `EU_868` region Meshtastic uses 869.4–869.65 MHz, where the legal duty cycle limit is 10%, and every node in range shares that airtime. Kervan keeps its own airtime budget well below the limit and sends only bundles and tombstones over LoRa, never bulk data.
+Implemented in `crates/kervan-node/src/lora.rs`. Desktops and the command line reach the device over USB serial or TCP; phones will reach it over Bluetooth.
+
+- **Device.** The node talks to a Meshtastic device with the Meshtastic client API, over USB serial at 115200 baud or over TCP: a device on the network, or meshtasticd, on port 4403. Both carry the API's stream framing, `0x94 0xC3 || u16 length || protobuf`. Before the first message on a serial port, the node sends 32 bytes of `0xC3`, which switch a device that is printing its log over to the API. It then asks for the configuration (`want_config_id`), reads the radio's modem settings and hop limit from it, and starts once `config_complete_id` arrives. A heartbeat every 5 minutes keeps the connection open. When the connection ends, the node connects again after 10 seconds.
+- **Packets.** Each frame is the payload of one Meshtastic `Data` packet, broadcast on the primary channel with the device's hop limit, MTU 233 bytes (`DATA_PAYLOAD_LEN`). Bundles longer than that travel as fragments (§7). During development it uses portnum `PRIVATE_APP` (256). A dedicated portnum will be requested once the format settles. Only bundles and tombstones go over LoRa, never file chunks.
+- **Channel.** The primary channel is the public one by default, so community devices with the same region and modem preset relay Kervan packets like any others. A primary channel of another name moves to another frequency, where they do not hear it. Kervan bundles are end-to-end encrypted already, so the public channel's shared key costs nothing.
+- **Split horizon.** The Meshtastic mesh rebroadcasts packets itself, with a hop limit of up to 7, so a node does not send over LoRa again a bundle or tombstone it heard there, whole or in fragments (§8). It passes them on to its other links. What a frame makes the node send, such as the receipt for a message to it, does go over LoRa.
+- **Airtime.** In the `EU_868` region Meshtastic uses 869.4–869.65 MHz, where the legal duty cycle limit is 10%, and every node in range shares that airtime. A node keeps its own airtime under 2.5% of the time, with bursts of at most 20 seconds, computing each packet's time on air from the device's modem settings and a 22-byte allowance for Meshtastic's header. On LongFast a full packet takes about 2.2 seconds, so a burst holds about nine. Its own bundles and tombstones go first. Up to 32 frames carried for others wait for airtime; past that, the oldest is dropped.
 
 ### 9.3 Internet via Nostr
 
@@ -452,11 +455,10 @@ Implemented in `crates/kervan-node/src/bluetooth.rs` for desktops, through btlep
 
 ## 11. Open questions
 
-1. Meshtastic channel: the default public channel (more relays, more contention for airtime) or a dedicated one.
-2. Downlink for nodes without internet access through a gateway, without telling the gateway who they are.
-3. Padding for LoRa frames: a smaller size leak against more airtime.
-4. Exchanging contacts at a distance.
-5. HF radio. Amateur bands forbid encryption that hides a message's meaning, so HF would need a separate signed but unencrypted message kind, limited to messages the user explicitly marks as public.
+1. Downlink for nodes without internet access through a gateway, without telling the gateway who they are.
+2. Padding for LoRa frames: a smaller size leak against more airtime.
+3. Exchanging contacts at a distance.
+4. HF radio. Amateur bands forbid encryption that hides a message's meaning, so HF would need a separate signed but unencrypted message kind, limited to messages the user explicitly marks as public.
 
 ## 12. Constants
 
@@ -478,6 +480,7 @@ Implemented in `crates/kervan-node/src/bluetooth.rs` for desktops, through btlep
 | Default hop limit | 8 |
 | Tag window | `today − 7` to `today + 1` |
 | Meshtastic MTU | 233 bytes |
+| LoRa airtime budget | 2.5% of the time, bursts of at most 20 s |
 | Most fragments per bundle | 32 |
 | Reassembly timeout | 600 s |
 | Bluetooth LE service | `4b52564e-a0c5-4a3e-9b31-6f2d8e7c1a01` |

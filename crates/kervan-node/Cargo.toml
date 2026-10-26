@@ -16,6 +16,7 @@ hmac = "0.12"
 if-addrs = "0.15"
 k256 = { version = "0.13", features = ["schnorr"] }
 kervan-proto = { path = "../kervan-proto" }
+prost = "0.13"
 rand_core = { version = "0.6", features = ["getrandom"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
@@ -35,8 +36,13 @@ uuid = { version = "1", optional = true }
 bluetooth = ["dep:btleplug", "dep:uuid"]
 
 [dev-dependencies]
+prost = "0.13"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 tempfile = "3"
+
+# USB serial for LoRa devices, without libudev, which only lists ports.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+serialport = { version = "4", default-features = false }
 
 # Android has no system OpenSSL for native-tls (relays, Tor): build it in.
 [target.'cfg(target_os = "android")'.dependencies]

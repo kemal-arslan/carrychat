@@ -9,6 +9,7 @@ mod error;
 pub mod file;
 pub mod internet;
 pub mod lan;
+pub mod lora;
 pub mod store;
 mod sync;
 
@@ -24,6 +25,7 @@ use crate::engine::{Engine, Handled, Outcome};
 pub use crate::error::{Error, Result};
 pub use crate::internet::{InternetConfig, TorState};
 pub use crate::lan::{LanConfig, LanProblem};
+pub use crate::lora::LoraDevice;
 use crate::store::Store;
 pub use crate::sync::Link;
 
@@ -207,6 +209,10 @@ pub struct Status {
     pub bluetooth_on: bool,
     /// Nodes connected over Bluetooth LE right now.
     pub bluetooth_peers: usize,
+    /// Whether a Meshtastic device is connected for the LoRa link.
+    pub lora_connected: bool,
+    /// Frames waiting for airtime on LoRa.
+    pub lora_waiting: usize,
     /// Internet relays connected right now.
     pub internet_relays: usize,
     /// Whether the internet link was started.
@@ -239,6 +245,8 @@ pub enum Event {
     MessageDelivered { contact_id: i64, message_id: i64 },
     #[serde(rename_all = "camelCase")]
     PeersChanged { lan: usize, bluetooth: usize },
+    /// The Meshtastic device of the LoRa link connected or went away.
+    LoraChanged { connected: bool },
     /// The contact read some of our messages.
     #[serde(rename_all = "camelCase")]
     MessagesRead {
@@ -280,6 +288,7 @@ pub(crate) struct Shared {
     events: broadcast::Sender<Event>,
     pub(crate) lan: lan::Lan,
     pub(crate) peers: sync::Peers,
+    pub(crate) lora: lora::Lora,
     pub(crate) internet: internet::Internet,
     internet_on: std::sync::atomic::AtomicBool,
 }
@@ -308,6 +317,7 @@ impl Node {
                 events: broadcast::channel(256).0,
                 lan: lan::Lan::new(),
                 peers: sync::Peers::new(),
+                lora: lora::Lora::new(),
                 internet: internet::Internet::new(),
                 internet_on: std::sync::atomic::AtomicBool::new(false),
             }),
@@ -415,6 +425,7 @@ impl Node {
         };
         self.shared.peers.broadcast(&frame.to_bytes(), None);
         self.shared.internet.post_bundle(&frame, &tag);
+        self.shared.lora.send(&frame, true);
         self.shared.internet.renew_subscription();
         self.shared.internet.probe();
         Ok(message)
@@ -600,6 +611,8 @@ impl Node {
             lan_problem: self.shared.lan.problem(),
             bluetooth_on: self.shared.engine().settings()?.bluetooth,
             bluetooth_peers: self.shared.peers.count(Link::Bluetooth),
+            lora_connected: self.shared.lora.connected(),
+            lora_waiting: self.shared.lora.waiting(),
             internet_relays: self.shared.internet.connected(),
             internet_on: self
                 .shared
@@ -690,6 +703,12 @@ impl Node {
         lan::dial(&self.shared, addr, None).await
     }
 
+    /// Starts the LoRa link (§9.2) through a Meshtastic device, connecting
+    /// again whenever the connection ends.
+    pub fn start_lora(&self, device: LoraDevice) -> Result<()> {
+        lora::start(&self.shared, device)
+    }
+
     /// Starts looking for nearby nodes over Bluetooth LE and connecting to
     /// them (§9.5), where btleplug supports it.
     #[cfg(feature = "bluetooth")]
@@ -743,12 +762,26 @@ impl Shared {
     /// sent back to the peer it came from, but a tombstone is: that peer may be
     /// the sender waiting for it.
     pub(crate) fn dispatch(&self, handled: Handled, from: Option<u64>) {
+        self.relay(handled, from, None);
+    }
+
+    /// Like `dispatch`, for a frame heard over LoRa: it goes to every other
+    /// link, but not back on LoRa, where the mesh already floods it (§8).
+    /// What it makes the node send, such as its receipt, does go on LoRa.
+    pub(crate) fn dispatch_from_lora(&self, handled: Handled, heard: &Frame) {
+        self.relay(handled, None, Some(heard));
+    }
+
+    fn relay(&self, handled: Handled, from: Option<u64>, heard_on_lora: Option<&Frame>) {
         for frame in &handled.relay {
             let except = match frame {
                 Frame::Bundle(_) | Frame::Chunk(_) => from,
                 _ => None,
             };
             self.peers.broadcast(&frame.to_bytes(), except);
+            if !heard_on_lora.is_some_and(|heard| lora::echoes(frame, heard)) {
+                self.lora.send(frame, false);
+            }
         }
         self.internet.post_handled(&handled);
         // A bundle posted as it arrives need not go up again on reconnecting.
@@ -787,6 +820,7 @@ impl Shared {
         for (frame, tag) in frames {
             self.peers.broadcast(&frame.to_bytes(), None);
             self.internet.post_bundle(frame, tag);
+            self.lora.send(frame, true);
         }
         self.internet.probe();
     }
@@ -798,6 +832,7 @@ impl Shared {
         };
         self.peers.broadcast(&frame.to_bytes(), None);
         self.internet.post_bundle(frame, &bundle.tag);
+        self.lora.send(frame, true);
         self.internet.probe();
     }
 
@@ -806,6 +841,7 @@ impl Shared {
         for (frame, tag) in frames {
             self.peers.broadcast(&frame.to_bytes(), None);
             self.internet.post_bundle(frame, tag);
+            self.lora.send(frame, true);
         }
         if !frames.is_empty() {
             self.internet.renew_subscription();

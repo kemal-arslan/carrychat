@@ -9,7 +9,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use kervan_node::{
     ChannelView, ContactView, Event, FileView, GroupView, InternetConfig, LanConfig, LanProblem,
-    Node, TorState,
+    LoraDevice, Node, TorState,
 };
 use tokio::io::{AsyncBufReadExt, BufReader};
 
@@ -99,6 +99,10 @@ enum Command {
         /// Also connect to nearby phones over Bluetooth LE.
         #[arg(long)]
         bluetooth: bool,
+        /// Also use a Meshtastic device for LoRa radio: its serial port, such
+        /// as /dev/cu.usbserial-0001, or tcp:host:port (meshtasticd: 4403).
+        #[arg(long, value_name = "DEVICE")]
+        lora: Option<LoraDevice>,
         /// Send every line typed on standard input to this contact.
         #[arg(long)]
         chat: Option<String>,
@@ -322,6 +326,7 @@ async fn run(cli: Cli) -> AnyResult {
             relays,
             tor,
             bluetooth,
+            lora,
             chat,
         } => {
             let chat = chat.map(|name| find_contact(&node, &name)).transpose()?;
@@ -342,7 +347,7 @@ async fn run(cli: Cli) -> AnyResult {
                 }
                 config
             });
-            run_node(node, lan, internet, bluetooth, connect, chat).await?;
+            run_node(node, lan, internet, bluetooth, lora, connect, chat).await?;
         }
     }
     Ok(())
@@ -353,6 +358,7 @@ async fn run_node(
     lan: LanConfig,
     internet: Option<InternetConfig>,
     bluetooth: bool,
+    lora: Option<LoraDevice>,
     connect: Vec<SocketAddr>,
     chat: Option<ContactView>,
 ) -> AnyResult {
@@ -367,6 +373,10 @@ async fn run_node(
             Ok(()) => println!("Looking for phones over Bluetooth."),
             Err(error) => eprintln!("Bluetooth is off: {error}"),
         }
+    }
+    if let Some(device) = lora {
+        println!("Connecting to the LoRa device {device:?}.");
+        node.start_lora(device)?;
     }
     println!(
         "{} is listening on port {port}. Ctrl-C stops.",
@@ -401,6 +411,10 @@ async fn run_node(
                 Ok(Event::MessageDelivered { contact_id, .. }) => {
                     println!("✓ delivered to {}", names(contact_id));
                 }
+                Ok(Event::LoraChanged { connected }) => println!(
+                    "· LoRa device {}",
+                    if connected { "connected" } else { "gone" }
+                ),
                 Ok(Event::PeersChanged { lan, bluetooth }) => {
                     println!("· {} node(s) nearby", lan + bluetooth)
                 }
