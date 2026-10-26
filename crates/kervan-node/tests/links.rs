@@ -3,7 +3,7 @@
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::time::Duration;
 
-use kervan_node::{Event, LanConfig, Node};
+use kervan_node::{Event, LanConfig, Link, Node};
 use tempfile::TempDir;
 use tokio::sync::broadcast;
 
@@ -155,6 +155,64 @@ async fn queued_messages_sync_when_peers_connect_and_new_ones_flow_live() {
     assert_eq!(status.lan_problem, None);
 }
 
+/// A connection platform code opened, such as Bluetooth LE on Android, with
+/// a small buffer so frames cross it in pieces as they do over the air.
+fn platform_link(a: &Node, b: &Node) -> (tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>) {
+    let (a_end, b_end) = tokio::io::duplex(64);
+    let (a_reader, a_writer) = tokio::io::split(a_end);
+    let (b_reader, b_writer) = tokio::io::split(b_end);
+    let (a, b) = (a.clone(), b.clone());
+    (
+        tokio::spawn(async move { a.sync_over(Link::Bluetooth, a_reader, a_writer, None).await }),
+        tokio::spawn(async move { b.sync_over(Link::Bluetooth, b_reader, b_writer, None).await }),
+    )
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_platform_link_syncs_like_the_local_network() {
+    let alice = node("alice");
+    let bob = node("bob");
+    let (bob_id, alice_id) = introduce(&alice.node, &bob.node);
+    let mut alice_events = alice.node.subscribe();
+    let mut bob_events = bob.node.subscribe();
+
+    alice
+        .node
+        .send_text(bob_id, "Bluetooth'tan merhaba")
+        .unwrap();
+    let _link = platform_link(&alice.node, &bob.node);
+    let Event::MessageReceived { message } = next_event(&mut bob_events, |event| {
+        matches!(event, Event::MessageReceived { .. })
+    })
+    .await
+    else {
+        unreachable!()
+    };
+    assert_eq!(message.body, "Bluetooth'tan merhaba");
+
+    bob.node.send_text(alice_id, "Aldım").unwrap();
+    let Event::MessageReceived { message } = next_event(&mut alice_events, |event| {
+        matches!(event, Event::MessageReceived { .. })
+    })
+    .await
+    else {
+        unreachable!()
+    };
+    assert_eq!(message.body, "Aldım");
+    let status = alice.node.status().unwrap();
+    assert_eq!((status.bluetooth_peers, status.lan_peers), (1, 0));
+
+    // The two are connected already: a second connection, over any link, ends.
+    let (second_a, second_b) = platform_link(&alice.node, &bob.node);
+    tokio::time::timeout(Duration::from_secs(10), async {
+        second_a.await.unwrap();
+        second_b.await.unwrap();
+    })
+    .await
+    .expect("the second connection should close");
+    assert_eq!(alice.node.status().unwrap().bluetooth_peers, 1);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_node_in_the_middle_relays_between_two_others() {
     let alice = node("alice");
@@ -205,7 +263,7 @@ async fn nodes_find_each_other_by_multicast() {
     alice.node.start(config.clone()).await.unwrap();
     bob.node.start(config).await.unwrap();
     next_event(&mut alice_events, |event| {
-        matches!(event, Event::PeersChanged { count: 1 })
+        matches!(event, Event::PeersChanged { lan: 1, .. })
     })
     .await;
     assert_eq!(alice.node.status().unwrap().lan_problem, None);

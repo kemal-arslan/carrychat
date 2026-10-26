@@ -521,7 +521,14 @@ impl Engine {
         Ok(Settings {
             read_receipts: self.store.meta("read_receipts")?.as_deref() != Some(b"0".as_slice()),
             tor: self.store.meta("tor")?.as_deref() == Some(b"1".as_slice()),
+            bluetooth: self.store.meta("bluetooth")?.as_deref() != Some(b"0".as_slice()),
         })
+    }
+
+    /// Whether the node uses Bluetooth LE, from its next start.
+    pub fn set_bluetooth(&self, on: bool) -> Result<()> {
+        self.store
+            .set_meta("bluetooth", if on { b"1" } else { b"0" })
     }
 
     /// Whether the internet link should go over Tor, from its next start.

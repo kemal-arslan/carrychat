@@ -15,7 +15,7 @@ class MainActivity : TauriActivity() {
     super.onCreate(savedInstanceState)
     keepClearOfSystemBars(findViewById(android.R.id.content))
     attachScreen()
-    askToNotify()
+    askForPermissions()
     KervanService.start(this)
   }
 
@@ -31,13 +31,24 @@ class MainActivity : TauriActivity() {
    */
   private external fun attachScreen()
 
-  /** The service's notification, and message notifications, need this. */
-  private fun askToNotify() {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-      checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-    ) {
-      requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+  /**
+   * Notifications, for the service and for messages, and Bluetooth, for
+   * nearby nodes. The service picks Bluetooth up within seconds of a yes.
+   */
+  private fun askForPermissions() {
+    val wanted = mutableListOf<String>()
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      wanted += Manifest.permission.POST_NOTIFICATIONS
     }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      wanted += Manifest.permission.BLUETOOTH_SCAN
+      wanted += Manifest.permission.BLUETOOTH_ADVERTISE
+      wanted += Manifest.permission.BLUETOOTH_CONNECT
+    } else {
+      wanted += Manifest.permission.ACCESS_FINE_LOCATION
+    }
+    val missing = wanted.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+    if (missing.isNotEmpty()) requestPermissions(missing.toTypedArray(), 1)
   }
 
   /** Pads the page by the status bar, the navigation bar and the keyboard. */

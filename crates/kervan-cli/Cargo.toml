@@ -13,6 +13,6 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive", "env"] }
-kervan-node = { path = "../kervan-node" }
+kervan-node = { path = "../kervan-node", features = ["bluetooth"] }
 kervan-proto = { path = "../kervan-proto" }
 tokio = { version = "1", features = ["io-std", "io-util", "macros", "rt-multi-thread", "signal"] }

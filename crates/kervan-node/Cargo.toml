@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 arti-client = { version = "0.34", default-features = false, features = ["tokio", "native-tls", "compression"] }
+btleplug = { version = "0.11", optional = true }
 data-encoding = "2"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 hmac = "0.12"
@@ -25,6 +26,13 @@ thiserror = "2"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-tungstenite = { version = "0.30", features = ["native-tls"] }
 tor-rtcompat = { version = "0.34", default-features = false, features = ["tokio", "native-tls"] }
+
+uuid = { version = "1", optional = true }
+
+[features]
+# Bluetooth LE (§9.5) through the operating system's stack, where btleplug
+# supports it. Android has its own, in the app.
+bluetooth = ["dep:btleplug", "dep:uuid"]
 
 [dev-dependencies]
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }

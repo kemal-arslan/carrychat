@@ -51,6 +51,13 @@ export function StatusBar({ status, preview, onNetworkHelp, onConnect, onImport,
       }[internet];
   const internetTitle = tor?.state === "failed" ? tor.detail : (status?.internetRefusal ?? undefined);
 
+  const bluetooth = !status?.bluetoothOn ? "off" : status.bluetoothPeers > 0 ? "up" : "waiting";
+  const bluetoothLabel = {
+    off: t.bluetoothOff,
+    waiting: t.bluetoothWaiting,
+    up: t.bluetoothUp(status?.bluetoothPeers ?? 0),
+  }[bluetooth];
+
   return (
     <footer className="status">
       <span className={`link ${link}`} title={status?.lanProblem?.detail}>
@@ -65,6 +72,10 @@ export function StatusBar({ status, preview, onNetworkHelp, onConnect, onImport,
       <span className={`link ${internet}`} title={internetTitle}>
         <span className="dot" aria-hidden />
         {internetLabel}
+      </span>
+      <span className={`link ${bluetooth}`}>
+        <span className="dot" aria-hidden />
+        {bluetoothLabel}
       </span>
       {status && (
         <>

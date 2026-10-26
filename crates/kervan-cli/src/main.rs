@@ -96,6 +96,9 @@ enum Command {
         /// Reach the relays over Tor only, never directly.
         #[arg(long)]
         tor: bool,
+        /// Also connect to nearby phones over Bluetooth LE.
+        #[arg(long)]
+        bluetooth: bool,
         /// Send every line typed on standard input to this contact.
         #[arg(long)]
         chat: Option<String>,
@@ -318,6 +321,7 @@ async fn run(cli: Cli) -> AnyResult {
             no_internet,
             relays,
             tor,
+            bluetooth,
             chat,
         } => {
             let chat = chat.map(|name| find_contact(&node, &name)).transpose()?;
@@ -338,7 +342,7 @@ async fn run(cli: Cli) -> AnyResult {
                 }
                 config
             });
-            run_node(node, lan, internet, connect, chat).await?;
+            run_node(node, lan, internet, bluetooth, connect, chat).await?;
         }
     }
     Ok(())
@@ -348,6 +352,7 @@ async fn run_node(
     node: Node,
     lan: LanConfig,
     internet: Option<InternetConfig>,
+    bluetooth: bool,
     connect: Vec<SocketAddr>,
     chat: Option<ContactView>,
 ) -> AnyResult {
@@ -356,6 +361,12 @@ async fn run_node(
     if let Some(internet) = internet {
         println!("Connecting to {} relay(s).", internet.relays.len());
         node.start_internet(internet)?;
+    }
+    if bluetooth {
+        match node.start_bluetooth().await {
+            Ok(()) => println!("Looking for phones over Bluetooth."),
+            Err(error) => eprintln!("Bluetooth is off: {error}"),
+        }
     }
     println!(
         "{} is listening on port {port}. Ctrl-C stops.",
@@ -390,7 +401,9 @@ async fn run_node(
                 Ok(Event::MessageDelivered { contact_id, .. }) => {
                     println!("✓ delivered to {}", names(contact_id));
                 }
-                Ok(Event::PeersChanged { count }) => println!("· {count} node(s) nearby"),
+                Ok(Event::PeersChanged { lan, bluetooth }) => {
+                    println!("· {} node(s) nearby", lan + bluetooth)
+                }
                 Ok(Event::InternetChanged { relays }) => match node.status().ok().and_then(|status| status.internet_tor) {
                     Some(TorState::Starting) => println!("· starting Tor"),
                     Some(TorState::Failed { detail }) => eprintln!("! Tor did not start: {detail}"),

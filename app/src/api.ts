@@ -119,7 +119,7 @@ export type Message = {
   file: FileView | null;
 };
 
-export type Settings = { readReceipts: boolean; tor: boolean };
+export type Settings = { readReceipts: boolean; tor: boolean; bluetooth: boolean };
 
 /** How the internet link stands with Tor, when it goes over Tor. */
 export type TorState = { state: "starting" } | { state: "ready" } | { state: "failed"; detail: string };
@@ -131,6 +131,8 @@ export type Status = {
   lanPeers: number;
   lanPort: number | null;
   lanProblem: LanProblem | null;
+  bluetoothOn: boolean;
+  bluetoothPeers: number;
   internetOn: boolean;
   internetRelays: number;
   /** The last reason a relay gave for refusing an event. */
@@ -153,7 +155,7 @@ export type NodeEvent =
   | { type: "messageDelivered"; contactId: number; messageId: number }
   | { type: "messagesRead"; contactId: number; messageIds: number[] }
   | { type: "contactChanged"; contact: Contact }
-  | { type: "peersChanged"; count: number }
+  | { type: "peersChanged"; lan: number; bluetooth: number }
   | { type: "contactRequest"; contact: Contact }
   | { type: "localNetworkChanged"; problem: LanProblem | null }
   | { type: "internetChanged"; relays: number }
@@ -204,6 +206,8 @@ export interface Api {
   setReadReceipts(on: boolean): Promise<void>;
   /** Chooses Tor for the internet link; it applies after a restart. */
   setTor(on: boolean): Promise<void>;
+  /** Chooses whether the app uses Bluetooth; it applies after a restart. */
+  setBluetooth(on: boolean): Promise<void>;
   restart(): Promise<void>;
   status(): Promise<Status>;
   /** Asks where to save, then exports. Returns null if cancelled. */
@@ -323,6 +327,7 @@ function desktopApi(): Api {
     settings: () => call("settings"),
     setReadReceipts: (on) => call("set_read_receipts", { on }),
     setTor: (on) => call("set_tor", { on }),
+    setBluetooth: (on) => call("set_bluetooth", { on }),
     restart: () => call("restart"),
     status: () => call("status"),
     async exportFile() {
@@ -353,7 +358,7 @@ function previewApi(): Api {
   const listeners: ((event: NodeEvent) => void)[] = [];
   const emit = (event: NodeEvent) => listeners.forEach((listener) => listener(event));
   let profile: Profile | null = null;
-  let settings: Settings = { readReceipts: true, tor: false };
+  let settings: Settings = { readReceipts: true, tor: false, bluetooth: true };
   let nextId = 10;
   const contact = (id: number, name: string, fingerprint: string, request = false, secure = false): Contact => ({
     id,
@@ -729,6 +734,9 @@ function previewApi(): Api {
     async setTor(on) {
       settings = { ...settings, tor: on };
     },
+    async setBluetooth(on) {
+      settings = { ...settings, bluetooth: on };
+    },
     async restart() {
       location.reload();
     },
@@ -745,6 +753,8 @@ function previewApi(): Api {
         lanPeers: lanProblem ? 0 : 1,
         lanPort: 49333,
         lanProblem,
+        bluetoothOn: settings.bluetooth,
+        bluetoothPeers: settings.bluetooth ? 1 : 0,
         internetOn: true,
         internetRelays: 3,
         internetRefusal: null,

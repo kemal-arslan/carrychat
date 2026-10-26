@@ -245,6 +245,8 @@ export function SettingsDialog({
   // Tor as the link started with it, and as now chosen.
   const [torAtStart, setTorAtStart] = useState<boolean | null>(null);
   const [tor, setTor] = useState(false);
+  const [bluetoothAtStart, setBluetoothAtStart] = useState<boolean | null>(null);
+  const [bluetooth, setBluetooth] = useState(true);
   const [notifications, setNotifications] = useState(notificationsEnabled);
   const [confirmErase, setConfirmErase] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -256,6 +258,8 @@ export function SettingsDialog({
       setReadReceipts(settings.readReceipts);
       setTorAtStart(settings.tor);
       setTor(settings.tor);
+      setBluetoothAtStart(settings.bluetooth);
+      setBluetooth(settings.bluetooth);
     });
   }, []);
 
@@ -278,6 +282,14 @@ export function SettingsDialog({
     setTor(on);
     await api.setTor(on).catch((failure) => setError(errorText(failure)));
   }
+
+  async function toggleBluetooth(on: boolean) {
+    setBluetooth(on);
+    await api.setBluetooth(on).catch((failure) => setError(errorText(failure)));
+  }
+
+  const needsRestart =
+    (torAtStart !== null && tor !== torAtStart) || (bluetoothAtStart !== null && bluetooth !== bluetoothAtStart);
 
   function toggleNotifications(on: boolean) {
     setNotifications(on);
@@ -334,9 +346,19 @@ export function SettingsDialog({
         {t.torSetting}
       </label>
       <p className="hint">{t.torHint}</p>
-      {torAtStart !== null && tor !== torAtStart && (
+      <label className="toggle">
+        <input
+          type="checkbox"
+          checked={bluetooth}
+          disabled={bluetoothAtStart === null}
+          onChange={(event) => toggleBluetooth(event.target.checked)}
+        />
+        {t.bluetoothSetting}
+      </label>
+      <p className="hint">{t.bluetoothHint}</p>
+      {needsRestart && (
         <div className="inline-field">
-          <p className="hint">{t.torRestart}</p>
+          <p className="hint">{t.restartToApply}</p>
           <button className="primary" type="button" onClick={() => api.restart()}>
             {t.restartNow}
           </button>

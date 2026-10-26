@@ -24,6 +24,7 @@ import androidx.core.content.ContextCompat
  */
 class KervanService : Service() {
   private var multicastLock: WifiManager.MulticastLock? = null
+  private var bluetooth: BleLink? = null
 
   override fun onCreate() {
     super.onCreate()
@@ -35,6 +36,7 @@ class KervanService : Service() {
       setReferenceCounted(false)
       acquire()
     }
+    bluetooth = BleLink(this).also { it.start() }
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -45,17 +47,35 @@ class KervanService : Service() {
       Process.killProcess(Process.myPid())
       return START_NOT_STICKY
     }
-    val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-      ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+      try {
+        ServiceCompat.startForeground(
+          this,
+          NOTIFICATION_ID,
+          notification(),
+          ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING or
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+        )
+      } catch (error: SecurityException) {
+        // Connected-device use needs a permission Android may not count as
+        // granted yet; messaging alone still keeps the process running.
+        ServiceCompat.startForeground(
+          this,
+          NOTIFICATION_ID,
+          notification(),
+          ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING,
+        )
+      }
     } else {
-      0
+      ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(), 0)
     }
-    ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(), type)
     // Started again without the app, the process would have no node in it.
     return START_NOT_STICKY
   }
 
   override fun onDestroy() {
+    bluetooth?.stop()
+    bluetooth = null
     multicastLock?.release()
     multicastLock = null
     super.onDestroy()

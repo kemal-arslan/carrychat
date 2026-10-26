@@ -8,6 +8,9 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("{0}")]
     Invalid(&'static str),
+    #[cfg(feature = "bluetooth")]
+    #[error("Bluetooth: {0}")]
+    Bluetooth(#[from] btleplug::Error),
 }
 
 pub type Result<T> = core::result::Result<T, Error>;

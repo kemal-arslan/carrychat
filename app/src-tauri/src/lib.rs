@@ -38,17 +38,19 @@ fn text(error: impl ToString) -> String {
     error.to_string()
 }
 
-/// Starts the local network and internet links and forwards node events to
-/// the window.
+/// Starts the local network, internet and Bluetooth links and forwards node
+/// events to the window.
 fn launch(app: &AppHandle, node: &Node, dir: &Path) {
+    let settings = node.settings().ok();
     // Tor keeps its state next to the node's, and is used if chosen.
     let internet = InternetConfig {
-        tor: node
-            .settings()
-            .is_ok_and(|settings| settings.tor)
+        tor: settings
+            .as_ref()
+            .is_some_and(|settings| settings.tor)
             .then(|| dir.join("tor")),
         ..InternetConfig::default()
     };
+    let bluetooth = settings.is_none_or(|settings| settings.bluetooth);
     let mut events = node.subscribe();
     let handle = app.clone();
     #[cfg(target_os = "android")]
@@ -72,6 +74,15 @@ fn launch(app: &AppHandle, node: &Node, dir: &Path) {
         if let Err(error) = node.start_internet(internet) {
             let _ = handle.emit("kervan-error", format!("Internet link is off: {error}"));
         }
+        // On Android the service runs Bluetooth, and asks the node for it.
+        #[cfg(not(target_os = "android"))]
+        if bluetooth {
+            if let Err(error) = node.start_bluetooth().await {
+                let _ = handle.emit("kervan-error", format!("Bluetooth is off: {error}"));
+            }
+        }
+        #[cfg(target_os = "android")]
+        android::set_bluetooth(&node, bluetooth);
     });
 }
 
@@ -401,6 +412,12 @@ fn set_tor(state: State<'_, AppState>, on: bool) -> CommandResult<()> {
     state.node()?.set_tor(on).map_err(text)
 }
 
+/// Chooses whether the app uses Bluetooth, from its next start.
+#[tauri::command]
+fn set_bluetooth(state: State<'_, AppState>, on: bool) -> CommandResult<()> {
+    state.node()?.set_bluetooth(on).map_err(text)
+}
+
 /// The page's notification setting and language, for the notifications
 /// Android shows while the page is closed.
 #[tauri::command]
@@ -523,6 +540,7 @@ pub fn run() {
             file_data,
             save_file,
             set_tor,
+            set_bluetooth,
             set_notifications,
             restart,
             status,

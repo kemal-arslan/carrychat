@@ -2,12 +2,15 @@
 //! pool on disk, plus the links that move bundles. Apps (the desktop app, the
 //! CLI) talk to a [`Node`] and listen to its [`Event`]s.
 
+#[cfg(feature = "bluetooth")]
+mod bluetooth;
 pub mod engine;
 mod error;
 pub mod file;
 pub mod internet;
 pub mod lan;
 pub mod store;
+mod sync;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -22,6 +25,7 @@ pub use crate::error::{Error, Result};
 pub use crate::internet::{InternetConfig, TorState};
 pub use crate::lan::{LanConfig, LanProblem};
 use crate::store::Store;
+pub use crate::sync::Link;
 
 const DATABASE_FILE: &str = "kervan.db";
 
@@ -188,6 +192,8 @@ pub struct Settings {
     /// Whether the internet link goes over Tor. It takes effect when the
     /// link starts.
     pub tor: bool,
+    /// Whether the node uses Bluetooth LE. It takes effect when the app starts.
+    pub bluetooth: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -197,6 +203,10 @@ pub struct Status {
     pub lan_port: Option<u16>,
     /// Why the local network link is not working, if it is not.
     pub lan_problem: Option<LanProblem>,
+    /// Whether the node is set to use Bluetooth LE.
+    pub bluetooth_on: bool,
+    /// Nodes connected over Bluetooth LE right now.
+    pub bluetooth_peers: usize,
     /// Internet relays connected right now.
     pub internet_relays: usize,
     /// Whether the internet link was started.
@@ -228,7 +238,7 @@ pub enum Event {
     #[serde(rename_all = "camelCase")]
     MessageDelivered { contact_id: i64, message_id: i64 },
     #[serde(rename_all = "camelCase")]
-    PeersChanged { count: usize },
+    PeersChanged { lan: usize, bluetooth: usize },
     /// The contact read some of our messages.
     #[serde(rename_all = "camelCase")]
     MessagesRead {
@@ -269,6 +279,7 @@ pub(crate) struct Shared {
     engine: Mutex<Engine>,
     events: broadcast::Sender<Event>,
     pub(crate) lan: lan::Lan,
+    pub(crate) peers: sync::Peers,
     pub(crate) internet: internet::Internet,
     internet_on: std::sync::atomic::AtomicBool,
 }
@@ -296,6 +307,7 @@ impl Node {
                 engine: Mutex::new(engine),
                 events: broadcast::channel(256).0,
                 lan: lan::Lan::new(),
+                peers: sync::Peers::new(),
                 internet: internet::Internet::new(),
                 internet_on: std::sync::atomic::AtomicBool::new(false),
             }),
@@ -356,6 +368,11 @@ impl Node {
         self.shared.engine().set_tor(on)
     }
 
+    /// Chooses whether the node uses Bluetooth LE from its next start.
+    pub fn set_bluetooth(&self, on: bool) -> Result<()> {
+        self.shared.engine().set_bluetooth(on)
+    }
+
     /// Accepts a request: its sender becomes a contact.
     pub fn accept_contact(&self, contact_id: i64) -> Result<ContactView> {
         let contact = self
@@ -396,7 +413,7 @@ impl Node {
             };
             (message, frame, tag)
         };
-        self.shared.lan.broadcast(&frame.to_bytes(), None);
+        self.shared.peers.broadcast(&frame.to_bytes(), None);
         self.shared.internet.post_bundle(&frame, &tag);
         self.shared.internet.renew_subscription();
         self.shared.internet.probe();
@@ -578,9 +595,11 @@ impl Node {
     pub fn status(&self) -> Result<Status> {
         let (outbox, carried) = self.shared.engine().counts()?;
         Ok(Status {
-            lan_peers: self.shared.lan.peer_count(),
+            lan_peers: self.shared.peers.count(Link::Lan),
             lan_port: self.shared.lan.port(),
             lan_problem: self.shared.lan.problem(),
+            bluetooth_on: self.shared.engine().settings()?.bluetooth,
+            bluetooth_peers: self.shared.peers.count(Link::Bluetooth),
             internet_relays: self.shared.internet.connected(),
             internet_on: self
                 .shared
@@ -670,6 +689,41 @@ impl Node {
     pub async fn connect(&self, addr: std::net::SocketAddr) -> Result<()> {
         lan::dial(&self.shared, addr, None).await
     }
+
+    /// Starts looking for nearby nodes over Bluetooth LE and connecting to
+    /// them (§9.5), where btleplug supports it.
+    #[cfg(feature = "bluetooth")]
+    pub async fn start_bluetooth(&self) -> Result<()> {
+        bluetooth::start(&self.shared).await
+    }
+
+    /// The id this run of the node goes by on nearby links, for platform
+    /// code that advertises the node over Bluetooth LE (§9.5).
+    pub fn session(&self) -> u64 {
+        self.shared.peers.session()
+    }
+
+    /// Whether to connect to a node seen nearby with this session id. A yes
+    /// counts as a connection in progress, which `sync_over` ends, or
+    /// `dial_ended` if the connection could not be made.
+    pub fn should_connect(&self, peer: u64) -> bool {
+        self.shared.peers.should_dial(peer, false)
+    }
+
+    pub fn dial_ended(&self, peer: u64) {
+        self.shared.peers.dial_ended(peer);
+    }
+
+    /// Syncs over a connection that platform code opened, such as a
+    /// Bluetooth LE connection on Android, until it ends. `dialed` is the
+    /// session id of the node this side connected to, if it connected.
+    pub async fn sync_over<R, W>(&self, link: Link, reader: R, writer: W, dialed: Option<u64>)
+    where
+        R: tokio::io::AsyncRead + Unpin + Send + 'static,
+        W: tokio::io::AsyncWrite + Unpin + Send + 'static,
+    {
+        sync::run(self.shared.clone(), link, reader, writer, dialed).await;
+    }
 }
 
 impl Shared {
@@ -694,7 +748,7 @@ impl Shared {
                 Frame::Bundle(_) | Frame::Chunk(_) => from,
                 _ => None,
             };
-            self.lan.broadcast(&frame.to_bytes(), except);
+            self.peers.broadcast(&frame.to_bytes(), except);
         }
         self.internet.post_handled(&handled);
         // A bundle posted as it arrives need not go up again on reconnecting.
@@ -731,7 +785,7 @@ impl Shared {
     /// Sends our new frames, a file's offer and chunks, on every link.
     fn send_own_frames(&self, frames: &[(Frame, kervan_proto::pair::RecipientTag)]) {
         for (frame, tag) in frames {
-            self.lan.broadcast(&frame.to_bytes(), None);
+            self.peers.broadcast(&frame.to_bytes(), None);
             self.internet.post_bundle(frame, tag);
         }
         self.internet.probe();
@@ -742,7 +796,7 @@ impl Shared {
         let Frame::Bundle(bundle) = frame else {
             unreachable!("sending makes a bundle");
         };
-        self.lan.broadcast(&frame.to_bytes(), None);
+        self.peers.broadcast(&frame.to_bytes(), None);
         self.internet.post_bundle(frame, &bundle.tag);
         self.internet.probe();
     }
@@ -750,7 +804,7 @@ impl Shared {
     /// Sends our own new bundles on every link that is up.
     fn send_own(&self, frames: &[(Frame, kervan_proto::pair::RecipientTag)]) {
         for (frame, tag) in frames {
-            self.lan.broadcast(&frame.to_bytes(), None);
+            self.peers.broadcast(&frame.to_bytes(), None);
             self.internet.post_bundle(frame, tag);
         }
         if !frames.is_empty() {

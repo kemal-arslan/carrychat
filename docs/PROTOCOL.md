@@ -373,7 +373,7 @@ Implemented in `crates/kervan-node/src/lan.rs`.
 
 The beacon carries no identity. On hearing a beacon from a node it is not connected to, the node with the smaller session id dials. The other node dials too after three beacons without a connection, in case its own beacons do not get through.
 
-**Sync.** Over TCP, every frame is prefixed with its `u16` length. Besides the frames of §7, three control frames exist:
+**Sync.** Implemented in `crates/kervan-node/src/sync.rs`, and the same over Bluetooth LE (§9.5). Over TCP, every frame is prefixed with its `u16` length. Besides the frames of §7, three control frames exist:
 
 | Type | Layout |
 | --- | --- |
@@ -381,7 +381,7 @@ The beacon carries no identity. On hearing a beacon from a node it is not connec
 | `0x11` WANT | `type \|\| count (u16) \|\| bundle_id × count` |
 | `0x12` HELLO | `type \|\| session id (8)` |
 
-Both sides send HELLO first. A second connection between the same two nodes is closed. Then each side sends HAVE with the ids of the bundles it can pass on, and every tombstone it knows. The other side answers with WANT for the ids it has never seen, and receives those bundles. After that, new bundles and tombstones are pushed as they appear. An empty HAVE every 15 seconds keeps the connection alive, and a connection silent for 45 seconds is closed.
+Both sides send HELLO first. A second connection between the same two nodes, over any link, is closed. Then each side sends HAVE with the ids of the bundles it can pass on, and every tombstone it knows. The other side answers with WANT for the ids it has never seen, and receives those bundles. After that, new bundles and tombstones are pushed as they appear. An empty HAVE every 15 seconds keeps the connection alive, and a connection silent for 45 seconds is closed.
 
 ### 9.2 LoRa via Meshtastic
 
@@ -417,6 +417,17 @@ The default relays are `wss://relay.damus.io`, `wss://nos.lol` and `wss://relay.
 
 Implemented in `crates/kervan-node/src/file.rs`, with the extension `.kervan`. A file is `"KRVN" || 0x00 || frames`, each frame prefixed with its `u16` length. Exporting writes the store's bundles and tombstones. Importing feeds every frame into the store, exactly as if it had arrived over any other link.
 
+### 9.5 Bluetooth LE
+
+Implemented in `crates/kervan-node/src/bluetooth.rs` for desktops, through btleplug, and in the Android app (`BleLink.kt`), which hands the bytes of each connection to the node.
+
+- **Advertisement.** A node advertises the service `4b52564e-a0c5-4a3e-9b31-6f2d8e7c1a01`. Its scan response carries, as service data for that uuid, the node's 8-byte session id, the one of its local network beacons (§9.1). It advertises no name.
+- **Stream.** The service has one characteristic, `4b52564e-a0c5-4a3e-9b31-6f2d8e7c1a02`, with write, write without response and indicate. The node that connects (the GATT client) writes to it with response, and the node it connected to (the GATT server) sends indications on it, which makes a byte stream in each direction. Each write or indication carries up to MTU − 3 bytes of the stream, at most 512, and the next waits until the other side confirms the last. With more in flight, notifications filled a phone's Bluetooth queue until it could not answer the other side's writes, and the link dropped when an answer was 30 seconds late (the ATT timeout). A write longer than the MTU arrives as prepared writes and joins the stream when executed. Subscribing to the indications opens the stream; disconnecting ends it.
+- **Sync.** Over the stream runs the sync of §9.1: frames prefixed with their `u16` length, HELLO, HAVE, WANT, then pushes as they appear. A node already connected over the local network is not connected again over Bluetooth, and a connection to it that is made anyway closes after HELLO.
+- **Who connects.** As on the local network, the node with the smaller session id connects, and the other after three sightings without a connection. A node that cannot advertise connects regardless. Desktops cannot advertise through btleplug, so they connect to phones, and reach other desktops over the local network.
+- **Desktops** write with response, 512 bytes at a time: macOS drops writes without response when its queue is full, which would break the stream. Since a scan reports each device once, they look at the devices seen so far every 5 seconds and connect to the Kervan nodes among them that are not connected.
+- **Android** runs the link in the foreground service that keeps the node alive, so it works while the app is closed. It asks for the Bluetooth permissions with `neverForLocation`.
+
 ## 10. Security
 
 **v0 provides:**
@@ -445,8 +456,7 @@ Implemented in `crates/kervan-node/src/file.rs`, with the extension `.kervan`. A
 2. Downlink for nodes without internet access through a gateway, without telling the gateway who they are.
 3. Padding for LoRa frames: a smaller size leak against more airtime.
 4. Exchanging contacts at a distance.
-5. A Bluetooth link between nearby devices.
-6. HF radio. Amateur bands forbid encryption that hides a message's meaning, so HF would need a separate signed but unencrypted message kind, limited to messages the user explicitly marks as public.
+5. HF radio. Amateur bands forbid encryption that hides a message's meaning, so HF would need a separate signed but unencrypted message kind, limited to messages the user explicitly marks as public.
 
 ## 12. Constants
 
@@ -470,3 +480,5 @@ Implemented in `crates/kervan-node/src/file.rs`, with the extension `.kervan`. A
 | Meshtastic MTU | 233 bytes |
 | Most fragments per bundle | 32 |
 | Reassembly timeout | 600 s |
+| Bluetooth LE service | `4b52564e-a0c5-4a3e-9b31-6f2d8e7c1a01` |
+| Bluetooth LE stream characteristic | `4b52564e-a0c5-4a3e-9b31-6f2d8e7c1a02` |

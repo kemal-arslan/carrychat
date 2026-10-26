@@ -1,12 +1,12 @@
 # Kervan
 
-**Offline-first, end-to-end encrypted messaging between computers over any link: local network, LoRa radio, internet or a file on a USB stick.**
+**Offline-first, end-to-end encrypted messaging between phones and computers over any link: local network, Bluetooth, LoRa radio, internet or a file on a USB stick.**
 
 Kervan is a store-and-forward messenger. Each message is sealed into a bundle of at most 4 KiB, kept until a link towards the recipient exists, and passed from computer to computer on the way. Computers that carry a bundle can neither read it nor tell who sent it or who it is for. The internet is one link among several, not a requirement.
 
 [![CI](https://github.com/kemal-arslan/kervan/actions/workflows/ci.yml/badge.svg)](https://github.com/kemal-arslan/kervan/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/kemalarslan)
 
-> **Status: early.** Kervan works today over the local network, the internet (Nostr relays) and by file, from a desktop app or the command line. The LoRa radio link comes next. Nothing is packaged yet. See the [roadmap](#roadmap).
+> **Status: early.** Kervan works today over the local network, Bluetooth, the internet (Nostr relays) and by file, from a desktop app, an Android app or the command line. The LoRa radio link comes next. Nothing is packaged yet. See the [roadmap](#roadmap).
 
 ## How it works
 
@@ -15,6 +15,7 @@ Kervan sends each message over the best link it has, and keeps it until one appe
 | Link | Reach | Used when |
 | --- | --- | --- |
 | Local network | a building or a campus | the router works but the internet doesn't |
+| Bluetooth LE | a few dozen metres, further from phone to phone | there is no network at all |
 | LoRa radio ([Meshtastic](https://meshtastic.org)) | kilometres per hop, further over community relays | there is no internet at all |
 | Internet ([Nostr](https://nostr.com) relays) | anywhere | normal days, or whenever one computer on the path is online |
 | File on a USB stick | as far as someone carries it | nothing else reaches |
@@ -61,6 +62,7 @@ kervan send-file Deniz photo.jpg             # a photo or voice message, up to 1
 kervan save-file 3 photo.jpg                 # a file that arrived, by the number in the log
 kervan run                                   # deliver, receive and relay (local network and internet)
 kervan run --tor                             # the same, with the internet only over Tor
+kervan run --bluetooth                       # also reach nearby phones over Bluetooth
 kervan export messages.kervan                # or carry everything on a USB stick
 kervan group create Mahalle Deniz Mehmet     # you become the group's admin
 kervan group send Mahalle "Su dağıtımı okulun önünde."
@@ -81,7 +83,7 @@ kervan erase --yes                           # delete identity, contacts and mes
 2. **Local network link, message store, desktop app, command line, USB export and import** (done)
 3. LoRa link through a Meshtastic radio over USB
 4. **Internet link over Nostr** (done). Computers with internet also pass on what they carry for computers without it. Fetching for those computers is still open.
-5. **Android app** (done). Bluetooth link, iOS app, HF radio
+5. **Android app and Bluetooth link** (done). iOS app, HF radio
 
 ## Build
 

@@ -20,7 +20,8 @@
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
 
-# The Rust side finds the service by name and calls notifyMessage over JNI,
+# The Rust side finds these classes by name and calls into them over JNI,
 # which R8 cannot see.
 -keep class dev.kemalarslan.kervan.KervanService { *; }
 -keep class dev.kemalarslan.kervan.KervanService$Companion { *; }
+-keep class dev.kemalarslan.kervan.Ble { *; }
