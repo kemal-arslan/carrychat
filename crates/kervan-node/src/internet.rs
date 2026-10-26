@@ -526,12 +526,15 @@ async fn run_relay<S>(
 fn greeting(shared: &Shared) -> (Vec<String>, Vec<String>) {
     let mut messages: Vec<String> = subscription(shared).into_iter().collect();
     let mut chunks = Vec::new();
-    let engine = shared.engine();
+    let mut engine = shared.engine();
     let secret = shared.internet.secret.get().copied();
     let Some(secret) = secret else {
         return (messages, chunks);
     };
-    for (frame, tag) in engine.outbox(now()).unwrap_or_default() {
+    let mut frames = engine.outbox(now()).unwrap_or_default();
+    // What it carries for others and could not post while offline.
+    frames.extend(engine.take_uploads(now()).unwrap_or_default());
+    for (frame, tag) in frames {
         if let Some(event) = bundle_event(&secret, &frame, &tag) {
             match frame {
                 Frame::Chunk(_) => chunks.push(event),
@@ -590,7 +593,9 @@ fn receive(shared: &Shared, text: &str) {
                 return;
             };
             // Anyone can post to a relay: take only what is for us (§9.3).
-            let handled = shared.engine().handle_with(frame, now(), false);
+            let handled = shared
+                .engine()
+                .atomically(|engine| engine.handle_with(frame, now(), false));
             if let Ok(handled) = handled {
                 shared.dispatch(handled, None);
             }

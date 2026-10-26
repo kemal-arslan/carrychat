@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { maxMessageBytes, onePacketBytes, radioPackets, utf8Length } from "./format";
 import { useI18n } from "./i18n";
-import { MAX_RECORDING_SECS, canRecord, shrinkPhoto, startRecording } from "./media";
+import { MAX_RECORDING_SECS, canRecord, shrinkPhoto, startRecording, type Recorder } from "./media";
 
 type Props = {
   placeholder: string;
@@ -14,7 +14,7 @@ type Props = {
   onSendFile?: (mime: string, bytes: Uint8Array) => Promise<void>;
 };
 
-type Recording = { stop: () => Promise<{ mime: string; bytes: Uint8Array }>; started: number };
+type Recording = Recorder & { started: number };
 
 export function Composer({ placeholder, overhead, conversation, onSend, onSendFile }: Props) {
   const { t } = useI18n();
@@ -24,10 +24,20 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
   const [recording, setRecording] = useState<Recording | null>(null);
   const [seconds, setSeconds] = useState(0);
   const photoInput = useRef<HTMLInputElement>(null);
+  const recordingRef = useRef<Recording | null>(null);
+  recordingRef.current = recording;
 
+  // A recording belongs to the conversation it started in: moving to another
+  // one, or leaving, throws it away and turns the microphone off, so it can
+  // never go to someone else.
   useEffect(() => {
     setDraft("");
     setError(null);
+    return () => {
+      recordingRef.current?.cancel();
+      recordingRef.current = null;
+      setRecording(null);
+    };
   }, [conversation]);
 
   // The timer while recording, which also stops a recording that runs too long.

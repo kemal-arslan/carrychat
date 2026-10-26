@@ -309,3 +309,35 @@ async fn sending_checks_the_connection_without_waiting_for_the_keepalive() {
     assert_eq!(bob.node.messages(contact.id).unwrap()[0].body, "Hemen git");
     assert!(started.elapsed() < Duration::from_secs(15));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_carrier_uploads_what_it_took_while_offline() {
+    let (url, _relay, _) = start_relay().await;
+    let alice = node("alice");
+    let bob = node("bob");
+    let carol = node("carol");
+    let alice_channel = alice.node.join_channel("mahalle", "", "Ayşe").unwrap();
+    alice
+        .node
+        .send_post(alice_channel.id, "Okulun önünde su var")
+        .unwrap();
+
+    // Alice's post reaches Carol on a USB stick while Carol has no internet.
+    let file = alice._dir.path().join("posts.kervan");
+    alice.node.export_file(&file).unwrap();
+    assert_eq!(carol.node.import_file(&file).unwrap().carried, 1);
+
+    // Then Carol gets online, and Bob, who is in the channel, reads the post.
+    bob.node.join_channel("mahalle", "", "Bora").unwrap();
+    let mut bob_events = bob.node.subscribe();
+    bob.node.start_internet(config(&url)).unwrap();
+    carol.node.start_internet(config(&url)).unwrap();
+    let Event::PostReceived { post } = next_event(&mut bob_events, |event| {
+        matches!(event, Event::PostReceived { .. })
+    })
+    .await
+    else {
+        unreachable!()
+    };
+    assert_eq!(post.body, "Okulun önünde su var");
+}

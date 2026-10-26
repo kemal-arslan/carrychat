@@ -176,6 +176,8 @@ const MIGRATIONS: &[&str] = &[
      ALTER TABLE messages ADD COLUMN file_ref INTEGER;
      ALTER TABLE group_messages ADD COLUMN file_ref INTEGER;
      ALTER TABLE channel_posts ADD COLUMN file_ref INTEGER;",
+    // Whether a carried bundle has gone up to the internet relays.
+    "ALTER TABLE bundles ADD COLUMN uploaded INTEGER NOT NULL DEFAULT 0;",
 ];
 
 /// Skipped keys kept per contact, at most; the oldest go first.
@@ -220,6 +222,40 @@ impl Store {
             ))?;
         }
         Ok(Self { conn })
+    }
+
+    /// Starts a change that is kept only if [`Store::commit`] follows, and
+    /// undone by [`Store::rollback`]. Changes nest.
+    pub fn begin(&self) -> Result<()> {
+        self.conn.execute_batch("SAVEPOINT change")?;
+        Ok(())
+    }
+
+    pub fn commit(&self) -> Result<()> {
+        self.conn.execute_batch("RELEASE change")?;
+        Ok(())
+    }
+
+    pub fn rollback(&self) {
+        let _ = self
+            .conn
+            .execute_batch("ROLLBACK TO change; RELEASE change");
+    }
+
+    /// Runs `write` so that it is kept whole or not at all, inside any change
+    /// already under way.
+    pub(crate) fn whole<T>(&self, write: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+        self.begin()?;
+        match write(&self.conn) {
+            Ok(value) => {
+                self.commit()?;
+                Ok(value)
+            }
+            Err(error) => {
+                self.rollback();
+                Err(error)
+            }
+        }
     }
 
     pub fn meta(&self, key: &str) -> Result<Option<Vec<u8>>> {
@@ -370,22 +406,23 @@ impl Store {
         if keys.is_empty() {
             return Ok(());
         }
-        let tx = self.conn.unchecked_transaction()?;
-        for key in keys {
-            tx.execute(
-                "INSERT OR REPLACE INTO skipped_keys (contact_id, ratchet, n, key, stored_at)
+        self.whole(|tx| {
+            for key in keys {
+                tx.execute(
+                    "INSERT OR REPLACE INTO skipped_keys (contact_id, ratchet, n, key, stored_at)
                  VALUES (?, ?, ?, ?, ?)",
-                params![contact_id, key.ratchet, key.n, key.key, now],
-            )?;
-        }
-        tx.execute(
-            "DELETE FROM skipped_keys WHERE contact_id = ?1 AND rowid NOT IN (
+                    params![contact_id, key.ratchet, key.n, key.key, now],
+                )?;
+            }
+            tx.execute(
+                "DELETE FROM skipped_keys WHERE contact_id = ?1 AND rowid NOT IN (
                  SELECT rowid FROM skipped_keys WHERE contact_id = ?1
                  ORDER BY stored_at DESC, n DESC LIMIT ?2
              )",
-            params![contact_id, MAX_SKIPPED_KEYS],
-        )?;
-        tx.commit()?;
+                params![contact_id, MAX_SKIPPED_KEYS],
+            )?;
+            Ok(())
+        })?;
         Ok(())
     }
 
@@ -542,6 +579,21 @@ impl Store {
         if !own {
             self.enforce_quota(chunk)?;
         }
+        Ok(())
+    }
+
+    /// Carried bundles not yet given to the internet relays, which may still
+    /// travel on.
+    pub fn bundles_to_upload(&self, now: u32) -> Result<Vec<Bundle>> {
+        self.bundles_where(
+            "expires_at > ?1 AND own = 0 AND uploaded = 0 AND hop_limit > 0",
+            now,
+        )
+    }
+
+    pub fn mark_uploaded(&self, id: BundleId) -> Result<()> {
+        self.conn
+            .execute("UPDATE bundles SET uploaded = 1 WHERE id = ?", [id.0])?;
         Ok(())
     }
 

@@ -37,6 +37,9 @@ pub const OVERHEAD: usize =
     BUNDLE_HEADER_LEN + HEADER_LEN + MESSAGE_HEADER_LEN + AEAD_TAG_LEN + SIGNATURE_LEN;
 /// Message keys a receiver derives ahead for messages that have not arrived.
 pub const MAX_SKIP: u32 = 1000;
+/// How far ahead of what it holds a receiver derives a chain for one message.
+/// It keeps the keys of only the last [`MAX_SKIP`] it passes.
+pub const MAX_JUMP: u32 = 100_000;
 pub const DISTRIBUTION_LEN: usize = GROUP_ID_LEN + 32 + 4 + 32 + 32;
 
 const SALT: &[u8] = b"kervan/v1/group";
@@ -426,12 +429,15 @@ impl ReceiverChain {
                     // Used already, or from before we got the chain.
                     return Err(Error::Decrypt);
                 }
-                if iteration - next.iteration > MAX_SKIP {
+                if iteration - next.iteration > MAX_JUMP {
                     return Err(Error::Invalid("too many skipped messages"));
                 }
+                let keep_from = iteration.saturating_sub(MAX_SKIP);
                 while next.iteration < iteration {
                     let (chain, key) = kdf_ck(&next.chain);
-                    new_skipped.push((next.iteration, key));
+                    if next.iteration >= keep_from {
+                        new_skipped.push((next.iteration, key));
+                    }
                     next.chain = chain;
                     next.iteration += 1;
                 }
@@ -695,10 +701,23 @@ mod tests {
     }
 
     #[test]
-    fn too_many_skipped_messages_are_refused() {
+    fn a_long_gap_opens_and_keeps_only_recent_keys() {
         let mut alice = SenderChain::generate(&mut OsRng);
         let mut bob = Member::of(&alice);
-        alice.iteration += MAX_SKIP + 1;
+        let lost: Vec<Bundle> = (0..1005)
+            .map(|n| send(&mut alice, &format!("{n}")))
+            .collect();
+        assert_eq!(bob.receive(&send(&mut alice, "sonra")).unwrap(), "sonra");
+        assert_eq!(bob.skipped.len(), MAX_SKIP as usize);
+        assert_eq!(bob.receive(&lost[1004]).unwrap(), "1004");
+        assert!(bob.receive(&lost[0]).is_err());
+    }
+
+    #[test]
+    fn a_jump_too_far_ahead_is_refused() {
+        let mut alice = SenderChain::generate(&mut OsRng);
+        let mut bob = Member::of(&alice);
+        alice.iteration += MAX_JUMP + 1;
         let far = send(&mut alice, "uzak");
         assert!(bob.receive(&far).is_err());
     }

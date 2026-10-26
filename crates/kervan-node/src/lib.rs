@@ -311,7 +311,10 @@ impl Node {
     }
 
     pub fn add_contact(&self, card_text: &str) -> Result<ContactView> {
-        let (contact, opened) = self.shared.engine().add_contact(card_text, now())?;
+        let (contact, opened) = self
+            .shared
+            .engine()
+            .atomically(|engine| engine.add_contact(card_text, now()))?;
         for handled in opened {
             self.shared.dispatch(handled, None);
         }
@@ -322,14 +325,20 @@ impl Node {
     /// Marks a contact's messages read and, unless read receipts are off,
     /// tells them.
     pub fn mark_read(&self, contact_id: i64) -> Result<()> {
-        let receipts = self.shared.engine().mark_read(contact_id, now())?;
+        let receipts = self
+            .shared
+            .engine()
+            .atomically(|engine| engine.mark_read(contact_id, now()))?;
         self.shared.send_own(&receipts);
         Ok(())
     }
 
     /// Changes our name and sends the new card to our contacts.
     pub fn rename(&self, name: &str) -> Result<Profile> {
-        let (profile, updates) = self.shared.engine().rename(name, now())?;
+        let (profile, updates) = self
+            .shared
+            .engine()
+            .atomically(|engine| engine.rename(name, now()))?;
         self.shared.send_own(&updates);
         Ok(profile)
     }
@@ -349,14 +358,19 @@ impl Node {
 
     /// Accepts a request: its sender becomes a contact.
     pub fn accept_contact(&self, contact_id: i64) -> Result<ContactView> {
-        let contact = self.shared.engine().accept_contact(contact_id)?;
+        let contact = self
+            .shared
+            .engine()
+            .atomically(|engine| engine.accept_contact(contact_id))?;
         self.shared.internet.renew_subscription();
         Ok(contact)
     }
 
     /// Declines a request and ignores its sender from now on.
     pub fn decline_contact(&self, contact_id: i64) -> Result<()> {
-        self.shared.engine().decline_contact(contact_id)?;
+        self.shared
+            .engine()
+            .atomically(|engine| engine.decline_contact(contact_id))?;
         self.shared.internet.renew_subscription();
         Ok(())
     }
@@ -374,7 +388,8 @@ impl Node {
     pub fn send_text(&self, contact_id: i64, text: &str) -> Result<MessageView> {
         let (message, frame, tag) = {
             let mut engine = self.shared.engine();
-            let (message, frame) = engine.send_text(contact_id, text, now())?;
+            let (message, frame) =
+                engine.atomically(|engine| engine.send_text(contact_id, text, now()))?;
             let tag = match &frame {
                 Frame::Bundle(bundle) => engine.publish_tag(bundle)?,
                 _ => unreachable!("sending makes a bundle"),
@@ -401,7 +416,7 @@ impl Node {
         let group = self
             .shared
             .engine()
-            .create_group(name, contact_ids, now())?;
+            .atomically(|engine| engine.create_group(name, contact_ids, now()))?;
         self.shared.flush_own();
         Ok(group)
     }
@@ -410,7 +425,7 @@ impl Node {
         let group = self
             .shared
             .engine()
-            .add_group_member(group_id, contact_id, now())?;
+            .atomically(|engine| engine.add_group_member(group_id, contact_id, now()))?;
         self.shared.flush_own();
         Ok(group)
     }
@@ -420,13 +435,16 @@ impl Node {
         let group = self
             .shared
             .engine()
-            .remove_group_member(group_id, fingerprint, now())?;
+            .atomically(|engine| engine.remove_group_member(group_id, fingerprint, now()))?;
         self.shared.flush_own();
         Ok(group)
     }
 
     pub fn leave_group(&self, group_id: i64) -> Result<GroupView> {
-        let group = self.shared.engine().leave_group(group_id, now())?;
+        let group = self
+            .shared
+            .engine()
+            .atomically(|engine| engine.leave_group(group_id, now()))?;
         self.shared.flush_own();
         Ok(group)
     }
@@ -436,7 +454,7 @@ impl Node {
         let (message, frame) = self
             .shared
             .engine()
-            .send_group_text(group_id, text, now())?;
+            .atomically(|engine| engine.send_group_text(group_id, text, now()))?;
         self.shared.send_own_post(&frame);
         Ok(message)
     }
@@ -454,7 +472,7 @@ impl Node {
         let (channel, opened) = self
             .shared
             .engine()
-            .join_channel(name, password, nick, now())?;
+            .atomically(|engine| engine.join_channel(name, password, nick, now()))?;
         for handled in opened {
             self.shared.dispatch(handled, None);
         }
@@ -463,7 +481,9 @@ impl Node {
     }
 
     pub fn leave_channel(&self, channel_id: i64) -> Result<()> {
-        self.shared.engine().leave_channel(channel_id)?;
+        self.shared
+            .engine()
+            .atomically(|engine| engine.leave_channel(channel_id))?;
         self.shared.internet.renew_subscription();
         Ok(())
     }
@@ -478,14 +498,20 @@ impl Node {
 
     /// Posts text to a channel.
     pub fn send_post(&self, channel_id: i64, text: &str) -> Result<PostView> {
-        let (post, frame) = self.shared.engine().send_post(channel_id, text, now())?;
+        let (post, frame) = self
+            .shared
+            .engine()
+            .atomically(|engine| engine.send_post(channel_id, text, now()))?;
         self.shared.send_own_post(&frame);
         Ok(post)
     }
 
     /// Posts our contact card to a channel, so readers can add us.
     pub fn share_card(&self, channel_id: i64) -> Result<PostView> {
-        let (post, frame) = self.shared.engine().share_card(channel_id, now())?;
+        let (post, frame) = self
+            .shared
+            .engine()
+            .atomically(|engine| engine.share_card(channel_id, now()))?;
         self.shared.send_own_post(&frame);
         Ok(post)
     }
@@ -516,7 +542,7 @@ impl Node {
         let (message, frames) = self
             .shared
             .engine()
-            .send_file(contact_id, mime, data, now())?;
+            .atomically(|engine| engine.send_file(contact_id, mime, data, now()))?;
         self.shared.send_own_frames(&frames);
         Ok(message)
     }
@@ -527,19 +553,19 @@ impl Node {
         mime: &str,
         data: &[u8],
     ) -> Result<GroupMessageView> {
-        let (message, frames) =
-            self.shared
-                .engine()
-                .send_group_file(group_id, mime, data, now())?;
+        let (message, frames) = self
+            .shared
+            .engine()
+            .atomically(|engine| engine.send_group_file(group_id, mime, data, now()))?;
         self.shared.send_own_frames(&frames);
         Ok(message)
     }
 
     pub fn send_channel_file(&self, channel_id: i64, mime: &str, data: &[u8]) -> Result<PostView> {
-        let (post, frames) =
-            self.shared
-                .engine()
-                .send_channel_file(channel_id, mime, data, now())?;
+        let (post, frames) = self
+            .shared
+            .engine()
+            .atomically(|engine| engine.send_channel_file(channel_id, mime, data, now()))?;
         self.shared.send_own_frames(&frames);
         Ok(post)
     }
@@ -638,8 +664,10 @@ impl Shared {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    /// Handles a frame atomically: if any part fails, nothing of it is kept.
     pub(crate) fn handle(&self, frame: Frame) -> Result<Handled> {
-        self.engine().handle(frame, now())
+        self.engine()
+            .atomically(|engine| engine.handle(frame, now()))
     }
 
     /// Passes relayed frames to LAN peers, and events to apps. A bundle is not
@@ -654,6 +682,14 @@ impl Shared {
             self.lan.broadcast(&frame.to_bytes(), except);
         }
         self.internet.post_handled(&handled);
+        // A bundle posted as it arrives need not go up again on reconnecting.
+        if handled.outcome == Outcome::Carried && self.internet.connected() > 0 {
+            for frame in &handled.relay {
+                if let Frame::Bundle(bundle) | Frame::Chunk(bundle) = frame {
+                    let _ = self.engine().mark_uploaded(bundle.id);
+                }
+            }
+        }
         self.flush_own();
         if handled
             .events

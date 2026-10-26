@@ -115,28 +115,28 @@ impl Store {
         member: bool,
         now: u32,
     ) -> Result<i64> {
-        let tx = self.conn.unchecked_transaction()?;
-        tx.execute(
-            "INSERT INTO groups (group_id, name, admin, version, member, created_at)
+        self.whole(|tx| {
+            tx.execute(
+                "INSERT INTO groups (group_id, name, admin, version, member, created_at)
              VALUES (?, ?, ?, ?, ?, ?)
              ON CONFLICT (group_id) DO UPDATE SET
                  name = excluded.name, version = excluded.version, member = excluded.member",
-            params![state.id.0, state.name, admin, state.version, member, now],
-        )?;
-        let id: i64 = tx.query_row(
-            "SELECT id FROM groups WHERE group_id = ?",
-            [state.id.0],
-            |row| row.get(0),
-        )?;
-        tx.execute("DELETE FROM group_members WHERE group_ref = ?", [id])?;
-        for (position, card) in state.members.iter().enumerate() {
-            tx.execute(
+                params![state.id.0, state.name, admin, state.version, member, now],
+            )?;
+            let id: i64 = tx.query_row(
+                "SELECT id FROM groups WHERE group_id = ?",
+                [state.id.0],
+                |row| row.get(0),
+            )?;
+            tx.execute("DELETE FROM group_members WHERE group_ref = ?", [id])?;
+            for (position, card) in state.members.iter().enumerate() {
+                tx.execute(
                 "INSERT INTO group_members (group_ref, position, dh_key, card) VALUES (?, ?, ?, ?)",
                 params![id, position, card.dh_key().as_bytes(), card.to_bytes()],
             )?;
-        }
-        tx.commit()?;
-        Ok(id)
+            }
+            Ok(id)
+        })
     }
 
     /// Our current chain for a group, with its row id.
@@ -280,22 +280,23 @@ impl Store {
         if keys.is_empty() {
             return Ok(());
         }
-        let tx = self.conn.unchecked_transaction()?;
-        for (iteration, key) in keys {
-            tx.execute(
-                "INSERT OR REPLACE INTO group_skipped (chain, iteration, key, stored_at)
+        self.whole(|tx| {
+            for (iteration, key) in keys {
+                tx.execute(
+                    "INSERT OR REPLACE INTO group_skipped (chain, iteration, key, stored_at)
                  VALUES (?, ?, ?, ?)",
-                params![chain, iteration, key, now],
-            )?;
-        }
-        tx.execute(
-            "DELETE FROM group_skipped WHERE chain = ?1 AND rowid NOT IN (
+                    params![chain, iteration, key, now],
+                )?;
+            }
+            tx.execute(
+                "DELETE FROM group_skipped WHERE chain = ?1 AND rowid NOT IN (
                  SELECT rowid FROM group_skipped WHERE chain = ?1
                  ORDER BY stored_at DESC, iteration DESC LIMIT ?2
              )",
-            params![chain, MAX_SKIPPED_KEYS],
-        )?;
-        tx.commit()?;
+                params![chain, MAX_SKIPPED_KEYS],
+            )?;
+            Ok(())
+        })?;
         Ok(())
     }
 

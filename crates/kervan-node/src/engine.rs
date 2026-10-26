@@ -122,23 +122,7 @@ impl Engine {
     }
 
     fn with_identity(store: Store, identity: Identity) -> Result<Self> {
-        let mut contacts = Vec::new();
-        for stored in store.contacts()? {
-            let keys = PairKeys::derive(&identity, stored.card.dh_key())?;
-            let session = match store.session(stored.id)? {
-                Some(state) => Session::from_bytes(&state)?,
-                None => Session::new(&identity, stored.card.dh_key(), &keys),
-            };
-            contacts.push(Contact {
-                id: stored.id,
-                card: stored.card,
-                keys,
-                request: stored.request,
-                introduced: stored.introduced,
-                hidden: stored.hidden,
-                session,
-            });
-        }
+        let contacts = load_contacts(&store, &identity)?;
         Ok(Self {
             store,
             identity,
@@ -152,6 +136,36 @@ impl Engine {
             reassembler: Reassembler::default(),
             own_out: Vec::new(),
         })
+    }
+
+    /// Runs a change atomically: if it fails, the store and what the engine
+    /// keeps in memory are as they were before, so nothing is half done, such
+    /// as a receipt sent for a message that was not kept.
+    pub fn atomically<T>(&mut self, change: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        let own_out = self.own_out.len();
+        self.store.begin()?;
+        let result = change(self).and_then(|value| {
+            self.store.commit()?;
+            Ok(value)
+        });
+        if result.is_err() {
+            self.store.rollback();
+            self.own_out.truncate(own_out);
+            // The store is as before; take contacts, sessions and name from it.
+            if let Ok(contacts) = load_contacts(&self.store, &self.identity) {
+                self.contacts = contacts;
+            }
+            if let Ok(Some(name)) = self.store.meta("name") {
+                let (signing, dh) = self.identity.secret_bytes();
+                if let Ok(identity) =
+                    Identity::from_secret_bytes(&signing, &dh, &String::from_utf8_lossy(&name))
+                {
+                    self.identity = identity;
+                }
+            }
+            self.forget_tags();
+        }
+        result
     }
 
     pub fn profile(&self) -> Profile {
@@ -402,6 +416,24 @@ impl Engine {
         } else {
             Ok(mailbox_tag(recipient, day))
         }
+    }
+
+    /// Carried bundles that have not gone up to the internet relays yet, for a
+    /// node that just reached them: it may have taken them over the local
+    /// network or from a file while it had no internet. They count as
+    /// uploaded from now on.
+    pub fn take_uploads(&mut self, now: u32) -> Result<Vec<(Frame, RecipientTag)>> {
+        let mut uploads = Vec::new();
+        for bundle in self.store.bundles_to_upload(now)? {
+            uploads.extend(self.passed_on(&bundle)?.map(|frame| (frame, bundle.tag)));
+            self.store.mark_uploaded(bundle.id)?;
+        }
+        Ok(uploads)
+    }
+
+    /// Notes that a carried bundle went up to the relays as it arrived.
+    pub fn mark_uploaded(&self, id: BundleId) -> Result<()> {
+        self.store.mark_uploaded(id)
     }
 
     /// Tombstones of the latest bundles delivered to us, to post again.
@@ -993,6 +1025,28 @@ impl Engine {
             has_our_card: contact.introduced,
         })
     }
+}
+
+/// Contacts with their pair keys and sessions, as the store has them.
+fn load_contacts(store: &Store, identity: &Identity) -> Result<Vec<Contact>> {
+    let mut contacts = Vec::new();
+    for stored in store.contacts()? {
+        let keys = PairKeys::derive(identity, stored.card.dh_key())?;
+        let session = match store.session(stored.id)? {
+            Some(state) => Session::from_bytes(&state)?,
+            None => Session::new(identity, stored.card.dh_key(), &keys),
+        };
+        contacts.push(Contact {
+            id: stored.id,
+            card: stored.card,
+            keys,
+            request: stored.request,
+            introduced: stored.introduced,
+            hidden: stored.hidden,
+            session,
+        });
+    }
+    Ok(contacts)
 }
 
 /// The days whose tags a receiver recognises (§4.1).

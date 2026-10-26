@@ -26,8 +26,15 @@ export function canRecord(): boolean {
   return typeof MediaRecorder !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia);
 }
 
-/** Starts recording from the microphone. `stop` ends it and gives the audio. */
-export async function startRecording(): Promise<{ stop: () => Promise<{ mime: string; bytes: Uint8Array }> }> {
+export type Recorder = {
+  /** Ends the recording and gives the audio. */
+  stop: () => Promise<{ mime: string; bytes: Uint8Array }>;
+  /** Ends the recording and throws the audio away. */
+  cancel: () => void;
+};
+
+/** Starts recording from the microphone. Either way it ends, the microphone turns off. */
+export async function startRecording(): Promise<Recorder> {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   const mimeType = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm"].find((type) =>
     MediaRecorder.isTypeSupported(type),
@@ -36,11 +43,17 @@ export async function startRecording(): Promise<{ stop: () => Promise<{ mime: st
   const parts: Blob[] = [];
   recorder.ondataavailable = (event) => parts.push(event.data);
   recorder.start();
+  const release = () => stream.getTracks().forEach((track) => track.stop());
   return {
+    cancel: () => {
+      recorder.onstop = null;
+      if (recorder.state !== "inactive") recorder.stop();
+      release();
+    },
     stop: () =>
       new Promise((resolve) => {
         recorder.onstop = async () => {
-          stream.getTracks().forEach((track) => track.stop());
+          release();
           const mime = (recorder.mimeType || "audio/mp4").split(";")[0];
           const blob = new Blob(parts, { type: mime });
           resolve({ mime, bytes: new Uint8Array(await blob.arrayBuffer()) });

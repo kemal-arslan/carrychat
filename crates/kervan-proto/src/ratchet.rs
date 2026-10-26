@@ -26,7 +26,8 @@ use crate::identity::Identity;
 use crate::pair::PairKeys;
 use crate::{day_of, hmac_sha256, truncate, Error, Result};
 
-/// Message keys a receiver derives ahead for messages that have not arrived.
+/// Keys a receiver keeps for messages that have not arrived: of those it
+/// passes when it derives a chain ahead, the last this many.
 pub const MAX_SKIP: u16 = 1000;
 /// Mode byte, sender's ratchet key, previous chain length, message number.
 pub const HEADER_LEN: usize = 37;
@@ -282,21 +283,24 @@ impl Session {
         })
     }
 
-    /// Derives and hands out the keys of the receiving chain up to `until`.
+    /// Derives the receiving chain up to `until`, however far, and hands out
+    /// the keys of the last [`MAX_SKIP`] messages it passes. After a long
+    /// silence the older ones expired on the way, and a chain of at most
+    /// 65535 messages bounds the work.
     fn skip(&mut self, until: u16, out: &mut Vec<SkippedKey>) -> Result<()> {
         let (Some(mut chain), Some(peer)) = (self.recv, self.peer) else {
             return Ok(());
         };
-        if until > self.received.saturating_add(MAX_SKIP) {
-            return Err(Error::Invalid("too many skipped messages"));
-        }
+        let keep_from = until.saturating_sub(MAX_SKIP);
         while self.received < until {
             let (next, key) = kdf_ck(&chain);
-            out.push(SkippedKey {
-                ratchet: peer,
-                n: self.received,
-                key,
-            });
+            if self.received >= keep_from {
+                out.push(SkippedKey {
+                    ratchet: peer,
+                    n: self.received,
+                    key,
+                });
+            }
             chain = next;
             self.received += 1;
         }
@@ -529,6 +533,20 @@ mod tests {
         let newer = a.send(&b, "yeni zincir");
         assert_eq!(b.receive(&newer).unwrap(), "yeni zincir");
         assert_eq!(b.receive(&early).unwrap(), "geç kalan");
+    }
+
+    #[test]
+    fn a_long_silence_does_not_lock_the_session() {
+        let (mut a, mut b) = pair();
+        b.receive(&a.send(&b, "ilk")).unwrap();
+        // 1005 messages that never arrive, say because they expired on the way.
+        let lost: Vec<Bundle> = (0..1005).map(|n| a.send(&b, &format!("{n}"))).collect();
+        assert_eq!(b.receive(&a.send(&b, "sonra")).unwrap(), "sonra");
+        assert_eq!(b.skipped.len(), MAX_SKIP as usize);
+        // Late ones among the last thousand still open; older ones do not.
+        assert_eq!(b.receive(&lost[1004]).unwrap(), "1004");
+        assert!(b.receive(&lost[0]).is_err());
+        b.receive(&a.send(&b, "devam")).unwrap();
     }
 
     #[test]
