@@ -433,6 +433,7 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
     setMessages((current) => [...current, message]);
     refreshContacts();
     refreshStatus();
+    return message.id;
   }
 
   async function accept() {

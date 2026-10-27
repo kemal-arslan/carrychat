@@ -577,6 +577,20 @@ impl Store {
         Ok(new_way.then_some((contact_id, message_id)))
     }
 
+    /// The bundle one of our messages travels in.
+    pub fn outgoing_bundle_id(&self, message_id: i64) -> Result<Option<BundleId>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT bundle_id FROM messages WHERE id = ? AND outgoing = 1",
+                [message_id],
+                |row| row.get::<_, Vec<u8>>(0),
+            )
+            .optional()?
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(BundleId))
+    }
+
     /// The way one of our messages went, from writing to reading.
     pub fn journey(&self, message_id: i64) -> Result<Option<Journey>> {
         let Some((bundle_id, created_at, delivered_at, read_at)) = self

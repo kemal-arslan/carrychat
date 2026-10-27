@@ -33,7 +33,7 @@ pub use crate::lan::{LanConfig, LanProblem};
 pub use crate::lora::{LoraDevice, LoraFirmware, LoraNode, LoraPort, LoraStatus};
 pub use crate::nearby::NearbyPerson;
 pub use crate::reticulum::{ReticulumPeer, ReticulumStatus};
-pub use crate::sound::{CardListener, HeardCard};
+pub use crate::sound::{HeardCard, SoundListener};
 use crate::store::Store;
 pub use crate::sync::Link;
 
@@ -380,7 +380,25 @@ impl Node {
     /// This node's card as sound (§3.2): one round, a WAV file to play over
     /// and over until the other device has heard it.
     pub fn card_sound(&self) -> Result<Vec<u8>> {
-        sound::wav(&self.profile().card)
+        sound::card_wav(&self.profile().card)
+    }
+
+    /// One of our messages as sound (§9.10): its frames, one round each, a
+    /// WAV file to play a few times for a device nearby that listens. Its
+    /// journey shows it left as sound.
+    pub fn message_sound(&self, message_id: i64) -> Result<Vec<u8>> {
+        let frames = self
+            .shared
+            .engine()
+            .message_frames(message_id, sound::MTU, now())?;
+        match frames.first() {
+            Some(Frame::Bundle(bundle)) => self.shared.handed_off_id(bundle.id, Via::Sound, 0),
+            Some(Frame::Fragment(fragment)) => {
+                self.shared.handed_off_id(fragment.id, Via::Sound, 0)
+            }
+            _ => {}
+        }
+        Ok(sound::frames_wav(&frames))
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<Event> {

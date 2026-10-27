@@ -5,6 +5,7 @@ import {
   GlobeSimpleIcon,
   GraphIcon,
   ShareNetworkIcon,
+  SpeakerHighIcon,
   UsbIcon,
   WifiHighIcon,
   type Icon,
@@ -19,6 +20,7 @@ const ICONS: Record<Via, Icon> = {
   internet: GlobeSimpleIcon,
   lora: CellTowerIcon,
   reticulum: GraphIcon,
+  sound: SpeakerHighIcon,
   file: UsbIcon,
 };
 

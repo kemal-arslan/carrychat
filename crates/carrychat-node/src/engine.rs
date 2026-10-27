@@ -263,6 +263,20 @@ impl Engine {
         self.store.record_handoff(id, via, peer, now)
     }
 
+    /// The frames of one of our messages still waiting to be delivered, cut
+    /// for a link whose packets hold `mtu` bytes.
+    pub fn message_frames(&self, message_id: i64, mtu: usize, now: u32) -> Result<Vec<Frame>> {
+        let bundle = self
+            .store
+            .outgoing_bundle_id(message_id)?
+            .map(|id| self.store.bundle(id))
+            .transpose()?
+            .flatten()
+            .filter(|bundle| !bundle.is_expired(now))
+            .ok_or(Error::Invalid("the message is no longer waiting"))?;
+        Ok(carrychat_proto::frame::frames_for(&bundle, mtu)?)
+    }
+
     pub fn journey(&self, message_id: i64) -> Result<Journey> {
         self.store
             .journey(message_id)?

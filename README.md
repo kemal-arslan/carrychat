@@ -23,6 +23,7 @@ CarryChat sends each message over the best link it has, and keeps it until one a
 | LoRa radio ([Meshtastic](https://meshtastic.org) or [MeshCore](https://meshcore.io)) | kilometres per hop, further over community relays | there is no internet at all |
 | [Reticulum](https://reticulum.network) | as far as the Reticulum network reaches, over its radios, serial lines and internet links | a Reticulum network is at hand |
 | Internet ([Nostr](https://nostr.com) relays) | anywhere | normal days, or whenever one computer on the path is online |
+| Sound | a few metres, side by side | nothing else reaches, and the other device listens |
 | File on a USB stick | as far as someone carries it | nothing else reaches |
 
 - **One message, one radio packet.** A bundle adds 104 bytes to a message (67 before a session starts), so up to 128 bytes of text fit into a single 233-byte Meshtastic packet. Longer messages are split.
@@ -64,6 +65,8 @@ Create your identity and give your card (**My card**, also as a QR code, under *
 **LoRa radio**, on **Network**, uses a [Meshtastic](https://meshtastic.org) or [MeshCore](https://meshcore.io) device: a phone pairs with it over Bluetooth, a computer uses it over USB or the network, and CarryChat finds out which kind it is. Once chosen, it shows the device's region or radio settings and the devices it has heard recently (three hours for Meshtastic, two days for MeshCore, whose repeaters announce themselves less often), so you can tell whether a mesh is in range. Phones and computers have no LoRa radio of their own, so it takes a separate device. On a MeshCore device, CarryChat adds a `#carrychat` channel to a free slot.
 
 **Reticulum**, on **Network**, connects to a [Reticulum](https://reticulum.network) node, such as `rnsd` on the same computer with a TCP server interface, and reaches the other CarryChat nodes on that network however many hops away. It shows the CarryChat nodes that announced themselves in the last six hours.
+
+**Sound**, on **Network**, listens for messages that a device right next to this one plays as sound, while the app is open. In a chat, the speaker button next to the message field sends what you write as sound too, played three times. It is slow, about 30 bytes a second, but needs nothing else: the message is sealed end to end, so those who hear the tones cannot read it.
 
 `npm run dev` opens the interface in a browser with sample data, without building the app.
 

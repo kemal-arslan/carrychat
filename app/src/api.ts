@@ -127,7 +127,16 @@ export type Message = {
 };
 
 /** A way a message left this device. */
-export type Via = "lan" | "bluetooth" | "wifiAware" | "wifiDirect" | "internet" | "lora" | "reticulum" | "file";
+export type Via =
+  | "lan"
+  | "bluetooth"
+  | "wifiAware"
+  | "wifiDirect"
+  | "internet"
+  | "lora"
+  | "reticulum"
+  | "sound"
+  | "file";
 
 /** A link a nearby node is connected over. */
 export type Link = "lan" | "bluetooth" | "wifiAware" | "wifiDirect";
@@ -274,6 +283,8 @@ export interface Api {
   addContact(card: string): Promise<Contact>;
   /** This device's card as sound: one round, a WAV file to play over and over. */
   cardSound(): Promise<ArrayBuffer>;
+  /** One of our messages as sound: a WAV file to play a few times for a device nearby that listens. */
+  messageSound(messageId: number): Promise<ArrayBuffer>;
   /**
    * Starts listening for a card played as sound, from a microphone at `rate` samples a second. Gives the
    * listening's number, which the calls for it name, so that one ended late cannot end the next.
@@ -448,6 +459,8 @@ function desktopApi(): Api {
     addContact: (card) => call("add_contact", { card }),
     // Android hands raw bytes to the page as an array of numbers, not a buffer.
     cardSound: () => call<ArrayBuffer | ArrayBufferView | number[]>("card_sound").then(toArrayBuffer),
+    messageSound: (messageId) =>
+      call<ArrayBuffer | ArrayBufferView | number[]>("message_sound", { messageId }).then(toArrayBuffer),
     listenStart: (rate) => call("listen_start", { rate }),
     // The samples go as the request's body, not as JSON, after the listening's number.
     listenHeard(listening, samples) {
@@ -733,6 +746,9 @@ function previewApi(): Api {
       return summarize();
     },
     async cardSound() {
+      return beep();
+    },
+    async messageSound() {
       return beep();
     },
     async listenStart() {

@@ -1299,6 +1299,10 @@ button.row-item:hover {
   color: var(--text-muted);
 }
 
+.composer-row .attach.on {
+  color: var(--accent);
+}
+
 .composer-row textarea {
   flex: 1;
   min-width: 0;

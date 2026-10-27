@@ -1,12 +1,15 @@
-// Cards over sound (PROTOCOL.md §3.2): playing this device's card, and
-// listening for another's. The node makes and reads the sound; the page only
-// plays it and hands over what the microphone hears.
+// Sound (PROTOCOL.md §3.2, §9.10): playing this device's card or one of its
+// messages, and listening for another's card or messages. The node makes
+// and reads the sound; the page only plays it and hands over what the
+// microphone hears.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type HeardCard } from "./api";
 
 /** How often the microphone's samples go to the listener. */
 const SEND_MS = 250;
+/** How many times a message is played, for a listener that misses a round. */
+const MESSAGE_PLAYS = 3;
 
 export function canListen(): boolean {
   return Boolean(navigator.mediaDevices?.getUserMedia) && typeof AudioContext !== "undefined";
@@ -35,11 +38,125 @@ export async function playCard(): Promise<() => void> {
   };
 }
 
+/** Messages played one after another, so two sent quickly do not sound over each other. */
+let messagesPlaying: Promise<void> = Promise.resolve();
+
+/** Plays one of our messages as sound a few times; resolves once it is done. */
+export function playMessage(messageId: number): Promise<void> {
+  const played = messagesPlaying.then(async () => {
+    const wav = await api.messageSound(messageId);
+    const context = new AudioContext();
+    try {
+      const source = context.createBufferSource();
+      source.buffer = await context.decodeAudioData(wav);
+      source.loop = true;
+      source.connect(context.destination);
+      const ended = new Promise((resolve) => (source.onended = resolve));
+      source.start();
+      source.stop(context.currentTime + source.buffer.duration * MESSAGE_PLAYS);
+      await ended;
+    } finally {
+      void context.close();
+    }
+  });
+  messagesPlaying = played.catch(() => {});
+  return played;
+}
+
+/** Whether the page listens for messages played as sound: off, on, or on but without a microphone. */
+export type MessageListening = "off" | "on" | "failed";
+
+let wantMessages = false;
+let stopMessages: (() => void) | null = null;
+let cardListenings = 0;
+let messageListening: MessageListening = "off";
+const watchers = new Set<(state: MessageListening) => void>();
+
+function setMessageListening(state: MessageListening) {
+  messageListening = state;
+  watchers.forEach((watch) => watch(state));
+}
+
+async function startMessages() {
+  if (stopMessages || cardListenings > 0 || !wantMessages) return;
+  try {
+    const stop = await listen(null);
+    // Turned off, or a card listening began, while the microphone opened.
+    if (!wantMessages || cardListenings > 0 || stopMessages) {
+      stop();
+      return;
+    }
+    stopMessages = stop;
+  } catch {
+    // Not asked again until it is turned on again.
+    wantMessages = false;
+    setMessageListening("failed");
+  }
+}
+
+/**
+ * Listens for messages played as sound while `on`, and while the app is open: the node takes in what it hears like
+ * a message from any link. Listening for a card pauses it.
+ */
+export function listenForMessages(on: boolean) {
+  wantMessages = on;
+  if (on) {
+    // On at once, while the microphone may still be asking for permission.
+    setMessageListening("on");
+    void startMessages();
+  } else {
+    stopMessages?.();
+    stopMessages = null;
+    setMessageListening("off");
+  }
+}
+
+export function useMessageListening(): MessageListening {
+  const [state, setState] = useState(messageListening);
+  useEffect(() => {
+    watchers.add(setState);
+    return () => {
+      watchers.delete(setState);
+    };
+  }, []);
+  return state;
+}
+
 /**
  * Listens to the microphone until a card is heard, and gives it to `onHeard`. Returns what stops listening,
- * which also stops by itself once a card is heard.
+ * which also stops by itself once a card is heard. Listening for messages pauses meanwhile.
  */
 export async function listenForCard(onHeard: (card: HeardCard) => void): Promise<() => void> {
+  cardListenings += 1;
+  stopMessages?.();
+  stopMessages = null;
+  let ended = false;
+  const end = () => {
+    if (ended) return;
+    ended = true;
+    cardListenings -= 1;
+    void startMessages();
+  };
+  try {
+    const stop = await listen((card) => {
+      end();
+      onHeard(card);
+    });
+    return () => {
+      stop();
+      end();
+    };
+  } catch (error) {
+    end();
+    throw error;
+  }
+}
+
+/**
+ * Listens to the microphone, handing what it hears to the node: messages heard go to it, and a card heard goes to
+ * `onCard`, if given, which ends listening. Returns what stops listening.
+ */
+async function listen(onCard: ((card: HeardCard) => void) | null): Promise<() => void> {
   // The browser's voice processing would take the tones for noise.
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
@@ -94,9 +211,9 @@ export async function listenForCard(onHeard: (card: HeardCard) => void): Promise
     heard = [];
     try {
       const card = await api.listenHeard(listening, samples);
-      if (card && !stopped) {
+      if (card && onCard && !stopped) {
         stop();
-        onHeard(card);
+        onCard(card);
       }
     } finally {
       sending = false;

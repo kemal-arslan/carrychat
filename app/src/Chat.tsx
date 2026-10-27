@@ -11,7 +11,8 @@ import { ViaIcon } from "./Via";
 type Props = {
   contact: Contact;
   messages: Message[];
-  onSend: (text: string) => Promise<void>;
+  /** Sends a message, and gives its id, which playing it as sound needs. */
+  onSend: (text: string) => Promise<number | void>;
   onSendFile: (mime: string, bytes: Uint8Array) => Promise<void>;
   onAccept: () => void;
   onDecline: () => void;
@@ -131,6 +132,7 @@ export function Chat({ contact, messages, onSend, onSendFile, onAccept, onDeclin
           conversation={`contact-${contact.id}`}
           onSend={onSend}
           onSendFile={onSendFile}
+          sound
         />
       )}
     </section>

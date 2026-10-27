@@ -10,6 +10,7 @@ import {
   LinkSimpleIcon,
   ShareNetworkIcon,
   ShieldCheckIcon,
+  SpeakerHighIcon,
   WifiHighIcon,
 } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
@@ -18,6 +19,7 @@ import { useI18n } from "./i18n";
 import { bluetoothLabel, internetLabel, lanLabel, linkStates, loraLabel, reticulumLabel, wifiAwareLabel } from "./links";
 import { LoraSheet } from "./LoraSheet";
 import { ReticulumSheet } from "./ReticulumSheet";
+import { canListen, listenForMessages, useMessageListening } from "./sound";
 
 /** Bluetooth as the node started with it: a change shows the restart row until the app restarts. */
 let bluetoothAtStart: boolean | null = null;
@@ -47,6 +49,7 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
   const [loraOpen, setLoraOpen] = useState(false);
   const [reticulum, setReticulum] = useState<ReticulumStatus | null>(null);
   const [reticulumOpen, setReticulumOpen] = useState(false);
+  const soundListening = useMessageListening();
 
   useEffect(() => {
     api.wifiAware().then(setWifiAware);
@@ -174,6 +177,29 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
           </span>
           <CaretRightIcon className="go" size={16} weight="bold" />
         </button>
+        {canListen() && (
+          <label className="row-item toggle" title={t.soundHint}>
+            <span className="tile">
+              <SpeakerHighIcon size={20} />
+            </span>
+            <span className="row-text">
+              <b>{t.soundName}</b>
+              <span className={soundListening === "on" ? "live" : soundListening === "failed" ? "trouble" : undefined}>
+                {soundListening === "on"
+                  ? t.soundListeningRow
+                  : soundListening === "failed"
+                    ? t.soundNoMicrophone
+                    : t.stateOff}
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              checked={soundListening !== "off"}
+              onChange={(event) => listenForMessages(event.target.checked)}
+              aria-label={t.soundListenSetting}
+            />
+          </label>
+        )}
         <button className="row-item" title={t.reticulumHint} onClick={() => setReticulumOpen(true)}>
           <span className="tile">
             <GraphIcon size={20} />

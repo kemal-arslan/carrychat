@@ -1,10 +1,16 @@
-//! Cards passed between devices side by side: this node's card played as
-//! sound and a listener that hears another's (§3.2), and cards read over
-//! NFC (§3.3).
+//! Sound (§3.2, §9.10): this node's card, or one of its messages, played as
+//! sound, and a listener that hears another's card, and takes in the
+//! frames it hears like those of any link.
 
+use carrychat_proto::frame::Frame;
 use carrychat_proto::identity::ContactCard;
-use carrychat_proto::sound;
+use carrychat_proto::sound::{self, Kind};
 use serde::Serialize;
+
+use crate::{Node, Result, Shared};
+
+/// The longest frame one round of sound carries.
+pub(crate) const MTU: usize = sound::MAX_FRAME_LEN;
 
 /// A card heard over sound or read over NFC, its signature verified.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -28,25 +34,55 @@ impl HeardCard {
     }
 }
 
-/// Listens to a microphone for a card played as sound.
-pub struct CardListener(sound::Listener);
+/// Listens to a microphone for what a device nearby plays: a card, or the
+/// frames of a message.
+pub struct SoundListener(sound::Listener);
 
-impl CardListener {
+impl SoundListener {
     /// A listener for samples at `rate` per second.
     pub fn new(rate: u32) -> Self {
         Self(sound::Listener::new(rate))
     }
 
-    /// Takes in samples, between -1 and 1. Returns the card once one has
-    /// been heard whole and its signature verifies; what does not verify
-    /// was heard wrong, and listening goes on.
-    pub fn push(&mut self, samples: &[f32]) -> Option<HeardCard> {
-        let bytes = self.0.push(samples)?;
-        HeardCard::verified(ContactCard::from_bytes(&bytes).ok()?)
+    /// Takes in samples, between -1 and 1. A frame heard whole, its check
+    /// matching, goes to `node` as from any link. A card heard whole is
+    /// returned once its signature verifies; what does not verify was heard
+    /// wrong, and listening goes on.
+    pub fn push(&mut self, node: &Node, samples: &[f32]) -> Option<HeardCard> {
+        let (kind, bytes) = self.0.push(samples)?;
+        match kind {
+            Kind::Card => HeardCard::verified(ContactCard::from_bytes(&bytes).ok()?),
+            Kind::Frame => {
+                take_frame(&node.shared, &bytes);
+                None
+            }
+        }
+    }
+}
+
+/// Takes in a frame heard over sound, handled like a frame from any link
+/// and passed on to the links. File chunks never come by sound.
+fn take_frame(shared: &Shared, bytes: &[u8]) {
+    let frame = match Frame::from_bytes(bytes) {
+        Ok(Frame::Chunk(_)) | Err(_) => return,
+        Ok(frame) => frame,
+    };
+    if let Ok(handled) = shared.handle(frame) {
+        shared.dispatch(handled, None);
     }
 }
 
 /// `card` as one round of sound, a WAV file to play over and over.
-pub(crate) fn wav(card: &str) -> crate::Result<Vec<u8>> {
-    Ok(sound::wav(&ContactCard::from_text(card)?.to_bytes()))
+pub(crate) fn card_wav(card: &str) -> Result<Vec<u8>> {
+    Ok(sound::wav(
+        Kind::Card,
+        &[&ContactCard::from_text(card)?.to_bytes()],
+    ))
+}
+
+/// Frames as rounds of sound, one after another, in a WAV file.
+pub(crate) fn frames_wav(frames: &[Frame]) -> Vec<u8> {
+    let bytes: Vec<Vec<u8>> = frames.iter().map(Frame::to_bytes).collect();
+    let rounds: Vec<&[u8]> = bytes.iter().map(Vec::as_slice).collect();
+    sound::wav(Kind::Frame, &rounds)
 }

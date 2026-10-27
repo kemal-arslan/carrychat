@@ -8,9 +8,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
 use carrychat_node::{
-    CardListener, ChannelView, ContactView, GroupMessageView, GroupView, HeardCard, ImportReport,
-    InternetConfig, Journey, LanConfig, LoraDevice, LoraPort, LoraStatus, MessageView, MutedView,
-    NearbyPerson, Node, PostView, Profile, ReticulumStatus, Settings, Status,
+    ChannelView, ContactView, GroupMessageView, GroupView, HeardCard, ImportReport, InternetConfig,
+    Journey, LanConfig, LoraDevice, LoraPort, LoraStatus, MessageView, MutedView, NearbyPerson,
+    Node, PostView, Profile, ReticulumStatus, Settings, SoundListener, Status,
 };
 use data_encoding::BASE64;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -24,7 +24,7 @@ struct AppState {
     node: Mutex<Option<Node>>,
     /// Listens for a card played as sound, while the add-contact sheet does,
     /// with the number the page knows that listening by.
-    listener: Mutex<Option<(u32, CardListener)>>,
+    listener: Mutex<Option<(u32, SoundListener)>>,
     listenings: AtomicU32,
 }
 
@@ -150,6 +150,17 @@ fn add_contact(state: State<'_, AppState>, card: String) -> CommandResult<Contac
     state.node()?.add_contact(&card).map_err(text)
 }
 
+/// One of our messages as sound (§9.10): a WAV file the page plays a few
+/// times for a device nearby that listens.
+#[tauri::command]
+async fn message_sound(
+    state: State<'_, AppState>,
+    message_id: i64,
+) -> CommandResult<tauri::ipc::Response> {
+    let wav = state.node()?.message_sound(message_id).map_err(text)?;
+    Ok(tauri::ipc::Response::new(wav))
+}
+
 /// This device's card as sound (§3.2): one round, a WAV file the page
 /// plays over and over.
 #[tauri::command]
@@ -169,13 +180,13 @@ fn listen_start(state: State<'_, AppState>, rate: u32) -> u32 {
         .listener
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) =
-        Some((listening, CardListener::new(rate)));
+        Some((listening, SoundListener::new(rate)));
     listening
 }
 
 /// The microphone's next samples in the request's body: the listening's
 /// number as a little-endian `u32`, then 16-bit little-endian samples.
-/// Returns the card once it has been heard whole.
+/// Messages heard go to the node; a card is returned once heard whole.
 #[tauri::command]
 async fn listen_heard(
     state: State<'_, AppState>,
@@ -198,13 +209,14 @@ async fn listen_heard(
         .chunks_exact(2)
         .map(|pair| f32::from(i16::from_le_bytes([pair[0], pair[1]])) / 32768.0)
         .collect();
+    let node = state.node()?;
     let mut listener = state
         .listener
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     Ok(match listener.as_mut() {
         Some((listening, listener)) if *listening == u32::from_le_bytes(*number) => {
-            listener.push(&samples)
+            listener.push(&node, &samples)
         }
         _ => None,
     })
@@ -725,6 +737,7 @@ pub fn run() {
             contacts,
             add_contact,
             card_sound,
+            message_sound,
             listen_start,
             listen_heard,
             listen_stop,

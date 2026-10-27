@@ -1,8 +1,9 @@
-import { ImageIcon, MicrophoneIcon, PaperPlaneRightIcon, StopIcon } from "@phosphor-icons/react";
+import { ImageIcon, MicrophoneIcon, PaperPlaneRightIcon, SpeakerHighIcon, StopIcon } from "@phosphor-icons/react";
 import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { maxMessageBytes, onePacketBytes, radioPackets, utf8Length } from "./format";
 import { useI18n } from "./i18n";
 import { MAX_RECORDING_SECS, canRecord, shrinkPhoto, startRecording, type Recorder } from "./media";
+import { playMessage } from "./sound";
 
 type Props = {
   placeholder: string;
@@ -10,9 +11,12 @@ type Props = {
   overhead: number;
   /** Clears the draft when it changes: the conversation it belongs to. */
   conversation: string;
-  onSend: (text: string) => Promise<void>;
+  /** Sends a message; gives its id where it can also go as sound. */
+  onSend: (text: string) => Promise<number | void>;
   /** Sends a photo or voice message. Without it there are no buttons for them. */
   onSendFile?: (mime: string, bytes: Uint8Array) => Promise<void>;
+  /** Offers to send messages as sound too, to a device right next to this one. */
+  sound?: boolean;
 };
 
 type Recording = Recorder & { started: number };
@@ -20,13 +24,16 @@ type Recording = Recorder & { started: number };
 /** A touch keyboard's Enter starts a new line; the Send button sends. */
 const TOUCH = window.matchMedia("(pointer: coarse)").matches;
 
-export function Composer({ placeholder, overhead, conversation, onSend, onSendFile }: Props) {
+export function Composer({ placeholder, overhead, conversation, onSend, onSendFile, sound = false }: Props) {
   const { t } = useI18n();
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [recording, setRecording] = useState<Recording | null>(null);
   const [seconds, setSeconds] = useState(0);
+  // Sending by sound too, for this conversation, and how many messages are still being played.
+  const [bySound, setBySound] = useState(false);
+  const [playing, setPlaying] = useState(0);
   const photoInput = useRef<HTMLInputElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const recordingRef = useRef<Recording | null>(null);
@@ -41,6 +48,7 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
   useEffect(() => {
     setDraft("");
     setError(null);
+    setBySound(false);
     return () => {
       left.current += 1;
       recordingRef.current?.cancel();
@@ -123,8 +131,14 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
     setSending(true);
     setError(null);
     try {
-      await onSend(draft);
+      const id = await onSend(draft);
       setDraft("");
+      if (bySound && typeof id === "number") {
+        setPlaying((count) => count + 1);
+        playMessage(id)
+          .catch((failure) => setError(`${t.soundMessageFailed} ${String(failure).replace(/^Error: /, "")}`))
+          .finally(() => setPlaying((count) => count - 1));
+      }
     } catch (failure) {
       setError(String(failure).replace(/^Error: /, ""));
     } finally {
@@ -144,13 +158,17 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
     error ??
     (recording
       ? t.recording(seconds)
-      : tooLong
-        ? t.tooLong(bytes, max)
-        : bytes > onePacketBytes(overhead)
-          ? packets === 1
-            ? t.onePacket(bytes)
-            : t.packets(bytes, packets)
-          : null);
+      : playing > 0
+        ? t.soundSending
+        : tooLong
+          ? t.tooLong(bytes, max)
+          : bytes > onePacketBytes(overhead)
+            ? packets === 1
+              ? t.onePacket(bytes)
+              : t.packets(bytes, packets)
+            : bySound
+              ? t.soundModeNote
+              : null);
   const empty = bytes === 0;
 
   return (
@@ -170,6 +188,17 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
               <ImageIcon size={24} />
             </button>
           </>
+        )}
+        {sound && (
+          <button
+            className={bySound ? "icon-button attach on" : "icon-button attach"}
+            onClick={() => setBySound((on) => !on)}
+            aria-pressed={bySound}
+            title={t.soundBySound}
+            aria-label={t.soundBySound}
+          >
+            <SpeakerHighIcon size={24} weight={bySound ? "fill" : "regular"} />
+          </button>
         )}
         <textarea
           ref={field}

@@ -25,6 +25,7 @@ CarryChat her mesajı elindeki en iyi bağlantıdan gönderir; bağlantı yoksa 
 | LoRa telsizi ([Meshtastic](https://meshtastic.org) ya da [MeshCore](https://meshcore.io)) | atlama başına kilometrelerce, topluluk aktarıcılarıyla daha uzak | hiç internet yok |
 | [Reticulum](https://reticulum.network) | Reticulum ağının telsizleri, seri hatları ve internet bağlantıları nereye ulaşıyorsa | elde bir Reticulum ağı var |
 | İnternet ([Nostr](https://nostr.com) aktarıcıları) | her yer | olağan günler ya da yoldaki bilgisayarlardan biri internete bağlandığında |
+| Ses | birkaç metre, yan yana | başka hiçbir şey ulaşmıyor ve karşı cihaz dinliyor |
 | USB bellekte dosya | biri onu nereye taşırsa | başka hiçbir şey ulaşmıyor |
 
 - **Bir mesaj, bir telsiz paketi.** Zarf bir mesaja 104 bayt ekler (oturum başlamadan önce 67), bu yüzden 128 bayta kadar metin tek bir 233 baytlık Meshtastic paketine sığar. Daha uzun mesajlar bölünür.
@@ -66,6 +67,8 @@ Kimliğini oluştur ve kartını (**Kartım**, QR kod olarak da; **Ben** sekmesi
 **Ağ**'daki **LoRa telsizi**, bir [Meshtastic](https://meshtastic.org) ya da [MeshCore](https://meshcore.io) cihazı kullanır: telefon onunla Bluetooth üzerinden eşleşir, bilgisayar onu USB ya da ağ üzerinden kullanır; CarryChat cihazın türünü kendisi anlar. Seçildikten sonra cihazın bölgesini ya da telsiz ayarlarını ve yakın zamanda duyduğu cihazları gösterir (Meshtastic için üç saat; tekrarlayıcıları kendilerini daha seyrek duyuran MeshCore için iki gün), böylece menzilde bir ağ olup olmadığını anlarsın. Telefonda da bilgisayarda da LoRa alıcısı yoktur; bu yüzden ayrı bir cihaz gerekir. Bir MeshCore cihazında CarryChat boş bir kanal yuvasına `#carrychat` kanalını ekler.
 
 **Ağ**'daki **Reticulum**, bir [Reticulum](https://reticulum.network) düğümüne bağlanır (örneğin aynı bilgisayarda TCP sunucu arayüzü açık bir `rnsd`) ve o ağdaki diğer CarryChat düğümlerine, kaç atlama uzakta olursa olsun ulaşır. Son altı saatte kendini duyuran CarryChat düğümlerini gösterir.
+
+**Ağ**'daki **Ses**, uygulama açıkken hemen yanındaki bir cihazın sesle çaldığı mesajları dinler. Sohbette, mesaj alanının yanındaki hoparlör düğmesi yazdığını sesle de gönderir; mesaj üç kez çalınır. Yavaştır (saniyede yaklaşık 30 bayt) ama başka hiçbir şey gerektirmez: mesaj uçtan uca mühürlü olduğu için tonları duyanlar onu okuyamaz.
 
 `npm run dev`, uygulamayı derlemeden arayüzü örnek verilerle bir tarayıcıda açar.
 

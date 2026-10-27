@@ -1,13 +1,15 @@
-//! Cards over sound (§3.2): a few hundred bytes, such as a contact card,
-//! played through a speaker and heard through a microphone, so two devices
-//! that are side by side exchange cards with nothing else in common.
+//! Sound (§3.2, §9.10): a few hundred bytes, a contact card or a link
+//! frame, played through a speaker and heard through a microphone, so two
+//! devices side by side exchange cards, or messages, with nothing else in
+//! common.
 //!
 //! Six channels of 16 tones each, 46.875 Hz apart from 1875 Hz up to about
 //! 6.3 kHz, where phone speakers and microphones work well. Each 100 ms
 //! symbol sounds one tone per channel, a nibble each, so three bytes. A start
 //! marker of four symbols comes first, then a header with the length, then
 //! the bytes. The sender plays it over and over; the listener needs one clean
-//! round. Nothing checks the bytes here: a card verifies its own signature.
+//! round. A card verifies its own signature; a frame carries a CRC-32, since
+//! a corrupt one could otherwise be carried on.
 
 use std::collections::VecDeque;
 use std::f64::consts::TAU;
@@ -16,6 +18,48 @@ use std::f64::consts::TAU;
 pub const SAMPLE_RATE: u32 = 48_000;
 /// The most bytes one round carries.
 pub const MAX_LEN: usize = 255;
+/// The longest frame one round carries, with its CRC-32.
+pub const MAX_FRAME_LEN: usize = MAX_LEN - 4;
+
+/// What a round carries, as its header's first byte says.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    /// A contact card (§3.1), which its signature checks.
+    Card,
+    /// A link frame (§7), followed by the CRC-32 of the frame.
+    Frame,
+}
+
+impl Kind {
+    fn magic(self) -> u8 {
+        match self {
+            Self::Card => 0xCC,
+            Self::Frame => 0xCD,
+        }
+    }
+
+    fn of(magic: u8) -> Option<Self> {
+        [Self::Card, Self::Frame]
+            .into_iter()
+            .find(|kind| kind.magic() == magic)
+    }
+}
+
+/// CRC-32 as Ethernet and zip compute it.
+pub fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = !0u32;
+    for &byte in bytes {
+        crc ^= u32::from(byte);
+        for _ in 0..8 {
+            crc = if crc & 1 == 1 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
 
 const BASE_HZ: f64 = 1875.0;
 /// Tones this far apart are orthogonal over a window of 1/STEP_HZ seconds.
@@ -38,26 +82,36 @@ const MARKER_SYMBOLS: usize = 4;
 /// Share of a channel's energy in the marker's tones: 1 for a clean marker,
 /// about 1/8 for noise and well under this for data.
 const MARKER_THRESHOLD: f32 = 0.5;
-/// The header's first byte; the other two are the length and its complement.
-const MAGIC: u8 = 0xCC;
 /// How much sound the listener keeps: longer than the longest round.
 const KEEP_SECS: f64 = 12.0;
 
 /// One round of `payload` as samples at `SAMPLE_RATE`, between -1 and 1.
-pub fn samples(payload: &[u8]) -> Vec<f32> {
-    assert!(payload.len() <= MAX_LEN, "too long for one round");
+/// A frame gets its CRC-32 added.
+pub fn samples(kind: Kind, payload: &[u8]) -> Vec<f32> {
+    let mut bytes = payload.to_vec();
+    if kind == Kind::Frame {
+        bytes.extend_from_slice(&crc32(payload).to_le_bytes());
+    }
+    round(kind.magic(), &bytes)
+}
+
+fn round(magic: u8, bytes: &[u8]) -> Vec<f32> {
+    assert!(bytes.len() <= MAX_LEN, "too long for one round");
     let rate = f64::from(SAMPLE_RATE);
     let mut out = vec![0.0; (LEAD_SECS * rate) as usize];
-    for symbol in symbols(payload) {
+    for symbol in symbols(magic, bytes) {
         sound(&mut out, &symbol, rate);
     }
     out.resize(out.len() + (TAIL_SECS * rate) as usize, 0.0);
     out
 }
 
-/// One round of `payload` as a 16-bit mono WAV file.
-pub fn wav(payload: &[u8]) -> Vec<u8> {
-    let samples = samples(payload);
+/// Rounds of `payloads`, one after another, as a 16-bit mono WAV file.
+pub fn wav(kind: Kind, payloads: &[&[u8]]) -> Vec<u8> {
+    let samples: Vec<f32> = payloads
+        .iter()
+        .flat_map(|payload| samples(kind, payload))
+        .collect();
     let data_len = (samples.len() * 2) as u32;
     let mut out = Vec::with_capacity(44 + samples.len() * 2);
     out.extend_from_slice(b"RIFF");
@@ -80,7 +134,7 @@ pub fn wav(payload: &[u8]) -> Vec<u8> {
 
 /// The tones of each symbol: the marker, the header, then the bytes, three
 /// to a symbol and zero-padded.
-fn symbols(payload: &[u8]) -> Vec<Vec<usize>> {
+fn symbols(magic: u8, payload: &[u8]) -> Vec<Vec<usize>> {
     let len = payload.len() as u8;
     let mut symbols: Vec<Vec<usize>> = (0..MARKER_SYMBOLS)
         .map(|index| {
@@ -89,7 +143,7 @@ fn symbols(payload: &[u8]) -> Vec<Vec<usize>> {
                 .collect()
         })
         .collect();
-    let header = [MAGIC, len, !len];
+    let header = [magic, len, !len];
     for bytes in std::iter::once(&header[..]).chain(payload.chunks(3)) {
         let mut padded = [0; 3];
         padded[..bytes.len()].copy_from_slice(bytes);
@@ -169,9 +223,9 @@ impl Listener {
         }
     }
 
-    /// Takes in samples. Returns the bytes of a round once one has been
-    /// heard whole.
-    pub fn push(&mut self, samples: &[f32]) -> Option<Vec<u8>> {
+    /// Takes in samples. Returns what a round carries once one has been
+    /// heard whole: a card as heard, or a frame whose CRC-32 matched.
+    pub fn push(&mut self, samples: &[f32]) -> Option<(Kind, Vec<u8>)> {
         self.pending.extend(samples);
         while self.pending.len() >= self.window {
             let frame = self.analyse();
@@ -272,7 +326,7 @@ impl Listener {
 
     /// Reads each round found once it has been heard whole. A round whose
     /// header does not read right is dropped.
-    fn decode_rounds(&mut self) -> Option<Vec<u8>> {
+    fn decode_rounds(&mut self) -> Option<(Kind, Vec<u8>)> {
         let mut index = 0;
         while index < self.rounds.len() {
             match self.decode(self.rounds[index]) {
@@ -280,9 +334,9 @@ impl Listener {
                 Round::Bad => {
                     self.rounds.remove(index);
                 }
-                Round::Heard(bytes) => {
+                Round::Heard(kind, bytes) => {
                     self.rounds.remove(index);
-                    return Some(bytes);
+                    return Some((kind, bytes));
                 }
             }
         }
@@ -315,9 +369,9 @@ impl Listener {
         let Some([magic, len, check]) = read(0) else {
             return Round::Waiting;
         };
-        if magic != MAGIC || check != !len {
+        let Some(kind) = Kind::of(magic).filter(|_| check == !len) else {
             return Round::Bad;
-        }
+        };
         let len = usize::from(len);
         let mut bytes = Vec::with_capacity(len + 2);
         for index in 0..len.div_ceil(3) {
@@ -327,14 +381,24 @@ impl Listener {
             }
         }
         bytes.truncate(len);
-        Round::Heard(bytes)
+        if kind == Kind::Frame {
+            let Some(at) = len.checked_sub(4) else {
+                return Round::Bad;
+            };
+            let crc = u32::from_le_bytes(bytes[at..].try_into().expect("4 bytes"));
+            bytes.truncate(at);
+            if crc32(&bytes) != crc {
+                return Round::Bad;
+            }
+        }
+        Round::Heard(kind, bytes)
     }
 }
 
 enum Round {
     Waiting,
     Bad,
-    Heard(Vec<u8>),
+    Heard(Kind, Vec<u8>),
 }
 
 #[cfg(test)]
@@ -360,7 +424,7 @@ mod tests {
     }
 
     /// Feeds `samples` in uneven pieces, as a microphone would.
-    fn listen(listener: &mut Listener, samples: &[f32]) -> Option<Vec<u8>> {
+    fn listen(listener: &mut Listener, samples: &[f32]) -> Option<(Kind, Vec<u8>)> {
         let mut heard = None;
         let mut at = 0;
         let mut size = 777;
@@ -377,13 +441,16 @@ mod tests {
     fn a_round_is_heard_back() {
         let payload = payload();
         let mut listener = Listener::new(SAMPLE_RATE);
-        assert_eq!(listen(&mut listener, &samples(&payload)), Some(payload));
+        assert_eq!(
+            listen(&mut listener, &samples(Kind::Card, &payload)),
+            Some((Kind::Card, payload))
+        );
     }
 
     #[test]
     fn a_round_is_heard_through_a_room_at_another_rate() {
         let payload = payload();
-        let round = samples(&payload);
+        let round = samples(Kind::Card, &payload);
         // The listener comes in halfway through a round, and hears the next.
         let mut played: Vec<f32> = round[round.len() / 2..].to_vec();
         played.extend_from_slice(&round);
@@ -409,7 +476,10 @@ mod tests {
             })
             .collect();
         let mut listener = Listener::new(44_100);
-        assert_eq!(listen(&mut listener, &resampled), Some(payload));
+        assert_eq!(
+            listen(&mut listener, &resampled),
+            Some((Kind::Card, payload))
+        );
     }
 
     #[test]
@@ -422,9 +492,33 @@ mod tests {
 
     #[test]
     fn a_wav_holds_the_round() {
-        let wav = wav(&[1, 2, 3]);
+        let wav = wav(Kind::Card, &[&[1, 2, 3], &[4]]);
         assert_eq!(&wav[..4], b"RIFF");
         assert_eq!(&wav[8..16], b"WAVEfmt ");
-        assert_eq!(wav.len(), 44 + samples(&[1, 2, 3]).len() * 2);
+        let rounds = samples(Kind::Card, &[1, 2, 3]).len() + samples(Kind::Card, &[4]).len();
+        assert_eq!(wav.len(), 44 + rounds * 2);
+    }
+
+    #[test]
+    fn a_frame_is_heard_back_after_its_check() {
+        let frame = payload();
+        let mut listener = Listener::new(SAMPLE_RATE);
+        assert_eq!(
+            listen(&mut listener, &samples(Kind::Frame, &frame)),
+            Some((Kind::Frame, frame.clone()))
+        );
+        // A frame whose check does not match was heard wrong, and is dropped.
+        let mut wrong = frame.clone();
+        wrong.extend_from_slice(&crc32(&frame).wrapping_add(1).to_le_bytes());
+        let mut listener = Listener::new(SAMPLE_RATE);
+        assert_eq!(
+            listen(&mut listener, &round(Kind::Frame.magic(), &wrong)),
+            None
+        );
+    }
+
+    #[test]
+    fn the_check_is_crc_32() {
+        assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
     }
 }
