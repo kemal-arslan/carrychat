@@ -24,6 +24,7 @@ import {
 } from "./api";
 import { MAX_NAME_BYTES, clockTime, fullTime, utf8Length } from "./format";
 import { useI18n } from "./i18n";
+import { soundInaudible } from "./prefs";
 import { Sheet } from "./Sheet";
 import { canListen, listenForCard, playCard, useSound } from "./sound";
 import { ViaIcon } from "./Via";
@@ -191,7 +192,7 @@ export function MyCardDialog({ profile, onClose }: { profile: Profile; onClose: 
       <textarea className="mono" rows={4} readOnly value={profile.card} onFocus={(event) => event.target.select()} />
       <p className="hint">{t.cardFingerprint}</p>
       <p className="fingerprint large">{profile.fingerprint}</p>
-      {playing.active && <p className="hint">{t.soundPlaying}</p>}
+      {playing.active && <p className="hint">{soundInaudible() ? t.soundPlayingInaudible : t.soundPlaying}</p>}
       {playError && <p className="hint error">{playError}</p>}
       {nfc && <p className="hint">{t.nfcOffer}</p>}
       <div className="dialog-actions">

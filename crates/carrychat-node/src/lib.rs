@@ -36,6 +36,7 @@ pub use crate::reticulum::{ReticulumPeer, ReticulumStatus};
 pub use crate::sound::{HeardCard, SoundListener};
 use crate::store::Store;
 pub use crate::sync::Link;
+pub use carrychat_proto::sound::Band as SoundBand;
 
 const DATABASE_FILE: &str = "carrychat.db";
 
@@ -377,16 +378,16 @@ impl Node {
         self.shared.engine().profile()
     }
 
-    /// This node's card as sound (§3.2): one round, a WAV file to play over
-    /// and over until the other device has heard it.
-    pub fn card_sound(&self) -> Result<Vec<u8>> {
-        sound::card_wav(&self.profile().card)
+    /// This node's card as sound in `band` (§3.2): one round, a WAV file to
+    /// play over and over until the other device has heard it.
+    pub fn card_sound(&self, band: SoundBand) -> Result<Vec<u8>> {
+        sound::card_wav(&self.profile().card, band)
     }
 
-    /// One of our messages as sound (§9.10): its frames, one round each, a
-    /// WAV file to play a few times for a device nearby that listens. Its
-    /// journey shows it left as sound.
-    pub fn message_sound(&self, message_id: i64) -> Result<Vec<u8>> {
+    /// One of our messages as sound in `band` (§9.10): its frames, one round
+    /// each, a WAV file to play a few times for a device nearby that
+    /// listens. Its journey shows it left as sound.
+    pub fn message_sound(&self, message_id: i64, band: SoundBand) -> Result<Vec<u8>> {
         let frames = self
             .shared
             .engine()
@@ -398,7 +399,7 @@ impl Node {
             }
             _ => {}
         }
-        Ok(sound::frames_wav(&frames))
+        Ok(sound::frames_wav(&frames, band))
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<Event> {

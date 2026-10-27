@@ -10,7 +10,7 @@ use std::sync::Mutex;
 use carrychat_node::{
     ChannelView, ContactView, GroupMessageView, GroupView, HeardCard, ImportReport, InternetConfig,
     Journey, LanConfig, LoraDevice, LoraPort, LoraStatus, MessageView, MutedView, NearbyPerson,
-    Node, PostView, Profile, ReticulumStatus, Settings, SoundListener, Status,
+    Node, PostView, Profile, ReticulumStatus, Settings, SoundBand, SoundListener, Status,
 };
 use data_encoding::BASE64;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -150,22 +150,41 @@ fn add_contact(state: State<'_, AppState>, card: String) -> CommandResult<Contac
     state.node()?.add_contact(&card).map_err(text)
 }
 
+/// The band sound plays in: above hearing when `inaudible`.
+fn sound_band(inaudible: bool) -> SoundBand {
+    if inaudible {
+        SoundBand::Inaudible
+    } else {
+        SoundBand::Audible
+    }
+}
+
 /// One of our messages as sound (§9.10): a WAV file the page plays a few
 /// times for a device nearby that listens.
 #[tauri::command]
 async fn message_sound(
     state: State<'_, AppState>,
     message_id: i64,
+    inaudible: bool,
 ) -> CommandResult<tauri::ipc::Response> {
-    let wav = state.node()?.message_sound(message_id).map_err(text)?;
+    let wav = state
+        .node()?
+        .message_sound(message_id, sound_band(inaudible))
+        .map_err(text)?;
     Ok(tauri::ipc::Response::new(wav))
 }
 
 /// This device's card as sound (§3.2): one round, a WAV file the page
 /// plays over and over.
 #[tauri::command]
-async fn card_sound(state: State<'_, AppState>) -> CommandResult<tauri::ipc::Response> {
-    let wav = state.node()?.card_sound().map_err(text)?;
+async fn card_sound(
+    state: State<'_, AppState>,
+    inaudible: bool,
+) -> CommandResult<tauri::ipc::Response> {
+    let wav = state
+        .node()?
+        .card_sound(sound_band(inaudible))
+        .map_err(text)?;
     Ok(tauri::ipc::Response::new(wav))
 }
 

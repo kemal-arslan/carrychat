@@ -68,7 +68,7 @@ Kimliğini oluştur ve kartını (**Kartım**, QR kod olarak da; **Ben** sekmesi
 
 **Ağ**'daki **Reticulum**, bir [Reticulum](https://reticulum.network) düğümüne bağlanır (örneğin aynı bilgisayarda TCP sunucu arayüzü açık bir `rnsd`) ve o ağdaki diğer CarryChat düğümlerine, kaç atlama uzakta olursa olsun ulaşır. Son altı saatte kendini duyuran CarryChat düğümlerini gösterir.
 
-**Ağ**'daki **Ses**, uygulama açıkken hemen yanındaki bir cihazın sesle çaldığı mesajları dinler. Sohbette, mesaj alanının yanındaki hoparlör düğmesi yazdığını sesle de gönderir; mesaj üç kez çalınır. Yavaştır (saniyede yaklaşık 30 bayt) ama başka hiçbir şey gerektirmez: mesaj uçtan uca mühürlü olduğu için tonları duyanlar onu okuyamaz.
+**Ağ**'daki **Ses**, uygulama açıkken hemen yanındaki bir cihazın sesle çaldığı mesajları dinler. Sohbette, mesaj alanının yanındaki hoparlör düğmesi yazdığını sesle de gönderir; mesaj üç kez çalınır. Yavaştır (saniyede yaklaşık 30 bayt) ama başka hiçbir şey gerektirmez: mesaj uçtan uca mühürlü olduğu için tonları duyanlar onu okuyamaz. Hemen altındaki **Duyulmayan ses**, kartları ve mesajları çoğu yetişkinin duymadığı 18–20 kHz'de, saniyede yaklaşık 23 baytla çalar; her hoparlör çalamaz, dinleme ise ikisini de duyar.
 
 `npm run dev`, uygulamayı derlemeden arayüzü örnek verilerle bir tarayıcıda açar.
 

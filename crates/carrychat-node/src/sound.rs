@@ -4,7 +4,7 @@
 
 use carrychat_proto::frame::Frame;
 use carrychat_proto::identity::ContactCard;
-use carrychat_proto::sound::{self, Kind};
+use carrychat_proto::sound::{self, Band, Kind};
 use serde::Serialize;
 
 use crate::{Node, Result, Shared};
@@ -72,17 +72,19 @@ fn take_frame(shared: &Shared, bytes: &[u8]) {
     }
 }
 
-/// `card` as one round of sound, a WAV file to play over and over.
-pub(crate) fn card_wav(card: &str) -> Result<Vec<u8>> {
+/// `card` as one round of sound in `band`, a WAV file to play over and
+/// over.
+pub(crate) fn card_wav(card: &str, band: Band) -> Result<Vec<u8>> {
     Ok(sound::wav(
+        band,
         Kind::Card,
         &[&ContactCard::from_text(card)?.to_bytes()],
     ))
 }
 
-/// Frames as rounds of sound, one after another, in a WAV file.
-pub(crate) fn frames_wav(frames: &[Frame]) -> Vec<u8> {
+/// Frames as rounds of sound in `band`, one after another, in a WAV file.
+pub(crate) fn frames_wav(frames: &[Frame], band: Band) -> Vec<u8> {
     let bytes: Vec<Vec<u8>> = frames.iter().map(Frame::to_bytes).collect();
     let rounds: Vec<&[u8]> = bytes.iter().map(Vec::as_slice).collect();
-    sound::wav(Kind::Frame, &rounds)
+    sound::wav(band, Kind::Frame, &rounds)
 }

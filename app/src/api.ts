@@ -281,10 +281,10 @@ export interface Api {
   rename(name: string): Promise<Profile>;
   contacts(): Promise<Contact[]>;
   addContact(card: string): Promise<Contact>;
-  /** This device's card as sound: one round, a WAV file to play over and over. */
-  cardSound(): Promise<ArrayBuffer>;
-  /** One of our messages as sound: a WAV file to play a few times for a device nearby that listens. */
-  messageSound(messageId: number): Promise<ArrayBuffer>;
+  /** This device's card as sound, above hearing if `inaudible`: one round, a WAV file to play over and over. */
+  cardSound(inaudible: boolean): Promise<ArrayBuffer>;
+  /** One of our messages as sound, above hearing if `inaudible`: a WAV file to play a few times for a device nearby that listens. */
+  messageSound(messageId: number, inaudible: boolean): Promise<ArrayBuffer>;
   /**
    * Starts listening for a card played as sound, from a microphone at `rate` samples a second. Gives the
    * listening's number, which the calls for it name, so that one ended late cannot end the next.
@@ -425,8 +425,8 @@ async function call<T>(command: string, args?: Record<string, unknown> | Uint8Ar
 /** When the preview started listening for a card. */
 let listeningSince = 0;
 
-/** Half a second of 2 kHz, as a WAV file, for the preview's card sound. */
-function beep(): ArrayBuffer {
+/** Half a second of `hz`, as a WAV file, for the preview's card sound. */
+function beep(hz: number): ArrayBuffer {
   const rate = 48_000;
   const samples = rate / 2;
   const view = new DataView(new ArrayBuffer(44 + samples * 2));
@@ -444,7 +444,7 @@ function beep(): ArrayBuffer {
   text(36, "data");
   view.setUint32(40, samples * 2, true);
   for (let index = 0; index < samples; index++) {
-    view.setInt16(44 + index * 2, Math.sin((2 * Math.PI * 2000 * index) / rate) * 8000, true);
+    view.setInt16(44 + index * 2, Math.sin((2 * Math.PI * hz * index) / rate) * 8000, true);
   }
   return view.buffer;
 }
@@ -458,9 +458,10 @@ function desktopApi(): Api {
     contacts: () => call("contacts"),
     addContact: (card) => call("add_contact", { card }),
     // Android hands raw bytes to the page as an array of numbers, not a buffer.
-    cardSound: () => call<ArrayBuffer | ArrayBufferView | number[]>("card_sound").then(toArrayBuffer),
-    messageSound: (messageId) =>
-      call<ArrayBuffer | ArrayBufferView | number[]>("message_sound", { messageId }).then(toArrayBuffer),
+    cardSound: (inaudible) =>
+      call<ArrayBuffer | ArrayBufferView | number[]>("card_sound", { inaudible }).then(toArrayBuffer),
+    messageSound: (messageId, inaudible) =>
+      call<ArrayBuffer | ArrayBufferView | number[]>("message_sound", { messageId, inaudible }).then(toArrayBuffer),
     listenStart: (rate) => call("listen_start", { rate }),
     // The samples go as the request's body, not as JSON, after the listening's number.
     listenHeard(listening, samples) {
@@ -745,11 +746,11 @@ function previewApi(): Api {
     async contacts() {
       return summarize();
     },
-    async cardSound() {
-      return beep();
+    async cardSound(inaudible) {
+      return beep(inaudible ? 18_000 : 2000);
     },
-    async messageSound() {
-      return beep();
+    async messageSound(_messageId, inaudible) {
+      return beep(inaudible ? 18_000 : 2000);
     },
     async listenStart() {
       listeningSince = Date.now();

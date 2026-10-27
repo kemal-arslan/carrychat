@@ -4,6 +4,7 @@ import {
   CellTowerIcon,
   DevicesIcon,
   DownloadSimpleIcon,
+  EarSlashIcon,
   ExportIcon,
   GlobeSimpleIcon,
   GraphIcon,
@@ -18,6 +19,7 @@ import { api, type LoraStatus, type ReticulumStatus, type Status, type WifiAware
 import { useI18n } from "./i18n";
 import { bluetoothLabel, internetLabel, lanLabel, linkStates, loraLabel, reticulumLabel, wifiAwareLabel } from "./links";
 import { LoraSheet } from "./LoraSheet";
+import { setSoundInaudible, soundInaudible } from "./prefs";
 import { ReticulumSheet } from "./ReticulumSheet";
 import { canListen, listenForMessages, useMessageListening } from "./sound";
 
@@ -50,6 +52,7 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
   const [reticulum, setReticulum] = useState<ReticulumStatus | null>(null);
   const [reticulumOpen, setReticulumOpen] = useState(false);
   const soundListening = useMessageListening();
+  const [inaudible, setInaudible] = useState(soundInaudible);
 
   useEffect(() => {
     api.wifiAware().then(setWifiAware);
@@ -200,6 +203,24 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
             />
           </label>
         )}
+        <label className="row-item toggle" title={t.soundInaudibleHint}>
+          <span className="tile">
+            <EarSlashIcon size={20} />
+          </span>
+          <span className="row-text">
+            <b>{t.soundInaudibleName}</b>
+            <span>{inaudible ? t.soundInaudibleRow : t.stateOff}</span>
+          </span>
+          <input
+            type="checkbox"
+            checked={inaudible}
+            onChange={(event) => {
+              setInaudible(event.target.checked);
+              setSoundInaudible(event.target.checked);
+            }}
+            aria-label={t.soundInaudibleSetting}
+          />
+        </label>
         <button className="row-item" title={t.reticulumHint} onClick={() => setReticulumOpen(true)}>
           <span className="tile">
             <GraphIcon size={20} />

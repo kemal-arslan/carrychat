@@ -105,6 +105,13 @@ const en = {
   soundModeNote: "Messages also go out as sound: on the other device, Network → Sound must be listening.",
   soundSending: "Playing as sound…",
   soundMessageFailed: "The message could not be played as sound.",
+  soundPlayingInaudible:
+    "Playing your card above hearing, so you hear nothing. Hold the phones side by side; on theirs, Add contact → Listen.",
+  soundInaudibleName: "Above hearing",
+  soundInaudibleHint:
+    "Cards and messages play at 18 to 20 kHz, which most adults do not hear. Not every speaker plays it; listening hears both.",
+  soundInaudibleSetting: "Play sound above hearing",
+  soundInaudibleRow: "Plays at 18–20 kHz, which most adults do not hear",
   nfcOffer: "Or hold this phone back to back with theirs, while Add contact is open on it.",
   nfcRead: "Or hold this phone back to back with theirs, while My card is open on it.",
   copied: "Copied",
@@ -497,6 +504,13 @@ const tr: Strings = {
   soundModeNote: "Mesajlar sesle de gider: karşı cihazda Ağ → Ses dinlemede olmalı.",
   soundSending: "Sesle çalınıyor…",
   soundMessageFailed: "Mesaj sesle çalınamadı.",
+  soundPlayingInaudible:
+    "Kartın duyulmayan tonlarla çalınıyor, bir şey duymazsın. Telefonları yan yana tut; karşıdaki Kişi ekle → Dinle'ye bassın.",
+  soundInaudibleName: "Duyulmayan ses",
+  soundInaudibleHint:
+    "Kartlar ve mesajlar çoğu yetişkinin duymadığı 18–20 kHz'de çalınır. Her hoparlör çalamaz; dinlerken ikisi de duyulur.",
+  soundInaudibleSetting: "Sesi duyulmayan tonlarla çal",
+  soundInaudibleRow: "18–20 kHz'de çalar, çoğu yetişkin duymaz",
   nfcOffer: "Ya da bu telefonu karşıdakinin telefonuyla sırt sırta tut; onda Kişi ekle açık olsun.",
   nfcRead: "Ya da bu telefonu karşıdakinin telefonuyla sırt sırta tut; onda Kartım açık olsun.",
   copied: "Kopyalandı",

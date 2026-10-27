@@ -1,6 +1,6 @@
 //! A card played as sound by one node is heard by another's listener.
 
-use carrychat_node::{Event, HeardCard, Node, SoundListener, Via};
+use carrychat_node::{Event, HeardCard, Node, SoundBand, SoundListener, Via};
 use tempfile::TempDir;
 
 /// The samples of a WAV file `card_sound` or `message_sound` made.
@@ -15,16 +15,17 @@ fn samples_of(wav: &[u8]) -> Vec<f32> {
 fn a_card_played_as_sound_is_heard_and_verified() {
     let dir = TempDir::new().unwrap();
     let node = Node::create(dir.path(), "Ayşe Yılmaz").unwrap();
-    let samples = samples_of(&node.card_sound().unwrap());
-
     let other = TempDir::new().unwrap();
     let listening = Node::create(other.path(), "Deniz").unwrap();
-    let mut listener = SoundListener::new(48_000);
-    let heard = listener
-        .push(&listening, &samples)
-        .expect("the card was not heard");
-    assert_eq!(heard.name, "Ayşe Yılmaz");
-    assert_eq!(heard.card, node.profile().card);
+    for band in [SoundBand::Audible, SoundBand::Inaudible] {
+        let samples = samples_of(&node.card_sound(band).unwrap());
+        let mut listener = SoundListener::new(48_000);
+        let heard = listener
+            .push(&listening, &samples)
+            .expect("the card was not heard");
+        assert_eq!(heard.name, "Ayşe Yılmaz");
+        assert_eq!(heard.card, node.profile().card);
+    }
 }
 
 #[test]
@@ -45,6 +46,15 @@ fn a_card_read_over_nfc_is_verified() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_message_played_as_sound_reaches_a_node_that_listens() {
+    message_played_in(SoundBand::Audible).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_played_above_hearing_reaches_a_node_that_listens() {
+    message_played_in(SoundBand::Inaudible).await;
+}
+
+async fn message_played_in(band: SoundBand) {
     let (alice_dir, bob_dir) = (TempDir::new().unwrap(), TempDir::new().unwrap());
     let alice = Node::create(alice_dir.path(), "Ayşe").unwrap();
     let bob = Node::create(bob_dir.path(), "Bora").unwrap();
@@ -55,7 +65,7 @@ async fn a_message_played_as_sound_reaches_a_node_that_listens() {
     // Long enough to need more than one round.
     let text = "Yangın merdiveni kapalı, arka kapıdan çıkın. ".repeat(6);
     let message = alice.send_text(bob_id, &text).unwrap();
-    let samples = samples_of(&alice.message_sound(message.id).unwrap());
+    let samples = samples_of(&alice.message_sound(message.id, band).unwrap());
     let mut listener = SoundListener::new(48_000);
     for piece in samples.chunks(12_000) {
         assert_eq!(listener.push(&bob, piece), None);
