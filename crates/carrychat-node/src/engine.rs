@@ -436,20 +436,19 @@ impl Engine {
         }
     }
 
-    /// Carried bundles that have not gone up to the internet relays yet, for a
-    /// node that just reached them: it may have taken them over the local
-    /// network or from a file while it had no internet. They count as
-    /// uploaded from now on.
-    pub fn take_uploads(&mut self, now: u32) -> Result<Vec<(Frame, RecipientTag)>> {
+    /// Carried bundles that no internet relay has taken yet, for a node that
+    /// just reached one: it may have taken them over the local network or
+    /// from a file while it had no internet, or a relay may have refused
+    /// them. They count as uploaded once a relay accepts them.
+    pub fn uploads(&self, now: u32) -> Result<Vec<(Frame, RecipientTag)>> {
         let mut uploads = Vec::new();
         for bundle in self.store.bundles_to_upload(now)? {
             uploads.extend(self.passed_on(&bundle)?.map(|frame| (frame, bundle.tag)));
-            self.store.mark_uploaded(bundle.id)?;
         }
         Ok(uploads)
     }
 
-    /// Notes that a carried bundle went up to the relays as it arrived.
+    /// Notes that an internet relay accepted a carried bundle.
     pub fn mark_uploaded(&self, id: BundleId) -> Result<()> {
         self.store.mark_uploaded(id)
     }

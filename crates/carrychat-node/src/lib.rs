@@ -948,15 +948,8 @@ impl Shared {
                 self.reticulum.send(frame, false);
             }
         }
+        // A carried bundle counts as uploaded once a relay accepts it.
         self.internet.post_handled(&handled);
-        // A bundle posted as it arrives need not go up again on reconnecting.
-        if handled.outcome == Outcome::Carried && self.internet.connected() > 0 {
-            for frame in &handled.relay {
-                if let Frame::Bundle(bundle) | Frame::Chunk(bundle) = frame {
-                    let _ = self.engine().mark_uploaded(bundle.id);
-                }
-            }
-        }
         self.flush_own();
         if handled
             .events

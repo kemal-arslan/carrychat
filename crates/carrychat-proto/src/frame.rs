@@ -11,7 +11,10 @@ pub const MESHTASTIC_MTU: usize = 233;
 pub const FRAGMENT_HEADER_LEN: usize = 11;
 pub const MAX_FRAGMENTS: usize = 32;
 pub const TOMBSTONE_FRAME_LEN: usize = 26;
-pub const DEFAULT_REASSEMBLY_TIMEOUT_SECS: u32 = 600;
+/// How long an incomplete bundle waits for its other fragments: long enough
+/// for the largest bundle over LoRa at Meshtastic's slowest preset, sent
+/// within the airtime budget (§9.2), which takes over five hours.
+pub const DEFAULT_REASSEMBLY_TIMEOUT_SECS: u32 = 6 * 60 * 60;
 
 const TYPE_LEN: usize = 1;
 const TYPE_BUNDLE: u8 = 0x01;
@@ -273,6 +276,27 @@ mod tests {
                 panic!("expected fragments");
             };
             if let Some(bundle) = reassembler.push(fragment, NOW).unwrap() {
+                done = Some(bundle);
+            }
+        }
+        assert_eq!(done, Some(bundle));
+    }
+
+    #[test]
+    fn fragments_paced_by_lora_airtime_still_come_together() {
+        // The largest bundle at Meshtastic's slowest preset takes over five
+        // hours to send within the airtime budget.
+        let bundle = bundle_with_body(1000);
+        let frames = frames_for(&bundle, MESHTASTIC_MTU).unwrap();
+        let mut reassembler = Reassembler::default();
+        let count = frames.len() as u32;
+        let mut done = None;
+        for (index, frame) in frames.into_iter().enumerate() {
+            let Frame::Fragment(fragment) = frame else {
+                panic!("expected fragments")
+            };
+            let at = NOW + index as u32 * (5 * 60 * 60 / count);
+            if let Some(bundle) = reassembler.push(fragment, at).unwrap() {
                 done = Some(bundle);
             }
         }

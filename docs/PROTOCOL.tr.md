@@ -160,7 +160,7 @@ Ek yük: 46 (başlık) + 5 (açık metin başlığı) + 16 (Poly1305 etiketi) = 
 
 ### 5.5 Tanıtımlar
 
-Tanıtım, gönderenin kartına henüz sahip olmayan birine gönderilen ilk mesajdır. Yalnızca gönderenin alıcının kartına sahip olması gerekir. §5'teki başlığa sahip bir zarftır, şu farklarla: alıcı etiketi 8 rastgele bayttır ve şifreli metin alanı tek kullanımlık bir açık anahtarla başlar:
+Tanıtım, gönderenin kartına henüz sahip olmayan birine gönderilen ilk mesajdır. Yalnızca gönderenin alıcının kartına sahip olması gerekir. §5'teki başlığa sahip bir zarftır, şu farklarla: alıcı etiketi, alıcının oluşturulduğu günkü posta kutusu etiketidir (§9.3), böylece onu internet aktarıcılarına taşıyan bir düğüm, alıcının kim olduğunu bilmeden onu alıcının baktığı yere yayımlar; şifreli metin alanı da tek kullanımlık bir açık anahtarla başlar:
 
 ```
 e          = a fresh X25519 key pair, used once
@@ -359,7 +359,7 @@ Aktarımlar çerçeve taşır. MTU'suna bütün bir zarf sığan bir aktarım (y
 | `0x03` `tombstone` | `type \|\| hop_limit (1) \|\| bundle_id (8) \|\| ack_secret (16)`, 26 bayt |
 | `0x04` dilim | `type \|\| bundle`, bir dosya dilimi (§5.9). Asla LoRa üzerinden gönderilmez. |
 
-`1 + len(bundle) > mtu` ise zarfın baytları `mtu − 11` baytlık dilimlere bölünür; dilim sayısı 2 ile 32 arasındadır. Alıcılar bir zaman aşımıyla (varsayılan 10 dakika) ve eksik zarf sayısına bir üst sınırla zarf kimliğine göre yeniden birleştirir, sonra birleşen zarfın parçalarıyla aynı kimliği taşıdığını denetler. Aktarıcılar iletmeden önce yeniden birleştirir, çünkü atlama sınırına ve bitiş zamanına ihtiyaç duyarlar.
+`1 + len(bundle) > mtu` ise zarfın baytları `mtu − 11` baytlık dilimlere bölünür; dilim sayısı 2 ile 32 arasındadır. Alıcılar bir zaman aşımıyla (varsayılan 6 saat: en büyük zarf LoRa üzerinden Meshtastic'in en yavaş ayarında, §9.2'deki yayın süresi payı içinde beş saatten uzun sürer) ve eksik zarf sayısına bir üst sınırla zarf kimliğine göre yeniden birleştirir, sonra birleşen zarfın parçalarıyla aynı kimliği taşıdığını denetler. Aktarıcılar iletmeden önce yeniden birleştirir, çünkü atlama sınırına ve bitiş zamanına ihtiyaç duyarlar.
 
 `0x10` ile `0x1f` arasındaki çerçeve türleri, aktarıma özgü denetim trafiği için ayrılmıştır (§9.1).
 
@@ -426,7 +426,7 @@ Bu eşlemeler her aktarım hayata geçirildiğinde kesinleşir (README'deki yol 
 `crates/carrychat-node/src/internet.rs` içinde gerçeklenmiştir.
 
 - **Olaylar.** Her zarf ve `tombstone`, `9378` türünde tek bir Nostr olayı (event, NIP-01) olarak gider; bu, Nostr'a kayıtlı olmayan geçici bir numaradır. İçerik, dolgusuz base64url ile kodlanmış çerçevedir (§7). Zarf olayının etiketi `["x", hex(tag)]`, `tombstone` olayınınki `["b", hex(bundle_id)]` olur.
-- **Etiketler.** Çift zarfı kendi alıcı etiketiyle yayımlanır. Kendi etiketi rastgele olan tanıtım ise alıcının posta kutusu etiketiyle yayımlanır; bu etiketi alıcının kartına sahip olan herkes hesaplayabilir:
+- **Etiketler.** Çift zarfı kendi alıcı etiketiyle yayımlanır. Tanıtım, aynı zamanda kendi etiketi de olan (§5.5) alıcının posta kutusu etiketiyle yayımlanır; bu etiketi alıcının kartına sahip olan herkes hesaplayabilir. Rastgele etiketli eski bir tanıtımı yapmış olan düğüm de onu posta kutusu etiketiyle yayımlar:
 
   ```
   mailbox_tag(pk, d) = HMAC(H("carrychat/v0/mailbox" || pk), u32(d))[0..8]
@@ -437,7 +437,7 @@ Bu eşlemeler her aktarım hayata geçirildiğinde kesinleşir (README'deki yol 
 - **Zaman.** Bir zarf olayının `created_at` değeri `expires_at − 604800`'dür; bu asla zarfın oluşturulma zamanından sonra değildir. `tombstone` olayınınki yayımlandığı zamandır.
 - **Abonelik.** Düğüm her aktarıcıdan, etiket penceresi (§4.1) boyunca tüm kişilerinin çift etiketleri ve kendi posta kutusu etiketleriyle `{"kinds": [9378], "#x": [...], "since": now − 691200}` ister; ayrıca hâlâ alındı bekleyen kendi zarflarının kimlikleriyle `{"kinds": [9378], "#b": [...]}` ister. Aboneliği kişileri değiştiğinde, gönderim yaptığında ve her 10 dakikada bir yeniler.
 - **Bağlantılar.** Düğüm her 20 saniyede bir her aktarıcıya ping gönderir, 40 saniye sessiz kalan bağlantıyı bırakır ve yeniden bağlanır. Gönderimden hemen sonra da her aktarıcıya ping gönderir ve 5 saniye içinde yanıt vermeyen bağlantıyı bırakır. Yeniden bağlandığında bekleyen zarflarını bir kez daha yayımlar. Aksi hâlde başka bir ağa geçen bir bilgisayar, ölü bir bağlantıyı fark etmeden dakikalarca tutabilir ve ona gönderdiklerini kaybedebilir.
-- **Düğümün yayımladıkları.** Kendi zarfları (gönderdiğinde ve her bağlantıda yeniden), aldığı zarfların `tombstone`'ları ve ağ geçidi olarak, taşıdığı ve başka bir bağlantıdan gelmiş her zarf: bir aktarıcı bağlıysa geldiği anda, değilse bir sonraki bağlantıda.
+- **Düğümün yayımladıkları.** Kendi zarfları (gönderdiğinde ve her bağlantıda yeniden), aldığı zarfların `tombstone`'ları ve ağ geçidi olarak, taşıdığı ve başka bir bağlantıdan gelmiş her zarf: bir aktarıcı bağlıysa geldiği anda ve bir aktarıcı onu `OK` ile kabul edene kadar her bağlantıda. Bir aktarıcının reddettiği zarf bir sonraki bağlantıda yeniden gönderilir.
 - **Düğümün aldıkları.** Yalnızca kendisine gelen zarflar ve `tombstone`'lar. Bir aktarıcıdan gelen ve açılamayan zarf taşınmaz, atılır; böylece bir aktarıcı düğümün deposunu dolduramaz.
 - **Tor.** Düğüm aktarıcılara Tor üzerinden ulaşabilir; her aktarıcı kendi devresinde olur ve aktarıcının ana makine adı çıkış düğümünde çözülür. Böyle bir düğüm asla doğrudan bağlanmaz: Tor çalışmadığı sürece interneti hiç kullanmaz.
 - **Aktarıcılar** etiketleri, boyutları ve zamanlamayı, düğüm Tor üzerinden gelmiyorsa IP adresini de görür. Ayrıca tek bir bağlantının hangi etiketleri birlikte istediğini görürler; bu da bir gün içinde bir düğümün kişilerine ait etiketleri birbirine bağlar.
@@ -513,7 +513,7 @@ Android uygulamasında (`WifiDirectLink.kt`) gerçeklenmiştir; uygulama, Wi-Fi 
 
 **v0 şunları sağlamaz:**
 
-- **Gizli tanıtımlar.** Bir tanıtım göndericisine ya da alıcısına bağlanamaz, ama boyutu onu çoğu çift zarfından ayırır.
+- **Gizli tanıtımlar.** Bir tanıtım göndericisine bağlanamaz, ama alıcının kartına sahip olan herkes, her bağlantıda, etiketinden (alıcının posta kutusu etiketi) onun alıcıya gittiğini anlayabilir. Boyutu da onu çoğu çift zarfından ayırır.
 - **Her zarf için ileri gizlilik.** Ratchet mesajlarında (§5.6) vardır: sonradan bir cihazdan alınan anahtar, cihazın daha önce almış olduğu kaydedilmiş mesajları açmaz; her yönde birer yanıt gittikten sonra sonrakileri de açmaz. Tanıtımlarda, oturumsuz `K_enc` zarflarında ve sürüm 1'den önceki zarflarda yoktur; ayrıca bir cihazın X25519 gizli anahtarını ele geçiren, o cihaza karşı kişilerinden herhangi birinin kimliğine bürünebilir. İleri gizlilik kaydedilmiş trafiği korur, cihazda tutulan geçmişi değil.
 - **Radyo üst verisi gizliliği.** Bir LoRa yayını, yayını yapan Meshtastic ya da MeshCore düğümünü ve yön bulma ekipmanına onun konumunu açığa çıkarır. v0 dolgu yapmadığı için zarf boyutları ve zamanlama görünürdür.
 - **Ağda yeniden oynatmaya karşı koruma.** Kaydedilmiş bir zarf, süresi dolana kadar yeniden ağa sokulabilir. Alıcılar kopyaları atar, ama yeniden oynatmalar yine de yayın süresi harcar.
@@ -553,7 +553,7 @@ Android uygulamasında (`WifiDirectLink.kt`) gerçeklenmiştir; uygulama, Wi-Fi 
 | MeshCore kanalı, veri türü | `#carrychat`, `0xFFCC` |
 | LoRa yayın süresi bütçesi | Zamanın %2.5'i, en çok 20 s'lik patlamalar |
 | Zarf başına en çok parça | 32 |
-| Yeniden birleştirme zaman aşımı | 600 s |
+| Yeniden birleştirme zaman aşımı | 21600 s (6 sa) |
 | Bluetooth LE servisi | `43524348-a0c5-4a3e-9b31-6f2d8e7c1a01` |
 | Bluetooth LE akış karakteristiği | `43524348-a0c5-4a3e-9b31-6f2d8e7c1a02` |
 | Wi-Fi Aware servis adı | `carrychat` |

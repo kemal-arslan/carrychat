@@ -160,7 +160,7 @@ Overhead is 46 (header) + 5 (plaintext header) + 16 (Poly1305 tag) = **67 bytes*
 
 ### 5.5 Introductions
 
-An introduction is a first message to someone who does not have the sender's card yet. Only the sender needs the recipient's card. It is a bundle with the header of §5, except that its recipient tag is 8 random bytes, and its ciphertext field starts with a one-time public key:
+An introduction is a first message to someone who does not have the sender's card yet. Only the sender needs the recipient's card. It is a bundle with the header of §5, except that its recipient tag is the recipient's mailbox tag for the day it is created (§9.3), so that a node carrying it to the internet relays posts it where the recipient looks without knowing who that is, and its ciphertext field starts with a one-time public key:
 
 ```
 e          = a fresh X25519 key pair, used once
@@ -359,7 +359,7 @@ Transports move frames. A transport whose MTU fits a whole bundle (local network
 | `0x03` tombstone | `type \|\| hop_limit (1) \|\| bundle_id (8) \|\| ack_secret (16)`, 26 bytes |
 | `0x04` chunk | `type \|\| bundle`, a file chunk (§5.9). Never sent over LoRa. |
 
-If `1 + len(bundle) > mtu`, the bundle bytes are split into chunks of `mtu − 11` bytes, from 2 to 32 of them. Receivers reassemble by bundle id with a timeout (10 minutes by default) and a cap on the number of incomplete bundles, then check that the reassembled bundle carries the same id as its fragments. Relays reassemble before forwarding, because they need the hop limit and the expiry.
+If `1 + len(bundle) > mtu`, the bundle bytes are split into chunks of `mtu − 11` bytes, from 2 to 32 of them. Receivers reassemble by bundle id with a timeout (6 hours by default: the largest bundle over LoRa at Meshtastic's slowest preset takes over five hours within the airtime budget of §9.2) and a cap on the number of incomplete bundles, then check that the reassembled bundle carries the same id as its fragments. Relays reassemble before forwarding, because they need the hop limit and the expiry.
 
 Frame types `0x10` to `0x1f` are reserved for transport-local control traffic (§9.1).
 
@@ -426,7 +426,7 @@ Implemented in `crates/carrychat-node/src/lora.rs`, with the devices' protocols 
 Implemented in `crates/carrychat-node/src/internet.rs`.
 
 - **Events.** Every bundle and tombstone travels as one Nostr event (NIP-01) of kind `9378`, a provisional number not registered with Nostr. The content is the frame (§7) in base64url without padding. A bundle event has the tag `["x", hex(tag)]`, a tombstone event `["b", hex(bundle_id)]`.
-- **Tags.** A pair bundle is posted under its recipient tag. An introduction, whose own tag is random, is posted under the recipient's mailbox tag, which anyone holding the recipient's card can compute:
+- **Tags.** A pair bundle is posted under its recipient tag. An introduction is posted under the recipient's mailbox tag, which is also its own tag (§5.5) and which anyone holding the recipient's card can compute. A node that made an older introduction, with a random tag, posts it under the mailbox tag too:
 
   ```
   mailbox_tag(pk, d) = HMAC(H("carrychat/v0/mailbox" || pk), u32(d))[0..8]
@@ -437,7 +437,7 @@ Implemented in `crates/carrychat-node/src/internet.rs`.
 - **Time.** A bundle event's `created_at` is `expires_at − 604800`, never later than the bundle's creation. A tombstone event's is the time it is posted.
 - **Subscription.** A node asks every relay for `{"kinds": [9378], "#x": [...], "since": now − 691200}` with the pair tags of all its contacts and its own mailbox tags over the tag window (§4.1), and for `{"kinds": [9378], "#b": [...]}` with the ids of its own bundles still waiting for a receipt. It renews the subscription when its contacts change, when it sends, and every 10 minutes.
 - **Connections.** A node pings every relay every 20 seconds and drops a connection that has been silent for 40, then connects again. Right after sending, it also pings every relay and drops a connection that does not answer within 5 seconds. On connecting again it posts its waiting bundles once more. A computer that moves to another network can otherwise keep a dead connection for minutes without noticing, and lose what it sends into it.
-- **What a node posts.** Its own bundles when it sends them and again on every connection, the tombstones of bundles it receives, and, as a gateway, every bundle it carries that came over another link: as it arrives if a relay is connected, otherwise on the next connection.
+- **What a node posts.** Its own bundles when it sends them and again on every connection, the tombstones of bundles it receives, and, as a gateway, every bundle it carries that came over another link: as it arrives if a relay is connected, and on every connection until a relay accepts it with `OK`. A bundle a relay refuses goes up again on the next connection.
 - **What a node takes.** Only bundles for itself and tombstones. A bundle from a relay that does not open is dropped, not carried, so a relay cannot fill a node's store.
 - **Tor.** A node may reach the relays over Tor, each relay on a circuit of its own, with the relay's host name looked up at the exit. Such a node never connects directly: while Tor does not work, it does not use the internet at all.
 - **Relays** see tags, sizes and timing, and, unless the node comes over Tor, its IP address. They also see which tags one connection asks for together, which links the tags of one node's contacts within a day.
@@ -513,7 +513,7 @@ Implemented in `crates/carrychat-node/src/reticulum.rs`, with Reticulum's wire f
 
 **v0 does not provide:**
 
-- **Hidden introductions.** An introduction cannot be linked to its sender or recipient, but its size sets it apart from most pair bundles.
+- **Hidden introductions.** An introduction cannot be linked to its sender, but anyone holding the recipient's card can tell from its tag, the recipient's mailbox tag, that it is for them, on every link. Its size also sets it apart from most pair bundles.
 - **Forward secrecy for every bundle.** Ratchet messages (§5.6) have it: a key taken from a device later opens neither the recorded messages it already received nor, once a reply has gone each way, the ones after. Introductions, session-less `K_enc` bundles and bundles from before version 1 do not, and whoever obtains a device's X25519 secret can impersonate any of its contacts to it. Forward secrecy protects recorded traffic, not the history kept on the device.
 - **Radio metadata privacy.** A LoRa transmission reveals the transmitting Meshtastic or MeshCore node and, to direction-finding equipment, its location. Bundle sizes and timing are visible, because v0 does not pad.
 - **Replay protection on the network.** A recorded bundle can be injected again until it expires. Receivers drop duplicates, but replays still spend airtime.
@@ -553,7 +553,7 @@ Implemented in `crates/carrychat-node/src/reticulum.rs`, with Reticulum's wire f
 | MeshCore channel, data type | `#carrychat`, `0xFFCC` |
 | LoRa airtime budget | 2.5% of the time, bursts of at most 20 s |
 | Most fragments per bundle | 32 |
-| Reassembly timeout | 600 s |
+| Reassembly timeout | 21600 s (6 h) |
 | Bluetooth LE service | `43524348-a0c5-4a3e-9b31-6f2d8e7c1a01` |
 | Bluetooth LE stream characteristic | `43524348-a0c5-4a3e-9b31-6f2d8e7c1a02` |
 | Wi-Fi Aware service name | `carrychat` |

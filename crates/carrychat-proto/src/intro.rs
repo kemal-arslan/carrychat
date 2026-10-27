@@ -90,7 +90,9 @@ impl IntroKeys {
 }
 
 /// Seals a first message from `sender` to the holder of `recipient`, with a
-/// fresh one-time key, nonce and tag.
+/// fresh one-time key and nonce, under the recipient's mailbox tag for the
+/// day it is created: whoever carries it to the internet relays posts it
+/// where the recipient looks (§9.3).
 pub fn seal_introduction(
     sender: &Identity,
     recipient: &PublicKey,
@@ -101,10 +103,9 @@ pub fn seal_introduction(
 ) -> Result<Bundle> {
     let mut ephemeral = [0; 32];
     let mut nonce = [0; 24];
-    let mut tag = [0; 8];
     OsRng.fill_bytes(&mut ephemeral);
     OsRng.fill_bytes(&mut nonce);
-    OsRng.fill_bytes(&mut tag);
+    let tag = mailbox_tag(recipient, crate::day_of(created_at));
     let bundle = seal_introduction_with(
         sender, recipient, text, created_at, expires_at, hop_limit, ephemeral, nonce, tag,
     );
@@ -279,6 +280,19 @@ mod tests {
         assert_eq!(intro.text, "Ben Alice");
         assert!(intro.tombstone.verify());
         assert_eq!(intro.tombstone.id, bundle.id);
+    }
+
+    #[test]
+    fn it_carries_the_recipients_mailbox_tag() {
+        // So a node that carries it to the internet posts it where the
+        // recipient looks, without knowing who that is.
+        let alice = Identity::generate("alice").unwrap();
+        let bob = Identity::generate("bob").unwrap();
+        let bundle = introduce(&alice, &bob, "hi");
+        assert_eq!(
+            bundle.tag,
+            mailbox_tag(&bob.dh_public(), crate::day_of(NOW))
+        );
     }
 
     #[test]

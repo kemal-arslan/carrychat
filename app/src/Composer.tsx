@@ -31,6 +31,9 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
   const field = useRef<HTMLTextAreaElement>(null);
   const recordingRef = useRef<Recording | null>(null);
   recordingRef.current = recording;
+  // Counts the conversations this composer has left, so a microphone that
+  // finishes opening after the move knows it is too late.
+  const left = useRef(0);
 
   // A recording belongs to the conversation it started in: moving to another
   // one, or leaving, throws it away and turns the microphone off, so it can
@@ -39,6 +42,7 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
     setDraft("");
     setError(null);
     return () => {
+      left.current += 1;
       recordingRef.current?.cancel();
       recordingRef.current = null;
       setRecording(null);
@@ -87,8 +91,14 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
 
   async function record() {
     setError(null);
+    const here = left.current;
     try {
       const started = await startRecording();
+      // The conversation changed, or closed, while the microphone opened.
+      if (left.current !== here) {
+        started.cancel();
+        return;
+      }
       setSeconds(0);
       setRecording({ ...started, started: Date.now() });
     } catch {

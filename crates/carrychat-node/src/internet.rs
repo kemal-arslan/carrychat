@@ -116,8 +116,8 @@ pub(crate) struct Internet {
     tor_state: Mutex<Option<TorState>>,
     /// The Tor client, once it has started.
     tor: watch::Sender<Option<Arc<Tor>>>,
-    /// The bundle each posted event carries, by event id, so a relay's OK
-    /// tells which bundle it took.
+    /// The bundle or chunk each posted event carries, by event id, so a
+    /// relay's OK tells which it took.
     posted: Mutex<HashMap<String, BundleId>>,
 }
 
@@ -144,7 +144,7 @@ impl Internet {
     /// bundle the event carries.
     fn event_for(&self, secret: &[u8; 32], frame: &Frame, tag: &RecipientTag) -> Option<String> {
         let (id, message) = bundle_event(secret, frame, tag)?;
-        if let Frame::Bundle(bundle) = frame {
+        if let Frame::Bundle(bundle) | Frame::Chunk(bundle) = frame {
             let mut posted = self
                 .posted
                 .lock()
@@ -578,14 +578,14 @@ async fn run_relay<S>(
 fn greeting(shared: &Shared) -> (Vec<String>, Vec<String>) {
     let mut messages: Vec<String> = subscription(shared).into_iter().collect();
     let mut chunks = Vec::new();
-    let mut engine = shared.engine();
+    let engine = shared.engine();
     let secret = shared.internet.secret.get().copied();
     let Some(secret) = secret else {
         return (messages, chunks);
     };
     let mut frames = engine.outbox(now()).unwrap_or_default();
     // What it carries for others and could not post while offline.
-    frames.extend(engine.take_uploads(now()).unwrap_or_default());
+    frames.extend(engine.uploads(now()).unwrap_or_default());
     for (frame, tag) in frames {
         if let Some(event) = shared.internet.event_for(&secret, &frame, &tag) {
             match frame {
@@ -663,7 +663,9 @@ fn receive(shared: &Shared, relay: u64, text: &str) {
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
                 posted.get(id).copied()
             });
+            // A bundle counts as uploaded only once a relay took it.
             if let Some(bundle) = carried.filter(|_| accepted) {
+                let _ = shared.engine().mark_uploaded(bundle);
                 shared.handed_off_id(bundle, Via::Internet, relay);
             }
             let reason = parts.get(3).and_then(Value::as_str).unwrap_or_default();

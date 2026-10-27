@@ -100,7 +100,9 @@ fn main() {
 /// Alice writes to Bob, who does not have her card yet (§5.5).
 fn introduction(alice: &Identity, bob: &Identity) -> Value {
     let text = "Merhaba Bob, ben Alice. Kartım bu mesajın içinde.";
-    let (ephemeral, nonce, tag) = ([0x55; 32], [0x66; 24], [0x77; 8]);
+    let (ephemeral, nonce) = ([0x55; 32], [0x66; 24]);
+    // An introduction carries the recipient's mailbox tag (§5.5).
+    let tag = mailbox_tag(&bob.dh_public(), day_of(CREATED_AT));
     let expires_at = CREATED_AT + 3 * DAY_SECS;
     let bundle = seal_introduction_with(
         alice,

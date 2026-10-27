@@ -7,6 +7,9 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <!-- Voice messages and message notifications. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- The web view asks for it with the microphone, and gives the page
+         neither unless both are granted. -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Bluetooth LE: finding nearby nodes and syncing with them. Scans are
          never used to find out where the phone is. -->

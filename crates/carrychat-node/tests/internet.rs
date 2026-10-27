@@ -1,6 +1,7 @@
 //! Two nodes that reach each other only through a Nostr relay, played by a
 //! small relay inside the test, so nothing leaves the computer.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -19,6 +20,14 @@ type Events = Arc<Mutex<Vec<Value>>>;
 /// Sending on the returned channel makes every open connection go silent,
 /// as a connection does when the computer moves to another network.
 async fn start_relay() -> (String, Events, broadcast::Sender<()>) {
+    start_relay_refusing(Arc::default()).await
+}
+
+/// A relay that refuses every event while `refusing` is set, as a relay that
+/// rate-limits or is full does.
+async fn start_relay_refusing(
+    refusing: Arc<AtomicBool>,
+) -> (String, Events, broadcast::Sender<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}", listener.local_addr().unwrap());
     let stored: Events = Arc::default();
@@ -31,6 +40,7 @@ async fn start_relay() -> (String, Events, broadcast::Sender<()>) {
             let stored = stored.clone();
             let fresh = fresh.clone();
             let mut silenced = silence.subscribe();
+            let refusing = refusing.clone();
             tokio::spawn(async move {
                 let Ok(socket) = tokio_tungstenite::accept_async(stream).await else {
                     return;
@@ -53,6 +63,9 @@ async fn start_relay() -> (String, Events, broadcast::Sender<()>) {
                             };
                             let parts: Vec<Value> = serde_json::from_str(&text).unwrap();
                             match parts[0].as_str() {
+                                Some("EVENT") if refusing.load(Ordering::Relaxed) => {
+                                    vec![json!(["OK", parts[1]["id"], false, "rate-limited: slow down"])]
+                                }
                                 Some("EVENT") => {
                                     let event = parts[1].clone();
                                     let is_new = {
@@ -340,4 +353,76 @@ async fn a_carrier_uploads_what_it_took_while_offline() {
         unreachable!()
     };
     assert_eq!(post.body, "Okulun önünde su var");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_first_message_carried_to_the_internet_reaches_its_recipient() {
+    let (url, _relay, _) = start_relay().await;
+    let alice = node("alice");
+    let bob = node("bob");
+    let carol = node("carol");
+    let bob_id = alice.node.add_contact(&bob.node.profile().card).unwrap().id;
+    alice
+        .node
+        .send_text(bob_id, "Ben Alice, kartını Deniz verdi")
+        .unwrap();
+
+    // Alice's first message to Bob reaches Carol on a USB stick; Carol, who
+    // cannot tell who it is for, takes it to the relay.
+    let file = alice._dir.path().join("first.carrychat");
+    alice.node.export_file(&file).unwrap();
+    assert_eq!(carol.node.import_file(&file).unwrap().carried, 1);
+    let mut bob_events = bob.node.subscribe();
+    bob.node.start_internet(config(&url)).unwrap();
+    carol.node.start_internet(config(&url)).unwrap();
+
+    let Event::ContactRequest { contact } = next_event(&mut bob_events, |event| {
+        matches!(event, Event::ContactRequest { .. })
+    })
+    .await
+    else {
+        unreachable!()
+    };
+    assert_eq!(
+        bob.node.messages(contact.id).unwrap()[0].body,
+        "Ben Alice, kartını Deniz verdi"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_carried_bundle_a_relay_refused_goes_up_again() {
+    let refusing = Arc::new(AtomicBool::new(true));
+    let (url, _relay, silence) = start_relay_refusing(refusing.clone()).await;
+    let alice = node("alice");
+    let bob = node("bob");
+    let carol = node("carol");
+    let alice_channel = alice.node.join_channel("mahalle", "", "Ayşe").unwrap();
+    alice.node.send_post(alice_channel.id, "Su okulda").unwrap();
+    let file = alice._dir.path().join("posts.carrychat");
+    alice.node.export_file(&file).unwrap();
+    assert_eq!(carol.node.import_file(&file).unwrap().carried, 1);
+
+    // The relay refuses what Carol brings, then takes events again; Carol's
+    // connection dies and she reconnects.
+    let mut carol_events = carol.node.subscribe();
+    carol.node.start_internet(config(&url)).unwrap();
+    next_event(&mut carol_events, |event| {
+        matches!(event, Event::InternetChanged { relays: 1 })
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    refusing.store(false, Ordering::Relaxed);
+    silence.send(()).unwrap();
+
+    bob.node.join_channel("mahalle", "", "Bora").unwrap();
+    let mut bob_events = bob.node.subscribe();
+    bob.node.start_internet(config(&url)).unwrap();
+    let Event::PostReceived { post } = next_event(&mut bob_events, |event| {
+        matches!(event, Event::PostReceived { .. })
+    })
+    .await
+    else {
+        unreachable!()
+    };
+    assert_eq!(post.body, "Su okulda");
 }
