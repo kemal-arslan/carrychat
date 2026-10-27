@@ -41,7 +41,7 @@ The full specification is in [docs/PROTOCOL.md](docs/PROTOCOL.md). [docs/test-ve
 [Releases](https://github.com/kemal-arslan/carrychat/releases) has the Android app and the macOS app:
 
 - **Android 7 or later:** download `CarryChat-0.2.0.apk` on the phone, open it and allow installing apps from that source. Later releases update it in place.
-- **macOS on Apple silicon:** unzip `CarryChat-0.2.0-macos-arm64.zip` and move CarryChat to Applications. The app is not notarized yet, so open it the first time with right-click → **Open**, or run `xattr -dr com.apple.quarantine /Applications/CarryChat.app`.
+- **macOS on Apple silicon:** unzip `CarryChat-0.2.0-macos-arm64.zip` and move CarryChat to Applications. The app is not notarized yet, so macOS blocks it the first time: open System Settings → **Privacy & Security** and click **Open Anyway**, or run `xattr -dr com.apple.quarantine /Applications/CarryChat.app`.
 
 Windows, Linux and Intel Macs build from source, as below. Building needs Rust 1.85 or later and Node.js 20 or later.
 
