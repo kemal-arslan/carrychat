@@ -6,7 +6,7 @@ CarryChat is a store-and-forward messenger. Each message is sealed into a bundle
 
 [![CI](https://github.com/kemal-arslan/carrychat/actions/workflows/ci.yml/badge.svg)](https://github.com/kemal-arslan/carrychat/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/kemalarslan)
 
-> **Status: early.** CarryChat works today over the local network, Bluetooth, the internet (Nostr relays) and by file, from a desktop app, an Android app or the command line. The LoRa radio link is written and waits for its first field test on real devices. The first release, [0.1.0](https://github.com/kemal-arslan/carrychat/releases/tag/v0.1.0), has the Android app and the macOS app for Apple silicon. See the [roadmap](#roadmap).
+> **Status: early.** CarryChat works today over the local network, Bluetooth, the internet (Nostr relays) and by file, from a desktop app, an Android app or the command line. The LoRa radio link is written and waits for its first field test on real devices. The latest release, [0.2.0](https://github.com/kemal-arslan/carrychat/releases/tag/v0.2.0), has the Android app and the macOS app for Apple silicon. See the [roadmap](#roadmap).
 
 ## How it works
 
@@ -40,8 +40,8 @@ The full specification is in [docs/PROTOCOL.md](docs/PROTOCOL.md). [docs/test-ve
 
 [Releases](https://github.com/kemal-arslan/carrychat/releases) has the Android app and the macOS app:
 
-- **Android 7 or later:** download `CarryChat-0.1.0.apk` on the phone, open it and allow installing apps from that source. Later releases update it in place.
-- **macOS on Apple silicon:** unzip `CarryChat-0.1.0-macos-arm64.zip` and move CarryChat to Applications. The app is not notarized yet, so open it the first time with right-click → **Open**, or run `xattr -dr com.apple.quarantine /Applications/CarryChat.app`.
+- **Android 7 or later:** download `CarryChat-0.2.0.apk` on the phone, open it and allow installing apps from that source. Later releases update it in place.
+- **macOS on Apple silicon:** unzip `CarryChat-0.2.0-macos-arm64.zip` and move CarryChat to Applications. The app is not notarized yet, so open it the first time with right-click → **Open**, or run `xattr -dr com.apple.quarantine /Applications/CarryChat.app`.
 
 Windows, Linux and Intel Macs build from source, as below. Building needs Rust 1.85 or later and Node.js 20 or later.
 

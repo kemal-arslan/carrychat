@@ -853,7 +853,7 @@ dependencies = [
 
 [[package]]
 name = "carrychat-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "carrychat-node",
  "data-encoding",
@@ -870,7 +870,7 @@ dependencies = [
 
 [[package]]
 name = "carrychat-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "carrychat-node",
  "carrychat-proto",
@@ -880,7 +880,7 @@ dependencies = [
 
 [[package]]
 name = "carrychat-node"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arti-client",
  "btleplug",
@@ -909,7 +909,7 @@ dependencies = [
 
 [[package]]
 name = "carrychat-proto"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chacha20 0.9.1",
  "chacha20poly1305",
