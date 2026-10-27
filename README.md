@@ -1,6 +1,6 @@
 # CarryChat
 
-**Offline-first, end-to-end encrypted messaging between phones and computers over any link: local network, Bluetooth, Wi-Fi Aware, Wi-Fi Direct, LoRa radio, internet or a file on a USB stick.**
+**Offline-first, end-to-end encrypted messaging between phones and computers over any link: local network, Bluetooth, Wi-Fi Aware, Wi-Fi Direct, LoRa radio, Reticulum, internet or a file on a USB stick.**
 
 CarryChat is a store-and-forward messenger. Each message is sealed into a bundle of at most 4 KiB, kept until a link towards the recipient exists, and passed from device to device on the way. Devices that carry a bundle can neither read it nor tell who sent it or who it is for. The internet is one link among several, not a requirement.
 
@@ -19,6 +19,7 @@ CarryChat sends each message over the best link it has, and keeps it until one a
 | Wi-Fi Aware | around a hundred metres, phone to phone, fast enough for photos | there is no router and no internet (Android phones that support it) |
 | Wi-Fi Direct | around a hundred metres, phone to phone, fast enough for photos | the same, on Android phones without Wi-Fi Aware |
 | LoRa radio ([Meshtastic](https://meshtastic.org) or [MeshCore](https://meshcore.io)) | kilometres per hop, further over community relays | there is no internet at all |
+| [Reticulum](https://reticulum.network) | as far as the Reticulum network reaches, over its radios, serial lines and internet links | a Reticulum network is at hand |
 | Internet ([Nostr](https://nostr.com) relays) | anywhere | normal days, or whenever one computer on the path is online |
 | File on a USB stick | as far as someone carries it | nothing else reaches |
 
@@ -60,6 +61,8 @@ Create your identity and give your card (**My card**, also as a QR code, under *
 
 **LoRa radio**, on **Network**, uses a [Meshtastic](https://meshtastic.org) or [MeshCore](https://meshcore.io) device: a phone pairs with it over Bluetooth, a computer uses it over USB or the network, and CarryChat finds out which kind it is. Once chosen, it shows the device's region or radio settings and the devices it has heard recently (three hours for Meshtastic, two days for MeshCore, whose repeaters announce themselves less often), so you can tell whether a mesh is in range. On a MeshCore device, CarryChat adds a `#carrychat` channel to a free slot.
 
+**Reticulum**, on **Network**, connects to a [Reticulum](https://reticulum.network) node, such as `rnsd` on the same computer with a TCP server interface, and reaches the other CarryChat nodes on that network however many hops away. It shows the CarryChat nodes that announced themselves in the last six hours.
+
 `npm run dev` opens the interface in a browser with sample data, without building the app.
 
 ### Command line
@@ -77,6 +80,7 @@ carrychat run                                   # deliver, receive and relay (lo
 carrychat run --tor                             # the same, with the internet only over Tor
 carrychat run --bluetooth                       # also reach nearby phones over Bluetooth
 carrychat run --lora /dev/cu.usbserial-0001     # and LoRa through a Meshtastic or MeshCore device (or tcp:host:port)
+carrychat run --reticulum 127.0.0.1:4242        # and Reticulum, through an rnsd TCP server interface
 carrychat export messages.carrychat                # or carry everything on a USB stick
 carrychat group create Mahalle Deniz Mehmet     # you become the group's admin
 carrychat group send Mahalle "Su dağıtımı okulun önünde."

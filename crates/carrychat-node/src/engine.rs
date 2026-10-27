@@ -546,7 +546,44 @@ impl Engine {
                 .meta("lora_device")?
                 .and_then(|device| String::from_utf8(device).ok())
                 .filter(|device| !device.is_empty()),
+            reticulum: self
+                .store
+                .meta("reticulum")?
+                .and_then(|address| String::from_utf8(address).ok())
+                .filter(|address| !address.is_empty()),
         })
+    }
+
+    /// The Reticulum node to connect to, as `host:port`, or none.
+    pub fn set_reticulum(&self, address: Option<&str>) -> Result<()> {
+        self.store
+            .set_meta("reticulum", address.unwrap_or_default().as_bytes())
+    }
+
+    /// The CarryChat destinations heard on Reticulum, as `Reticulum` keeps
+    /// them, for asking for their paths after a restart.
+    pub fn reticulum_peers(&self) -> Result<Vec<u8>> {
+        Ok(self.store.meta("reticulum_peers")?.unwrap_or_default())
+    }
+
+    pub fn set_reticulum_peers(&self, peers: &[u8]) -> Result<()> {
+        self.store.set_meta("reticulum_peers", peers)
+    }
+
+    /// This node's Reticulum identity: its X25519 and Ed25519 secret keys,
+    /// made the first time they are asked for. They have nothing to do with
+    /// the CarryChat identity, so the Reticulum network cannot tell whose
+    /// node it is.
+    pub fn reticulum_secret(&self) -> Result<[u8; 64]> {
+        if let Some(secret) = self.store.meta("reticulum_identity")? {
+            if let Ok(secret) = secret.try_into() {
+                return Ok(secret);
+            }
+        }
+        let mut secret = [0; 64];
+        rand_core::RngCore::fill_bytes(&mut OsRng, &mut secret);
+        self.store.set_meta("reticulum_identity", &secret)?;
+        Ok(secret)
     }
 
     /// The Meshtastic or MeshCore device to use for LoRa, as `LoraDevice`

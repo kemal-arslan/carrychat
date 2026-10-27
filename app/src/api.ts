@@ -127,7 +127,7 @@ export type Message = {
 };
 
 /** A way a message left this device. */
-export type Via = "lan" | "bluetooth" | "wifiAware" | "wifiDirect" | "internet" | "lora" | "file";
+export type Via = "lan" | "bluetooth" | "wifiAware" | "wifiDirect" | "internet" | "lora" | "reticulum" | "file";
 
 /** A link a nearby node is connected over. */
 export type Link = "lan" | "bluetooth" | "wifiAware" | "wifiDirect";
@@ -164,6 +164,8 @@ export type Settings = {
   nearby: boolean;
   /** The Meshtastic or MeshCore device chosen for LoRa: `tcp:host:port`, a serial port or `bluetooth:address`. */
   loraDevice: string | null;
+  /** The Reticulum node to connect to, as `host:port`. */
+  reticulum: string | null;
 };
 
 /** A device the LoRa device heard. `at` is in seconds since the epoch. */
@@ -185,6 +187,20 @@ export type LoraStatus = {
   waiting: number;
   heard: LoraNode[];
   heardWithin: number;
+  carrychatAt: number | null;
+};
+
+/** A CarryChat node heard on Reticulum: its destination in hex, how many hops away, and when it last announced. */
+export type ReticulumPeer = { destination: string; hops: number; at: number };
+
+/** How the Reticulum link stands: the node connected to, and the CarryChat nodes heard through it. */
+export type ReticulumStatus = {
+  address: string | null;
+  connected: boolean;
+  /** This node's own destination, in hex. */
+  destination: string | null;
+  peers: ReticulumPeer[];
+  waiting: number;
   carrychatAt: number | null;
 };
 
@@ -315,6 +331,9 @@ export interface Api {
   /** Starts looking for Meshtastic and MeshCore devices over Bluetooth, on a phone. */
   loraScan(): Promise<void>;
   loraFound(): Promise<FoundDevice[]>;
+  reticulum(): Promise<ReticulumStatus>;
+  /** Connects to a Reticulum node, as `host:port`, or to none. */
+  setReticulum(address: string | null): Promise<void>;
   restart(): Promise<void>;
   status(): Promise<Status>;
   /** Asks where to save, then exports. Returns null if cancelled. */
@@ -478,6 +497,8 @@ function desktopApi(): Api {
     loraPorts: () => call("lora_ports"),
     loraScan: () => call("lora_scan"),
     loraFound: () => call("lora_found"),
+    reticulum: () => call("reticulum"),
+    setReticulum: (address) => call("set_reticulum", { address }),
     restart: () => call("restart"),
     status: () => call("status"),
     async exportFile() {
@@ -508,7 +529,14 @@ function previewApi(): Api {
   const listeners: ((event: NodeEvent) => void)[] = [];
   const emit = (event: NodeEvent) => listeners.forEach((listener) => listener(event));
   let profile: Profile | null = null;
-  let settings: Settings = { readReceipts: true, tor: false, bluetooth: true, nearby: false, loraDevice: null };
+  let settings: Settings = {
+    readReceipts: true,
+    tor: false,
+    bluetooth: true,
+    nearby: false,
+    loraDevice: null,
+    reticulum: null,
+  };
   const minutesAgo = (minutes: number) => Math.floor(Date.now() / 1000) - minutes * 60;
   // Who the preview shows nearby once it is visible.
   const nearbyPeople: NearbyPerson[] = [
@@ -975,6 +1003,26 @@ function previewApi(): Api {
         { address: "D4:8A:FC:3F:2A:01", name: "Meshtastic_3f2a" },
         { address: "C8:2B:96:0E:41:7A", name: "MeshCore-Ayse" },
       ];
+    },
+    async reticulum() {
+      const address = settings.reticulum;
+      return {
+        address,
+        connected: address !== null,
+        destination: address === null ? null : "5d2fa0c4e8b17736a9e0c1f42b7d9e13",
+        peers:
+          address === null
+            ? []
+            : [
+                { destination: "a3c9172e5b0f44d18c26e9b7f0d3a512", hops: 2, at: minutesAgo(7) },
+                { destination: "0e7b5c13d9a24f6e81b3c0d7a9e5f264", hops: 4, at: minutesAgo(51) },
+              ],
+        waiting: 0,
+        carrychatAt: address === null ? null : minutesAgo(9),
+      };
+    },
+    async setReticulum(address) {
+      settings = { ...settings, reticulum: address };
     },
     async restart() {
       location.reload();

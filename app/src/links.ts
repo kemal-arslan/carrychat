@@ -1,4 +1,4 @@
-import type { LoraStatus, Status, WifiAware } from "./api";
+import type { LoraStatus, ReticulumStatus, Status, WifiAware } from "./api";
 import type { useI18n } from "./i18n";
 
 type Strings = ReturnType<typeof useI18n>["t"];
@@ -88,6 +88,12 @@ export function loraLabel(lora: LoraStatus | null, t: Strings): string {
   if (lora.noFreeChannel) return t.loraNoChannel;
   const heard = t.loraHeard(lora.heard.length);
   return lora.name ? `${lora.name} · ${heard}` : heard;
+}
+
+export function reticulumLabel(reticulum: ReticulumStatus | null, t: Strings): string {
+  if (!reticulum?.address) return t.reticulumNoNode;
+  if (!reticulum.connected) return t.stateConnecting;
+  return t.reticulumPeers(reticulum.peers.length);
 }
 
 export function internetLabel(state: InternetState, status: Status | null, t: Strings): string {

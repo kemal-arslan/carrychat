@@ -104,6 +104,10 @@ enum Command {
         /// and meshtasticd: 4403, MeshCore: 5000).
         #[arg(long, value_name = "DEVICE")]
         lora: Option<LoraDevice>,
+        /// Also reach CarryChat nodes on a Reticulum network, through the
+        /// Reticulum node at this host:port (an rnsd TCP server interface).
+        #[arg(long, value_name = "HOST:PORT")]
+        reticulum: Option<String>,
         /// Send every line typed on standard input to this contact.
         #[arg(long)]
         chat: Option<String>,
@@ -328,6 +332,7 @@ async fn run(cli: Cli) -> AnyResult {
             tor,
             bluetooth,
             lora,
+            reticulum,
             chat,
         } => {
             let chat = chat.map(|name| find_contact(&node, &name)).transpose()?;
@@ -348,10 +353,17 @@ async fn run(cli: Cli) -> AnyResult {
                 }
                 config
             });
-            run_node(node, lan, internet, bluetooth, lora, connect, chat).await?;
+            let radio = Radio { lora, reticulum };
+            run_node(node, lan, internet, bluetooth, radio, connect, chat).await?;
         }
     }
     Ok(())
+}
+
+/// The links that go through a device or a network of their own.
+struct Radio {
+    lora: Option<LoraDevice>,
+    reticulum: Option<String>,
 }
 
 async fn run_node(
@@ -359,7 +371,7 @@ async fn run_node(
     lan: LanConfig,
     internet: Option<InternetConfig>,
     bluetooth: bool,
-    lora: Option<LoraDevice>,
+    radio: Radio,
     connect: Vec<SocketAddr>,
     chat: Option<ContactView>,
 ) -> AnyResult {
@@ -375,9 +387,13 @@ async fn run_node(
             Err(error) => eprintln!("Bluetooth is off: {error}"),
         }
     }
-    if let Some(device) = lora {
+    if let Some(device) = radio.lora {
         println!("Connecting to the LoRa device {device:?}.");
         node.start_lora(device)?;
+    }
+    if let Some(address) = radio.reticulum {
+        println!("Connecting to the Reticulum node at {address}.");
+        node.start_reticulum(&address)?;
     }
     println!(
         "{} is listening on port {port}. Ctrl-C stops.",
@@ -419,6 +435,10 @@ async fn run_node(
                 }
                 Ok(Event::LoraChanged { connected }) => println!(
                     "· LoRa device {}",
+                    if connected { "connected" } else { "gone" }
+                ),
+                Ok(Event::ReticulumChanged { connected }) => println!(
+                    "· Reticulum node {}",
                     if connected { "connected" } else { "gone" }
                 ),
                 Ok(Event::PeersChanged { lan, bluetooth, wifi_aware, wifi_direct }) => {

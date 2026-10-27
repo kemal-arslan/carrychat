@@ -6,16 +6,18 @@ import {
   DownloadSimpleIcon,
   ExportIcon,
   GlobeSimpleIcon,
+  GraphIcon,
   LinkSimpleIcon,
   ShareNetworkIcon,
   ShieldCheckIcon,
   WifiHighIcon,
 } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
-import { api, type LoraStatus, type Status, type WifiAware } from "./api";
+import { api, type LoraStatus, type ReticulumStatus, type Status, type WifiAware } from "./api";
 import { useI18n } from "./i18n";
-import { bluetoothLabel, internetLabel, lanLabel, linkStates, loraLabel, wifiAwareLabel } from "./links";
+import { bluetoothLabel, internetLabel, lanLabel, linkStates, loraLabel, reticulumLabel, wifiAwareLabel } from "./links";
 import { LoraSheet } from "./LoraSheet";
+import { ReticulumSheet } from "./ReticulumSheet";
 
 type Props = {
   status: Status | null;
@@ -40,12 +42,15 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
   const [wifiDirect, setWifiDirect] = useState<WifiAware>(null);
   const [lora, setLora] = useState<LoraStatus | null>(null);
   const [loraOpen, setLoraOpen] = useState(false);
+  const [reticulum, setReticulum] = useState<ReticulumStatus | null>(null);
+  const [reticulumOpen, setReticulumOpen] = useState(false);
 
   useEffect(() => {
     api.wifiAware().then(setWifiAware);
     api.wifiDirect().then(setWifiDirect);
     api.lora().then(setLora);
-  }, [status, loraOpen]);
+    api.reticulum().then(setReticulum);
+  }, [status, loraOpen, reticulumOpen]);
 
   useEffect(() => {
     api.settings().then((settings) => {
@@ -163,6 +168,16 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
           </span>
           <CaretRightIcon className="go" size={16} weight="bold" />
         </button>
+        <button className="row-item" title={t.reticulumHint} onClick={() => setReticulumOpen(true)}>
+          <span className="tile">
+            <GraphIcon size={20} />
+          </span>
+          <span className="row-text">
+            <b>{t.reticulumName}</b>
+            <span className={reticulum?.connected ? "live" : undefined}>{reticulumLabel(reticulum, t)}</span>
+          </span>
+          <CaretRightIcon className="go" size={16} weight="bold" />
+        </button>
         <div
           className="row-item"
           title={status?.internetTor?.state === "failed" ? status.internetTor.detail : (status?.internetRefusal ?? undefined)}
@@ -250,6 +265,7 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
       )}
       {preview && <p className="page-note preview-tag">{t.preview}</p>}
       {loraOpen && <LoraSheet onClose={() => setLoraOpen(false)} />}
+      {reticulumOpen && <ReticulumSheet onClose={() => setReticulumOpen(false)} />}
     </div>
   );
 }

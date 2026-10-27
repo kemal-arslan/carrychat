@@ -12,6 +12,7 @@ mod journey;
 pub mod lan;
 pub mod lora;
 mod nearby;
+pub mod reticulum;
 mod sound;
 pub mod store;
 mod sync;
@@ -31,6 +32,7 @@ pub use crate::journey::{Journey, Step, Via};
 pub use crate::lan::{LanConfig, LanProblem};
 pub use crate::lora::{LoraDevice, LoraFirmware, LoraNode, LoraPort, LoraStatus};
 pub use crate::nearby::NearbyPerson;
+pub use crate::reticulum::{ReticulumPeer, ReticulumStatus};
 pub use crate::sound::{CardListener, HeardCard};
 use crate::store::Store;
 pub use crate::sync::Link;
@@ -209,9 +211,11 @@ pub struct Settings {
     pub bluetooth: bool,
     /// Whether people nearby who turned it on too can see us, and we them.
     pub nearby: bool,
-    /// The Meshtastic or MeshCore device chosen for LoRa: `tcp:host:port`, a serial port
-    /// or `bluetooth:address`.
+    /// The Meshtastic or MeshCore device chosen for LoRa: `tcp:host:port`,
+    /// a serial port or `bluetooth:address`.
     pub lora_device: Option<String>,
+    /// The Reticulum node to connect to, as `host:port`.
+    pub reticulum: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -236,6 +240,8 @@ pub struct Status {
     pub lora_connected: bool,
     /// Frames waiting for airtime on LoRa.
     pub lora_waiting: usize,
+    /// Whether the node is connected to a Reticulum node.
+    pub reticulum_connected: bool,
     /// Internet relays connected right now.
     pub internet_relays: usize,
     /// Whether the internet link was started.
@@ -280,6 +286,8 @@ pub enum Event {
     NearbyChanged { people: usize },
     /// The device of the LoRa link connected or went away.
     LoraChanged { connected: bool },
+    /// The Reticulum node connected or went away.
+    ReticulumChanged { connected: bool },
     /// The contact read some of our messages.
     #[serde(rename_all = "camelCase")]
     MessagesRead {
@@ -322,6 +330,7 @@ pub(crate) struct Shared {
     pub(crate) lan: lan::Lan,
     pub(crate) peers: sync::Peers,
     pub(crate) lora: lora::Lora,
+    pub(crate) reticulum: reticulum::Reticulum,
     pub(crate) internet: internet::Internet,
     internet_on: std::sync::atomic::AtomicBool,
     /// Whether this device's Bluetooth is on: 0 not known yet, 1 off, 2 on.
@@ -355,6 +364,7 @@ impl Node {
                 lan: lan::Lan::new(),
                 peers: sync::Peers::new(),
                 lora: lora::Lora::new(),
+                reticulum: reticulum::Reticulum::new(),
                 internet: internet::Internet::new(),
                 internet_on: std::sync::atomic::AtomicBool::new(false),
                 bluetooth_radio: std::sync::atomic::AtomicU8::new(0),
@@ -684,6 +694,7 @@ impl Node {
             wifi_direct_peers: self.shared.peers.count(Link::WifiDirect),
             lora_connected: self.shared.lora.connected(),
             lora_waiting: self.shared.lora.waiting(),
+            reticulum_connected: self.shared.reticulum.connected(),
             internet_relays: self.shared.internet.connected(),
             internet_on: self
                 .shared
@@ -807,6 +818,31 @@ impl Node {
         self.shared.lora.status(now())
     }
 
+    /// Connects to a Reticulum node (§9.9), given as `host:port`, or to
+    /// none, and keeps the choice for the next start, which reads it from
+    /// the settings.
+    pub fn set_reticulum(&self, address: Option<&str>) -> Result<()> {
+        let address = address.map(str::trim).filter(|address| !address.is_empty());
+        self.shared.engine().set_reticulum(address)?;
+        match address {
+            Some(address) => reticulum::start(&self.shared, address.to_owned()),
+            None => {
+                reticulum::stop(&self.shared);
+                Ok(())
+            }
+        }
+    }
+
+    /// Starts the Reticulum link to `address` without keeping the choice.
+    pub fn start_reticulum(&self, address: &str) -> Result<()> {
+        reticulum::start(&self.shared, address.to_owned())
+    }
+
+    /// How the Reticulum link stands.
+    pub fn reticulum(&self) -> ReticulumStatus {
+        self.shared.reticulum.status(now())
+    }
+
     /// Runs the LoRa link over a connection platform code made to the
     /// chosen device, such as Bluetooth LE on Android, carrying the stream
     /// framing a serial port does for `firmware`. Returns when the
@@ -885,18 +921,31 @@ impl Shared {
     /// link, but not back on LoRa, where the mesh already floods it (§8).
     /// What it makes the node send, such as its receipt, does go on LoRa.
     pub(crate) fn dispatch_from_lora(&self, handled: Handled, heard: &Frame) {
-        self.relay(handled, None, Some(heard));
+        self.relay(handled, None, Some((Via::Lora, heard)));
     }
 
-    fn relay(&self, handled: Handled, from: Option<u64>, heard_on_lora: Option<&Frame>) {
+    pub(crate) fn dispatch_from_reticulum(&self, handled: Handled, heard: &Frame) {
+        self.relay(handled, None, Some((Via::Reticulum, heard)));
+    }
+
+    /// Passes on what a frame made the node send. What was heard on LoRa or
+    /// Reticulum does not go back there: the LoRa mesh floods it already,
+    /// and on Reticulum its sender sent it to every CarryChat node it knows.
+    fn relay(&self, handled: Handled, from: Option<u64>, heard: Option<(Via, &Frame)>) {
+        let echoes = |via: Via, frame: &Frame| {
+            heard.is_some_and(|(heard_via, heard)| heard_via == via && lora::echoes(frame, heard))
+        };
         for frame in &handled.relay {
             let except = match frame {
                 Frame::Bundle(_) | Frame::Chunk(_) => from,
                 _ => None,
             };
             self.peers.broadcast(&frame.to_bytes(), except);
-            if !heard_on_lora.is_some_and(|heard| lora::echoes(frame, heard)) {
+            if !echoes(Via::Lora, frame) {
                 self.lora.send(frame, false);
+            }
+            if !echoes(Via::Reticulum, frame) {
+                self.reticulum.send(frame, false);
             }
         }
         self.internet.post_handled(&handled);
@@ -941,6 +990,9 @@ impl Shared {
             if self.lora.send(frame, true) {
                 self.handed_off(frame, Via::Lora, 0);
             }
+            if self.reticulum.send(frame, true) {
+                self.handed_off(frame, Via::Reticulum, 0);
+            }
         }
         self.internet.probe();
     }
@@ -953,6 +1005,7 @@ impl Shared {
         self.peers.broadcast(&frame.to_bytes(), None);
         self.internet.post_bundle(frame, &bundle.tag);
         self.lora.send(frame, true);
+        self.reticulum.send(frame, true);
         self.internet.probe();
     }
 
@@ -962,6 +1015,7 @@ impl Shared {
             self.peers.broadcast(&frame.to_bytes(), None);
             self.internet.post_bundle(frame, tag);
             self.lora.send(frame, true);
+            self.reticulum.send(frame, true);
         }
         if !frames.is_empty() {
             self.internet.renew_subscription();

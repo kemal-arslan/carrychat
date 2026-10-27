@@ -19,6 +19,7 @@ pub enum Via {
     WifiDirect,
     Internet,
     Lora,
+    Reticulum,
     File,
 }
 
@@ -31,6 +32,7 @@ impl Via {
             Via::WifiDirect => "wifiDirect",
             Via::Internet => "internet",
             Via::Lora => "lora",
+            Via::Reticulum => "reticulum",
             Via::File => "file",
         }
     }
@@ -43,6 +45,7 @@ impl Via {
             "wifiDirect" => Via::WifiDirect,
             "internet" => Via::Internet,
             "lora" => Via::Lora,
+            "reticulum" => Via::Reticulum,
             "file" => Via::File,
             _ => return None,
         })

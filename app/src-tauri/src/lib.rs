@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use carrychat_node::{
     CardListener, ChannelView, ContactView, GroupMessageView, GroupView, HeardCard, ImportReport,
     InternetConfig, Journey, LanConfig, LoraDevice, LoraPort, LoraStatus, MessageView, MutedView,
-    NearbyPerson, Node, PostView, Profile, Settings, Status,
+    NearbyPerson, Node, PostView, Profile, ReticulumStatus, Settings, Status,
 };
 use data_encoding::BASE64;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -55,8 +55,10 @@ pub(crate) fn start_links(node: &Node, dir: &Path, report: impl Fn(String) + Sen
     };
     let bluetooth = settings.as_ref().is_none_or(|settings| settings.bluetooth);
     let lora = settings
-        .and_then(|settings| settings.lora_device)
+        .as_ref()
+        .and_then(|settings| settings.lora_device.as_ref())
         .and_then(|device| device.parse::<LoraDevice>().ok());
+    let reticulum = settings.and_then(|settings| settings.reticulum);
     let node = node.clone();
     tauri::async_runtime::spawn(async move {
         if let Err(error) = node.start(LanConfig::default()).await {
@@ -78,6 +80,11 @@ pub(crate) fn start_links(node: &Node, dir: &Path, report: impl Fn(String) + Sen
         if let Some(device) = lora {
             if let Err(error) = node.start_lora(device) {
                 report(format!("LoRa is off: {error}"));
+            }
+        }
+        if let Some(address) = reticulum {
+            if let Err(error) = node.start_reticulum(&address) {
+                report(format!("Reticulum is off: {error}"));
             }
         }
     });
@@ -289,6 +296,20 @@ fn lora_found() -> Vec<FoundDevice> {
     return android::lora_found();
     #[cfg(not(target_os = "android"))]
     Vec::new()
+}
+
+#[tauri::command]
+fn reticulum(state: State<'_, AppState>) -> CommandResult<ReticulumStatus> {
+    Ok(state.node()?.reticulum())
+}
+
+/// Connects to a Reticulum node, given as `host:port`, or to none.
+#[tauri::command]
+fn set_reticulum(state: State<'_, AppState>, address: Option<String>) -> CommandResult<()> {
+    state
+        .node()?
+        .set_reticulum(address.as_deref())
+        .map_err(text)
 }
 
 #[tauri::command]
@@ -693,6 +714,8 @@ pub fn run() {
             lora_ports,
             lora_scan,
             lora_found,
+            reticulum,
+            set_reticulum,
             erase_everything,
             messages,
             journey,

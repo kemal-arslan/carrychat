@@ -3,6 +3,7 @@ import {
   CellTowerIcon,
   DevicesIcon,
   GlobeSimpleIcon,
+  GraphIcon,
   ShareNetworkIcon,
   UsbIcon,
   WifiHighIcon,
@@ -17,6 +18,7 @@ const ICONS: Record<Via, Icon> = {
   wifiDirect: ShareNetworkIcon,
   internet: GlobeSimpleIcon,
   lora: CellTowerIcon,
+  reticulum: GraphIcon,
   file: UsbIcon,
 };
 

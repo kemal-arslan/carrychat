@@ -882,11 +882,14 @@ dependencies = [
 name = "carrychat-node"
 version = "0.2.0"
 dependencies = [
+ "aes",
  "arti-client",
  "btleplug",
  "carrychat-proto",
  "data-encoding",
+ "ed25519-dalek",
  "futures-util",
+ "hkdf",
  "hmac",
  "if-addrs",
  "k256",
@@ -905,6 +908,7 @@ dependencies = [
  "tokio-tungstenite",
  "tor-rtcompat",
  "uuid",
+ "x25519-dalek",
 ]
 
 [[package]]
