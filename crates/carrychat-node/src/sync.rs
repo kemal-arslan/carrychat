@@ -35,6 +35,8 @@ pub enum Link {
     Bluetooth,
     /// Wi-Fi between phones with no access point (§9.6).
     WifiAware,
+    /// Wi-Fi Direct between phones with no access point (§9.8).
+    WifiDirect,
 }
 
 type Outbox = mpsc::UnboundedSender<Vec<u8>>;
@@ -186,6 +188,7 @@ impl Shared {
             lan: self.peers.count(Link::Lan),
             bluetooth: self.peers.count(Link::Bluetooth),
             wifi_aware: self.peers.count(Link::WifiAware),
+            wifi_direct: self.peers.count(Link::WifiDirect),
         });
     }
 }

@@ -228,6 +228,8 @@ pub struct Status {
     pub bluetooth_radio: Option<bool>,
     /// Nodes connected over Wi-Fi Aware right now, phone to phone.
     pub wifi_aware_peers: usize,
+    /// Nodes connected over Wi-Fi Direct right now, phone to phone.
+    pub wifi_direct_peers: usize,
     /// Whether a LoRa device is connected for the LoRa link.
     pub lora_connected: bool,
     /// Frames waiting for airtime on LoRa.
@@ -270,6 +272,7 @@ pub enum Event {
         lan: usize,
         bluetooth: usize,
         wifi_aware: usize,
+        wifi_direct: usize,
     },
     /// Someone nearby became visible, or went away.
     NearbyChanged { people: usize },
@@ -670,6 +673,7 @@ impl Node {
                 _ => None,
             },
             wifi_aware_peers: self.shared.peers.count(Link::WifiAware),
+            wifi_direct_peers: self.shared.peers.count(Link::WifiDirect),
             lora_connected: self.shared.lora.connected(),
             lora_waiting: self.shared.lora.waiting(),
             internet_relays: self.shared.internet.connected(),

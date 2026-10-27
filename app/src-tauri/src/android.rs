@@ -3,9 +3,9 @@
 //! the phone starts. These are the Rust pieces of that: one node for the
 //! process, opened by the screen or by the service, staying alive without a
 //! window, making a window again for a screen that opens later, announcing
-//! messages while there is no page to do it, and syncing over the Bluetooth
-//! and Wi-Fi Aware connections that the service's `BleLink` and
-//! `WifiAwareLink` make (§9.5, §9.6).
+//! messages while there is no page to do it, and syncing over the
+//! Bluetooth, Wi-Fi Aware and Wi-Fi Direct connections that the service's
+//! `BleLink`, `WifiAwareLink` and `WifiDirectLink` make (§9.5, §9.6, §9.8).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -330,6 +330,27 @@ pub extern "system" fn Java_dev_kemalarslan_carrychat_Aware_state(
     WIFI_AWARE.store(state, Ordering::Relaxed);
 }
 
+/// How Wi-Fi Direct stands, as `WifiDirectLink` last said: 0 unsupported, 1 off, 2 on.
+static WIFI_DIRECT: AtomicI32 = AtomicI32::new(0);
+
+pub fn wifi_direct() -> &'static str {
+    match WIFI_DIRECT.load(Ordering::Relaxed) {
+        2 => "on",
+        1 => "off",
+        _ => "unsupported",
+    }
+}
+
+/// `Direct.state(state)`: Wi-Fi Direct was turned on or off.
+#[no_mangle]
+pub extern "system" fn Java_dev_kemalarslan_carrychat_Direct_state(
+    _env: JNIEnv,
+    _class: JClass,
+    state: jint,
+) {
+    WIFI_DIRECT.store(state, Ordering::Relaxed);
+}
+
 /// `Ble.state(on)`: whether the phone's Bluetooth is on, every few seconds.
 #[no_mangle]
 pub extern "system" fn Java_dev_kemalarslan_carrychat_Ble_state(
@@ -345,9 +366,10 @@ pub extern "system" fn Java_dev_kemalarslan_carrychat_Ble_state(
 /// The node, while it uses Bluetooth.
 static BLUETOOTH: Mutex<Option<Node>> = Mutex::new(None);
 
-/// The Kotlin classes that move a link's bytes: `Ble` and `Aware`.
+/// The Kotlin classes that move a link's bytes: `Ble`, `Aware` and `Direct`.
 static BLE: OnceLock<(JavaVM, GlobalRef)> = OnceLock::new();
 static AWARE: OnceLock<(JavaVM, GlobalRef)> = OnceLock::new();
+static DIRECT: OnceLock<(JavaVM, GlobalRef)> = OnceLock::new();
 
 /// Each open connection's incoming bytes, by its bridge and the id Kotlin gave it.
 static CONNECTIONS: Mutex<Option<HashMap<(Bridge, i32), mpsc::UnboundedSender<Vec<u8>>>>> =
@@ -357,12 +379,14 @@ static CONNECTIONS: Mutex<Option<HashMap<(Bridge, i32), mpsc::UnboundedSender<Ve
 const SEND_LEN: usize = 4096;
 const BUFFER_LEN: usize = 64 * 1024;
 
-/// A platform link whose connections Kotlin makes: Bluetooth LE (§9.5) or
-/// Wi-Fi Aware (§9.6). Both carry the sync stream the same way.
+/// A platform link whose connections Kotlin makes: Bluetooth LE (§9.5),
+/// Wi-Fi Aware (§9.6) or Wi-Fi Direct (§9.8). All carry the sync stream the
+/// same way.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum Bridge {
     Ble,
     Aware,
+    Direct,
 }
 
 impl Bridge {
@@ -370,6 +394,7 @@ impl Bridge {
         match self {
             Bridge::Ble => &BLE,
             Bridge::Aware => &AWARE,
+            Bridge::Direct => &DIRECT,
         }
     }
 
@@ -377,14 +402,16 @@ impl Bridge {
         match self {
             Bridge::Ble => Link::Bluetooth,
             Bridge::Aware => Link::WifiAware,
+            Bridge::Direct => Link::WifiDirect,
         }
     }
 
-    /// The node, while it uses this link. Wi-Fi Aware has no switch of its own.
+    /// The node, while it uses this link. Wi-Fi Aware and Wi-Fi Direct have
+    /// no switch of their own.
     fn node(self) -> Option<Node> {
         match self {
             Bridge::Ble => lock(&BLUETOOTH).clone(),
-            Bridge::Aware => lock(&NODE).clone(),
+            Bridge::Aware | Bridge::Direct => lock(&NODE).clone(),
         }
     }
 }
@@ -503,7 +530,7 @@ fn forget(bridge: Bridge, id: i32) {
     }
 }
 
-/// `Ble.send(id, data)` or `Aware.send(id, data)`.
+/// `send(id, data)` on the bridge's class.
 fn send(bridge: Bridge, id: i32, data: &[u8]) -> jni::errors::Result<()> {
     let Some((vm, class)) = bridge.class().get() else {
         return Ok(());
@@ -523,7 +550,7 @@ fn send(bridge: Bridge, id: i32, data: &[u8]) -> jni::errors::Result<()> {
     sent.map(drop)
 }
 
-/// `Ble.close(id)` or `Aware.close(id)`.
+/// `close(id)` on the bridge's class.
 fn close(bridge: Bridge, id: i32) {
     let Some((vm, class)) = bridge.class().get() else {
         return;
@@ -597,6 +624,16 @@ bridge_entry_points!(
     Java_dev_kemalarslan_carrychat_Aware_opened,
     Java_dev_kemalarslan_carrychat_Aware_received,
     Java_dev_kemalarslan_carrychat_Aware_closed
+);
+
+bridge_entry_points!(
+    Bridge::Direct,
+    Java_dev_kemalarslan_carrychat_Direct_session,
+    Java_dev_kemalarslan_carrychat_Direct_shouldConnect,
+    Java_dev_kemalarslan_carrychat_Direct_dialEnded,
+    Java_dev_kemalarslan_carrychat_Direct_opened,
+    Java_dev_kemalarslan_carrychat_Direct_received,
+    Java_dev_kemalarslan_carrychat_Direct_closed
 );
 
 /// The Kotlin side of LoRa over Bluetooth LE: `Lora`, which connects to the

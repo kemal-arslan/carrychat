@@ -16,6 +16,7 @@ pub enum Via {
     Lan,
     Bluetooth,
     WifiAware,
+    WifiDirect,
     Internet,
     Lora,
     File,
@@ -27,6 +28,7 @@ impl Via {
             Via::Lan => "lan",
             Via::Bluetooth => "bluetooth",
             Via::WifiAware => "wifiAware",
+            Via::WifiDirect => "wifiDirect",
             Via::Internet => "internet",
             Via::Lora => "lora",
             Via::File => "file",
@@ -38,6 +40,7 @@ impl Via {
             "lan" => Via::Lan,
             "bluetooth" => Via::Bluetooth,
             "wifiAware" => Via::WifiAware,
+            "wifiDirect" => Via::WifiDirect,
             "internet" => Via::Internet,
             "lora" => Via::Lora,
             "file" => Via::File,
@@ -52,6 +55,7 @@ impl From<Link> for Via {
             Link::Lan => Via::Lan,
             Link::Bluetooth => Via::Bluetooth,
             Link::WifiAware => Via::WifiAware,
+            Link::WifiDirect => Via::WifiDirect,
         }
     }
 }

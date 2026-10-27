@@ -173,6 +173,16 @@ fn wifi_aware() -> Option<&'static str> {
     None
 }
 
+/// How Wi-Fi Direct stands on this phone: "unsupported", "off" or "on".
+/// Elsewhere there is none.
+#[tauri::command]
+fn wifi_direct() -> Option<&'static str> {
+    #[cfg(target_os = "android")]
+    return Some(android::wifi_direct());
+    #[cfg(not(target_os = "android"))]
+    None
+}
+
 #[tauri::command]
 fn lora(state: State<'_, AppState>) -> CommandResult<LoraStatus> {
     Ok(state.node()?.lora())
@@ -613,6 +623,7 @@ pub fn run() {
             set_nearby,
             nearby,
             wifi_aware,
+            wifi_direct,
             lora,
             set_lora,
             lora_ports,

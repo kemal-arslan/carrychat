@@ -26,6 +26,7 @@
 -keep class dev.kemalarslan.carrychat.CarryChatService$Companion { *; }
 -keep class dev.kemalarslan.carrychat.Ble { *; }
 -keep class dev.kemalarslan.carrychat.Aware { *; }
+-keep class dev.kemalarslan.carrychat.Direct { *; }
 -keep class dev.kemalarslan.carrychat.Lora { *; }
 -keep class dev.kemalarslan.carrychat.Core { *; }
 

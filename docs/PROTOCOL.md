@@ -449,7 +449,7 @@ Implemented in the Android app (`WifiAwareLink.kt`), which hands the bytes of ea
 
 ### 9.7 People nearby
 
-A node can be visible to people nearby. A visible node tells the nodes it is directly connected to, over the local network, Bluetooth or Wi-Fi Aware, who it is, but only those that said they are visible too: two people see each other only when both turned it on, and a node that did not never sees anyone's card. Nothing about it is relayed.
+A node can be visible to people nearby. A visible node tells the nodes it is directly connected to, over the local network, Bluetooth, Wi-Fi Aware or Wi-Fi Direct, who it is, but only those that said they are visible too: two people see each other only when both turned it on, and a node that did not never sees anyone's card. Nothing about it is relayed.
 
 | Kind | Meaning |
 | --- | --- |
@@ -458,6 +458,15 @@ A node can be visible to people nearby. A visible node tells the nodes it is dir
 | `2` GONE | "I am no longer visible." |
 
 A visible node sends ASK on each new connection, and to every connected node when it becomes visible. A visible node answers ASK with ME, once per connection, and answers a ME it has not answered yet with its own ME. A node that is not visible ignores ASK and ME. A node that stops being visible sends GONE, and forgets everyone; the others forget it on GONE or when the connection ends. Adding someone seen nearby as a contact uses their card, as any card would (§5.5).
+
+### 9.8 Wi-Fi Direct
+
+Implemented in the Android app (`WifiDirectLink.kt`), which hands the bytes of each connection to the node like Wi-Fi Aware's. Wi-Fi Direct reaches phones that do not support Wi-Fi Aware: nearly every Android phone has it. Desktops do not take part.
+
+- **Discovery.** Each phone announces a Wi-Fi Direct DNS-SD service, instance `CarryChat`, type `_carrychat._tcp`, whose TXT record holds `s`, the node's session id in hex, and `h`, `1` while the phone hosts a group and `0` otherwise. Each phone looks for that service every 30 seconds.
+- **Who hosts.** Joining a Wi-Fi Direct group normally asks the user of the phone that owns it. Here the host makes an autonomous group whose network name, `DIRECT-CC-` followed by its session id in hex, and passphrase, `carrychat-` followed by the same, the other phone derives from the announcement, and joins it with them, so nobody is asked. Of two phones, the one with the higher session id hosts, since the node lets the other connect first (§9.1). A phone hosts when it hears a lower session id, unless it has joined a group; a phone joins a host with a higher session id when the node chooses to connect, unless it hosts itself. A group no one joins within 2 minutes is given up, and the phone does not host again for 10 minutes. A phone in a group talks to no other phone over Wi-Fi Direct.
+- **Sync.** The host listens on TCP port 43524; the phone that joined connects to the group owner's address and runs the sync of §9.1 over it. It leaves the group when the sync ends. The passphrase encrypts the link, though everything on it is sealed end to end already.
+- **Android** runs the link in the foreground service, from Android 10, which joining with a network name and passphrase needs. It asks for the same permissions as Wi-Fi Aware.
 
 ## 10. Security
 

@@ -7,6 +7,7 @@ import {
   ExportIcon,
   GlobeSimpleIcon,
   LinkSimpleIcon,
+  ShareNetworkIcon,
   ShieldCheckIcon,
   WifiHighIcon,
 } from "@phosphor-icons/react";
@@ -34,13 +35,15 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
   const [tor, setTor] = useState(false);
   const [bluetoothOn, setBluetoothOn] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Only phones have Wi-Fi Aware; it can come and go with Wi-Fi.
+  // Only phones have Wi-Fi Aware and Wi-Fi Direct; they come and go with Wi-Fi.
   const [wifiAware, setWifiAware] = useState<WifiAware>(null);
+  const [wifiDirect, setWifiDirect] = useState<WifiAware>(null);
   const [lora, setLora] = useState<LoraStatus | null>(null);
   const [loraOpen, setLoraOpen] = useState(false);
 
   useEffect(() => {
     api.wifiAware().then(setWifiAware);
+    api.wifiDirect().then(setWifiDirect);
     api.lora().then(setLora);
   }, [status, loraOpen]);
 
@@ -131,6 +134,19 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
               <b>{t.wifiAwareName}</b>
               <span className={(status?.wifiAwarePeers ?? 0) > 0 ? "live" : undefined}>
                 {wifiAwareLabel(wifiAware, status, t)}
+              </span>
+            </span>
+          </div>
+        )}
+        {wifiDirect !== null && (
+          <div className="row-item" title={t.wifiDirectHint}>
+            <span className="tile">
+              <ShareNetworkIcon size={20} />
+            </span>
+            <span className="row-text">
+              <b>{t.wifiDirectName}</b>
+              <span className={(status?.wifiDirectPeers ?? 0) > 0 ? "live" : undefined}>
+                {wifiAwareLabel(wifiDirect, status, t, status?.wifiDirectPeers ?? 0)}
               </span>
             </span>
           </div>

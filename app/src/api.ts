@@ -124,10 +124,10 @@ export type Message = {
 };
 
 /** A way a message left this device. */
-export type Via = "lan" | "bluetooth" | "wifiAware" | "internet" | "lora" | "file";
+export type Via = "lan" | "bluetooth" | "wifiAware" | "wifiDirect" | "internet" | "lora" | "file";
 
 /** A link a nearby node is connected over. */
-export type Link = "lan" | "bluetooth" | "wifiAware";
+export type Link = "lan" | "bluetooth" | "wifiAware" | "wifiDirect";
 
 /** Someone nearby who is visible, as we are. */
 export type NearbyPerson = {
@@ -142,7 +142,7 @@ export type NearbyPerson = {
   contactId: number | null;
 };
 
-/** How Wi-Fi Aware stands on this phone; null where there is none. */
+/** How Wi-Fi Aware, or Wi-Fi Direct, stands on this phone; null where there is none. */
 export type WifiAware = "unsupported" | "off" | "on" | null;
 
 /** One of our messages from writing to reading. */
@@ -206,6 +206,7 @@ export type Status = {
   /** Whether this device's Bluetooth is on; null until the app knows. */
   bluetoothRadio: boolean | null;
   wifiAwarePeers: number;
+  wifiDirectPeers: number;
   /** Whether a LoRa device is connected. */
   loraConnected: boolean;
   /** Frames waiting for airtime on LoRa. */
@@ -233,7 +234,7 @@ export type NodeEvent =
   | { type: "messageMoved"; contactId: number; messageId: number }
   | { type: "messagesRead"; contactId: number; messageIds: number[] }
   | { type: "contactChanged"; contact: Contact }
-  | { type: "peersChanged"; lan: number; bluetooth: number; wifiAware: number }
+  | { type: "peersChanged"; lan: number; bluetooth: number; wifiAware: number; wifiDirect: number }
   | { type: "loraChanged"; connected: boolean }
   | { type: "nearbyChanged"; people: number }
   | { type: "contactRequest"; contact: Contact }
@@ -295,6 +296,7 @@ export interface Api {
   /** The people nearby who are visible, while we are. */
   nearby(): Promise<NearbyPerson[]>;
   wifiAware(): Promise<WifiAware>;
+  wifiDirect(): Promise<WifiAware>;
   lora(): Promise<LoraStatus>;
   setLora(device: string | null): Promise<void>;
   loraPorts(): Promise<LoraPort[]>;
@@ -425,6 +427,7 @@ function desktopApi(): Api {
     setNearby: (on) => call("set_nearby", { on }),
     nearby: () => call("nearby"),
     wifiAware: () => call("wifi_aware"),
+    wifiDirect: () => call("wifi_direct"),
     lora: () => call("lora"),
     setLora: (device) => call("set_lora", { device }),
     loraPorts: () => call("lora_ports"),
@@ -872,6 +875,9 @@ function previewApi(): Api {
     async wifiAware() {
       return "on";
     },
+    async wifiDirect() {
+      return "on";
+    },
     async lora() {
       const device = settings.loraDevice;
       const meshcore = device !== null && (device.endsWith(":5000") || device.includes("C8:2B:96"));
@@ -931,6 +937,7 @@ function previewApi(): Api {
         bluetoothPeers: settings.bluetooth ? 1 : 0,
         bluetoothRadio: true,
         wifiAwarePeers: 1,
+        wifiDirectPeers: 0,
         loraConnected: settings.loraDevice !== null,
         loraWaiting: 0,
         internetOn: true,

@@ -32,7 +32,11 @@ export function linkStates(status: Status | null) {
       : tor?.state !== "starting" && status.internetRelays > 0
         ? "up"
         : "waiting";
-  const nearby = (status?.lanPeers ?? 0) + (status?.bluetoothPeers ?? 0) + (status?.wifiAwarePeers ?? 0);
+  const nearby =
+    (status?.lanPeers ?? 0) +
+    (status?.bluetoothPeers ?? 0) +
+    (status?.wifiAwarePeers ?? 0) +
+    (status?.wifiDirectPeers ?? 0);
   return { lan, bluetooth, internet, nearby };
 }
 
@@ -70,10 +74,10 @@ export function bluetoothLabel(state: BluetoothState, status: Status | null, t: 
   }[state];
 }
 
-export function wifiAwareLabel(state: WifiAware, status: Status | null, t: Strings): string {
+/** Wi-Fi Aware's state in words, or Wi-Fi Direct's with `peers` of its own. */
+export function wifiAwareLabel(state: WifiAware, status: Status | null, t: Strings, peers = status?.wifiAwarePeers ?? 0): string {
   if (state === "unsupported") return t.wifiAwareUnsupported;
   if (state === "off") return t.wifiAwareOff;
-  const peers = status?.wifiAwarePeers ?? 0;
   return peers > 0 ? t.nearbyCount(peers) : t.stateLooking;
 }
 

@@ -26,6 +26,7 @@ class CarryChatService : Service() {
   private var multicastLock: WifiManager.MulticastLock? = null
   private var bluetooth: BleLink? = null
   private var wifiAware: WifiAwareLink? = null
+  private var wifiDirect: WifiDirectLink? = null
   private var lora: LoraLink? = null
 
   override fun onCreate() {
@@ -41,6 +42,9 @@ class CarryChatService : Service() {
     bluetooth = BleLink(this).also { it.start() }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && WifiAwareLink.supported(this)) {
       wifiAware = WifiAwareLink(this).also { it.start() }
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && WifiDirectLink.supported(this)) {
+      wifiDirect = WifiDirectLink(this).also { it.start() }
     }
     lora = LoraLink(this).also { it.start() }
   }
@@ -94,6 +98,8 @@ class CarryChatService : Service() {
     bluetooth = null
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) wifiAware?.stop()
     wifiAware = null
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) wifiDirect?.stop()
+    wifiDirect = null
     lora?.stop()
     lora = null
     multicastLock?.release()

@@ -421,8 +421,8 @@ async fn run_node(
                     "· LoRa device {}",
                     if connected { "connected" } else { "gone" }
                 ),
-                Ok(Event::PeersChanged { lan, bluetooth, wifi_aware }) => {
-                    println!("· {} node(s) nearby", lan + bluetooth + wifi_aware)
+                Ok(Event::PeersChanged { lan, bluetooth, wifi_aware, wifi_direct }) => {
+                    println!("· {} node(s) nearby", lan + bluetooth + wifi_aware + wifi_direct)
                 }
                 Ok(Event::NearbyChanged { .. }) => {
                     let people: Vec<String> = node.nearby().into_iter().map(|person| person.name).collect();
