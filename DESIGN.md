@@ -118,6 +118,8 @@ components:
 
 # CarryChat
 
+**English** · [Türkçe](DESIGN.tr.md)
+
 ## Overview
 
 **Creative North Star:** a clean phone app that stays out of the way. People open CarryChat to read and send a few words, often on a weak battery and without internet; the interface should feel familiar within seconds and never look alarming.

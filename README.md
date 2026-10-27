@@ -1,12 +1,14 @@
 # CarryChat
 
+**English** · [Türkçe](README.tr.md)
+
 **Offline-first, end-to-end encrypted messaging between phones and computers over any link: local network, Bluetooth, Wi-Fi Aware, Wi-Fi Direct, LoRa radio, Reticulum, internet or a file on a USB stick.**
 
 CarryChat is a store-and-forward messenger. Each message is sealed into a bundle of at most 4 KiB, kept until a link towards the recipient exists, and passed from device to device on the way. Devices that carry a bundle can neither read it nor tell who sent it or who it is for. The internet is one link among several, not a requirement.
 
 [![CI](https://github.com/kemal-arslan/carrychat/actions/workflows/ci.yml/badge.svg)](https://github.com/kemal-arslan/carrychat/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/kemalarslan)
 
-> **Status: early.** CarryChat works today over the local network, Bluetooth, the internet (Nostr relays) and by file, from a desktop app, an Android app or the command line. The LoRa radio link is written and waits for its first field test on real devices. The latest release, [0.2.0](https://github.com/kemal-arslan/carrychat/releases/tag/v0.2.0), has the Android app and the macOS app for Apple silicon. See the [roadmap](#roadmap).
+> **Status: early.** CarryChat works today over the local network, Bluetooth, the internet (Nostr relays) and by file, from a desktop app, an Android app or the command line. The LoRa radio (Meshtastic and MeshCore) and Reticulum links are written and wait for their first field test on real devices, as do Wi-Fi Direct and passing cards over NFC, which need two phones. The latest release, [0.2.0](https://github.com/kemal-arslan/carrychat/releases/tag/v0.2.0), has the Android app and the macOS app for Apple silicon. See the [roadmap](#roadmap).
 
 ## How it works
 
@@ -34,7 +36,7 @@ CarryChat sends each message over the best link it has, and keeps it until one a
 - **Delivery receipts the network can check.** The recipient publishes a short proof that only the two contacts can produce, and every device that carries a copy deletes it.
 - **Only card holders can write.** To write to someone you need their card. Your first message carries your own card, signed, so they see a request with your fingerprint and accept or decline it. Nobody without your card can reach you.
 
-The full specification is in [docs/PROTOCOL.md](docs/PROTOCOL.md). [docs/test-vectors.json](docs/test-vectors.json) lets another implementation check itself byte for byte.
+The full specification is in [docs/PROTOCOL.md](docs/PROTOCOL.md) ([Türkçe](docs/PROTOCOL.tr.md)). [docs/test-vectors.json](docs/test-vectors.json) lets another implementation check itself byte for byte.
 
 ## Try it
 
@@ -59,7 +61,7 @@ Create your identity and give your card (**My card**, also as a QR code, under *
 
 **Be visible nearby**, on **People**, shows the people around you who turned it on too, over the local network, Bluetooth, Wi-Fi Aware or Wi-Fi Direct, and lets you write to them without exchanging cards first. While it is off, no one nearby sees you and you see no one.
 
-**LoRa radio**, on **Network**, uses a [Meshtastic](https://meshtastic.org) or [MeshCore](https://meshcore.io) device: a phone pairs with it over Bluetooth, a computer uses it over USB or the network, and CarryChat finds out which kind it is. Once chosen, it shows the device's region or radio settings and the devices it has heard recently (three hours for Meshtastic, two days for MeshCore, whose repeaters announce themselves less often), so you can tell whether a mesh is in range. On a MeshCore device, CarryChat adds a `#carrychat` channel to a free slot.
+**LoRa radio**, on **Network**, uses a [Meshtastic](https://meshtastic.org) or [MeshCore](https://meshcore.io) device: a phone pairs with it over Bluetooth, a computer uses it over USB or the network, and CarryChat finds out which kind it is. Once chosen, it shows the device's region or radio settings and the devices it has heard recently (three hours for Meshtastic, two days for MeshCore, whose repeaters announce themselves less often), so you can tell whether a mesh is in range. Phones and computers have no LoRa radio of their own, so it takes a separate device. On a MeshCore device, CarryChat adds a `#carrychat` channel to a free slot.
 
 **Reticulum**, on **Network**, connects to a [Reticulum](https://reticulum.network) node, such as `rnsd` on the same computer with a TCP server interface, and reaches the other CarryChat nodes on that network however many hops away. It shows the CarryChat nodes that announced themselves in the last six hours.
 
@@ -99,9 +101,9 @@ carrychat erase --yes                           # delete identity, contacts and 
 
 1. **Protocol v0, reference implementation, test vectors** (done)
 2. **Local network link, message store, desktop app, command line, USB export and import** (done)
-3. **LoRa link through a Meshtastic or MeshCore radio** (written: the command line and the macOS app use a device over USB or TCP, the Android app over Bluetooth; it shows the region or radio settings and the devices heard. Field tests come next)
+3. **LoRa link through a Meshtastic or MeshCore radio, and the Reticulum link** (written: the command line and the macOS app use a device over USB or TCP, the Android app over Bluetooth; it shows the region or radio settings and the devices heard. Field tests come next)
 4. **Internet link over Nostr** (done). Computers with internet also pass on what they carry for computers without it. Fetching for those computers is still open.
-5. **Android app, Bluetooth, Wi-Fi Aware and Wi-Fi Direct links, people nearby** (done; Wi-Fi Aware and Wi-Fi Direct wait for a test between two phones). iOS app, HF radio
+5. **Android app, Bluetooth, Wi-Fi Aware and Wi-Fi Direct links, people nearby, cards over sound and NFC** (done; Wi-Fi Aware, Wi-Fi Direct and NFC wait for a test between two phones). iOS app, HF radio
 
 ## Build
 
@@ -126,7 +128,7 @@ On a phone CarryChat keeps running after its screen is closed, with an ongoing n
 | [`carrychat-proto`](crates/carrychat-proto) | Wire format and cryptography, no I/O |
 | [`carrychat-node`](crates/carrychat-node) | Message store, forwarding, local network and file links |
 | [`carrychat-cli`](crates/carrychat-cli) | The `carrychat` command |
-| [`app`](app) | The desktop and Android app (Tauri and React); its look follows [DESIGN.md](DESIGN.md) |
+| [`app`](app) | The desktop and Android app (Tauri and React); its look follows [DESIGN.md](DESIGN.md) ([Türkçe](DESIGN.tr.md)) |
 
 ## Security
 

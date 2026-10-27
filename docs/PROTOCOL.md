@@ -1,5 +1,7 @@
 # CarryChat protocol v0
 
+**English** · [Türkçe](PROTOCOL.tr.md)
+
 **Status: draft.** Breaking changes are expected until v1. The reference implementation is [`crates/carrychat-proto`](../crates/carrychat-proto), and [`test-vectors.json`](test-vectors.json) pins its output so other implementations can check themselves against it.
 
 ## 1. Goals
