@@ -8,7 +8,7 @@ use std::sync::Mutex;
 
 use carrychat_node::{
     ChannelView, ContactView, GroupMessageView, GroupView, ImportReport, InternetConfig, Journey,
-    LanConfig, MessageView, MutedView, Node, PostView, Profile, Settings, Status,
+    LanConfig, MessageView, MutedView, NearbyPerson, Node, PostView, Profile, Settings, Status,
 };
 use data_encoding::BASE64;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -141,6 +141,26 @@ fn rename(state: State<'_, AppState>, name: String) -> CommandResult<Profile> {
 #[tauri::command]
 fn settings(state: State<'_, AppState>) -> CommandResult<Settings> {
     state.node()?.settings().map_err(text)
+}
+
+#[tauri::command]
+fn set_nearby(state: State<'_, AppState>, on: bool) -> CommandResult<()> {
+    state.node()?.set_nearby(on).map_err(text)
+}
+
+#[tauri::command]
+fn nearby(state: State<'_, AppState>) -> CommandResult<Vec<NearbyPerson>> {
+    Ok(state.node()?.nearby())
+}
+
+/// How Wi-Fi Aware stands on this phone: "unsupported", "off" or "on".
+/// Elsewhere there is none.
+#[tauri::command]
+fn wifi_aware() -> Option<&'static str> {
+    #[cfg(target_os = "android")]
+    return Some(android::wifi_aware());
+    #[cfg(not(target_os = "android"))]
+    None
 }
 
 #[tauri::command]
@@ -530,6 +550,9 @@ pub fn run() {
             rename,
             settings,
             set_read_receipts,
+            set_nearby,
+            nearby,
+            wifi_aware,
             erase_everything,
             messages,
             journey,

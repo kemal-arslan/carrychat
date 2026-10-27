@@ -1,6 +1,7 @@
 import {
   BluetoothIcon,
   CaretRightIcon,
+  DevicesIcon,
   DownloadSimpleIcon,
   ExportIcon,
   GlobeSimpleIcon,
@@ -9,9 +10,9 @@ import {
   WifiHighIcon,
 } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
-import { api, type Status } from "./api";
+import { api, type Status, type WifiAware } from "./api";
 import { useI18n } from "./i18n";
-import { bluetoothLabel, internetLabel, lanLabel, linkStates } from "./links";
+import { bluetoothLabel, internetLabel, lanLabel, linkStates, wifiAwareLabel } from "./links";
 
 type Props = {
   status: Status | null;
@@ -31,6 +32,12 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
   const [tor, setTor] = useState(false);
   const [bluetoothOn, setBluetoothOn] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Only phones have Wi-Fi Aware; it can come and go with Wi-Fi.
+  const [wifiAware, setWifiAware] = useState<WifiAware>(null);
+
+  useEffect(() => {
+    api.wifiAware().then(setWifiAware);
+  }, [status]);
 
   useEffect(() => {
     api.settings().then((settings) => {
@@ -110,6 +117,19 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
             aria-label={t.bluetoothSetting}
           />
         </label>
+        {wifiAware !== null && (
+          <div className="row-item" title={t.wifiAwareHint}>
+            <span className="tile">
+              <DevicesIcon size={20} />
+            </span>
+            <span className="row-text">
+              <b>{t.wifiAwareName}</b>
+              <span className={(status?.wifiAwarePeers ?? 0) > 0 ? "live" : undefined}>
+                {wifiAwareLabel(wifiAware, status, t)}
+              </span>
+            </span>
+          </div>
+        )}
         <div
           className="row-item"
           title={status?.internetTor?.state === "failed" ? status.internetTor.detail : (status?.internetRefusal ?? undefined)}

@@ -264,6 +264,63 @@ async fn a_message_keeps_the_ways_it_left_by() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn people_nearby_see_each_other_only_when_both_are_visible() {
+    let alice = node("alice");
+    let bob = node("bob");
+    let carol = node("carol");
+    alice.node.set_nearby(true).unwrap();
+    bob.node.set_nearby(true).unwrap();
+    let mut alice_events = alice.node.subscribe();
+    let nearby_changed = |event: &Event| matches!(event, Event::NearbyChanged { .. });
+
+    let _bob_link = platform_link(&alice.node, &bob.node);
+    next_event(&mut alice_events, nearby_changed).await;
+    let seen = alice.node.nearby();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(
+        (seen[0].name.as_str(), seen[0].link, seen[0].contact_id),
+        ("bob", Link::Bluetooth, None)
+    );
+    assert_eq!(seen[0].card, bob.node.profile().card);
+
+    // Carol is not visible: she neither sees Alice nor is seen.
+    let _carol_link = platform_link(&alice.node, &carol.node);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(alice.node.nearby().len(), 1);
+    assert!(carol.node.nearby().is_empty());
+
+    carol.node.set_nearby(true).unwrap();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while alice.node.nearby().len() < 2 || carol.node.nearby().is_empty() {
+            next_event(&mut alice_events, nearby_changed).await;
+        }
+    })
+    .await
+    .expect("Alice and Carol should see each other");
+    assert_eq!(carol.node.nearby()[0].name, "alice");
+
+    // A contact shows as one; someone who turns it off disappears.
+    let bob_id = alice.node.add_contact(&bob.node.profile().card).unwrap().id;
+    let bob_seen = alice
+        .node
+        .nearby()
+        .into_iter()
+        .find(|person| person.name == "bob")
+        .unwrap();
+    assert_eq!(bob_seen.contact_id, Some(bob_id));
+    bob.node.set_nearby(false).unwrap();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while alice.node.nearby().len() != 1 {
+            next_event(&mut alice_events, nearby_changed).await;
+        }
+    })
+    .await
+    .expect("Bob should disappear");
+    assert_eq!(alice.node.nearby()[0].name, "carol");
+    assert!(bob.node.nearby().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_node_in_the_middle_relays_between_two_others() {
     let alice = node("alice");
     let bob = node("bob");

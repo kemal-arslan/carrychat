@@ -1,9 +1,18 @@
-import { BluetoothIcon, BroadcastIcon, GlobeSimpleIcon, UsbIcon, WifiHighIcon, type Icon } from "@phosphor-icons/react";
+import {
+  BluetoothIcon,
+  BroadcastIcon,
+  DevicesIcon,
+  GlobeSimpleIcon,
+  UsbIcon,
+  WifiHighIcon,
+  type Icon,
+} from "@phosphor-icons/react";
 import type { Via } from "./api";
 
 const ICONS: Record<Via, Icon> = {
   lan: WifiHighIcon,
   bluetooth: BluetoothIcon,
+  wifiAware: DevicesIcon,
   internet: GlobeSimpleIcon,
   lora: BroadcastIcon,
   file: UsbIcon,

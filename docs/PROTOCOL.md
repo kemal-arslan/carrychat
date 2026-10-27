@@ -373,13 +373,14 @@ Implemented in `crates/carrychat-node/src/lan.rs`.
 
 The beacon carries no identity. On hearing a beacon from a node it is not connected to, the node with the smaller session id dials. The other node dials too after three beacons without a connection, in case its own beacons do not get through.
 
-**Sync.** Implemented in `crates/carrychat-node/src/sync.rs`, and the same over Bluetooth LE (§9.5). Over TCP, every frame is prefixed with its `u16` length. Besides the frames of §7, three control frames exist:
+**Sync.** Implemented in `crates/carrychat-node/src/sync.rs`, and the same over Bluetooth LE (§9.5) and Wi-Fi Aware (§9.6). Over TCP, every frame is prefixed with its `u16` length. Besides the frames of §7, four control frames exist:
 
 | Type | Layout |
 | --- | --- |
 | `0x10` HAVE | `type \|\| count (u16) \|\| bundle_id × count` |
 | `0x11` WANT | `type \|\| count (u16) \|\| bundle_id × count` |
 | `0x12` HELLO | `type \|\| session id (8)` |
+| `0x13` NEARBY | `type \|\| kind (1) \|\| card` (§9.7) |
 
 Both sides send HELLO first. A second connection between the same two nodes, over any link, is closed. Then each side sends HAVE with the ids of the bundles it can pass on, and every tombstone it knows. The other side answers with WANT for the ids it has never seen, and receives those bundles. After that, new bundles and tombstones are pushed as they appear. An empty HAVE every 15 seconds keeps the connection alive, and a connection silent for 45 seconds is closed.
 
@@ -430,6 +431,27 @@ Implemented in `crates/carrychat-node/src/bluetooth.rs` for desktops, through bt
 - **Who connects.** As on the local network, the node with the smaller session id connects, and the other after three sightings without a connection. A node that cannot advertise connects regardless. Desktops cannot advertise through btleplug, so they connect to phones, and reach other desktops over the local network.
 - **Desktops** write with response, 512 bytes at a time: macOS drops writes without response when its queue is full, which would break the stream. Since a scan reports each device once, they look at the devices seen so far every 5 seconds and connect to the CarryChat nodes among them that are not connected.
 - **Android** runs the link in the foreground service that keeps the node alive, so it works while the app is closed. It asks for the Bluetooth permissions with `neverForLocation`.
+
+### 9.6 Wi-Fi Aware
+
+Implemented in the Android app (`WifiAwareLink.kt`), which hands the bytes of each connection to the node like Bluetooth's. Phones that support Wi-Fi Aware (Neighbor Awareness Networking) connect over Wi-Fi directly, with no access point and no internet, farther and much faster than over Bluetooth. Desktops do not take part.
+
+- **Discovery.** Each phone publishes and subscribes to the service named `carrychat`. The publication's service-specific info is the node's 8-byte session id.
+- **Who connects.** As on the other links, the node chooses by session id (§9.1). The subscriber that connects first sends the publisher a discovery message holding its own session id. The publisher then listens on a TCP port and asks for a data path to that subscriber, giving the port; the subscriber asks for a data path to the publisher, learns the port and the publisher's IPv6 address from it, and connects. Both data paths use the passphrase `carrychat-wifi-aware`: the link is encrypted, though everything on it is sealed end to end already.
+- **Sync.** The TCP connection carries the sync of §9.1.
+- **Android** runs the link in the foreground service, from Android 10. It asks for `NEARBY_WIFI_DEVICES` with `neverForLocation` from Android 13, and for the location permission before that, which Wi-Fi Aware discovery needs there.
+
+### 9.7 People nearby
+
+A node can be visible to people nearby. A visible node tells the nodes it is directly connected to, over the local network, Bluetooth or Wi-Fi Aware, who it is, but only those that said they are visible too: two people see each other only when both turned it on, and a node that did not never sees anyone's card. Nothing about it is relayed.
+
+| Kind | Meaning |
+| --- | --- |
+| `0` ASK | "I am visible: who are you?" |
+| `1` ME | "This is me", followed by the sender's contact card (§3) |
+| `2` GONE | "I am no longer visible." |
+
+A visible node sends ASK on each new connection, and to every connected node when it becomes visible. A visible node answers ASK with ME, once per connection, and answers a ME it has not answered yet with its own ME. A node that is not visible ignores ASK and ME. A node that stops being visible sends GONE, and forgets everyone; the others forget it on GONE or when the connection ends. Adding someone seen nearby as a contact uses their card, as any card would (§5.5).
 
 ## 10. Security
 
@@ -485,3 +507,5 @@ Implemented in `crates/carrychat-node/src/bluetooth.rs` for desktops, through bt
 | Reassembly timeout | 600 s |
 | Bluetooth LE service | `43524348-a0c5-4a3e-9b31-6f2d8e7c1a01` |
 | Bluetooth LE stream characteristic | `43524348-a0c5-4a3e-9b31-6f2d8e7c1a02` |
+| Wi-Fi Aware service name | `carrychat` |
+| Wi-Fi Aware data path passphrase | `carrychat-wifi-aware` |

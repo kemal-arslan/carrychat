@@ -124,7 +124,26 @@ export type Message = {
 };
 
 /** A way a message left this device. */
-export type Via = "lan" | "bluetooth" | "internet" | "lora" | "file";
+export type Via = "lan" | "bluetooth" | "wifiAware" | "internet" | "lora" | "file";
+
+/** A link a nearby node is connected over. */
+export type Link = "lan" | "bluetooth" | "wifiAware";
+
+/** Someone nearby who is visible, as we are. */
+export type NearbyPerson = {
+  /** Their node's session id, steady while they stay. */
+  session: string;
+  name: string;
+  fingerprint: string;
+  /** Their card, to add them as a contact. */
+  card: string;
+  link: Link;
+  /** Set when they are one of our contacts already. */
+  contactId: number | null;
+};
+
+/** How Wi-Fi Aware stands on this phone; null where there is none. */
+export type WifiAware = "unsupported" | "off" | "on" | null;
 
 /** One of our messages from writing to reading. */
 export type Journey = {
@@ -135,7 +154,7 @@ export type Journey = {
   steps: { via: Via; count: number; at: number }[];
 };
 
-export type Settings = { readReceipts: boolean; tor: boolean; bluetooth: boolean };
+export type Settings = { readReceipts: boolean; tor: boolean; bluetooth: boolean; nearby: boolean };
 
 /** How the internet link stands with Tor, when it goes over Tor. */
 export type TorState = { state: "starting" } | { state: "ready" } | { state: "failed"; detail: string };
@@ -149,6 +168,7 @@ export type Status = {
   lanProblem: LanProblem | null;
   bluetoothOn: boolean;
   bluetoothPeers: number;
+  wifiAwarePeers: number;
   internetOn: boolean;
   internetRelays: number;
   /** The last reason a relay gave for refusing an event. */
@@ -172,7 +192,8 @@ export type NodeEvent =
   | { type: "messageMoved"; contactId: number; messageId: number }
   | { type: "messagesRead"; contactId: number; messageIds: number[] }
   | { type: "contactChanged"; contact: Contact }
-  | { type: "peersChanged"; lan: number; bluetooth: number }
+  | { type: "peersChanged"; lan: number; bluetooth: number; wifiAware: number }
+  | { type: "nearbyChanged"; people: number }
   | { type: "contactRequest"; contact: Contact }
   | { type: "localNetworkChanged"; problem: LanProblem | null }
   | { type: "internetChanged"; relays: number }
@@ -227,6 +248,11 @@ export interface Api {
   setTor(on: boolean): Promise<void>;
   /** Chooses whether the app uses Bluetooth; it applies after a restart. */
   setBluetooth(on: boolean): Promise<void>;
+  /** Becomes visible to people nearby who are visible too, or stops. */
+  setNearby(on: boolean): Promise<void>;
+  /** The people nearby who are visible, while we are. */
+  nearby(): Promise<NearbyPerson[]>;
+  wifiAware(): Promise<WifiAware>;
   restart(): Promise<void>;
   status(): Promise<Status>;
   /** Asks where to save, then exports. Returns null if cancelled. */
@@ -348,6 +374,9 @@ function desktopApi(): Api {
     setReadReceipts: (on) => call("set_read_receipts", { on }),
     setTor: (on) => call("set_tor", { on }),
     setBluetooth: (on) => call("set_bluetooth", { on }),
+    setNearby: (on) => call("set_nearby", { on }),
+    nearby: () => call("nearby"),
+    wifiAware: () => call("wifi_aware"),
     restart: () => call("restart"),
     status: () => call("status"),
     async exportFile() {
@@ -378,7 +407,12 @@ function previewApi(): Api {
   const listeners: ((event: NodeEvent) => void)[] = [];
   const emit = (event: NodeEvent) => listeners.forEach((listener) => listener(event));
   let profile: Profile | null = null;
-  let settings: Settings = { readReceipts: true, tor: false, bluetooth: true };
+  let settings: Settings = { readReceipts: true, tor: false, bluetooth: true, nearby: false };
+  // Who the preview shows nearby once it is visible.
+  const nearbyPeople: NearbyPerson[] = [
+    { session: "a1", name: "Elif", fingerprint: "q3rd 7kpa mx2c vuhe 4tzn 6wyb fo", card: "carrychat:elif", link: "bluetooth", contactId: null },
+    { session: "b2", name: "Deniz", fingerprint: "7jgi 54zm 2zkd yent vzen s3pg lq", card: "carrychat:deniz", link: "wifiAware", contactId: 1 },
+  ];
   let nextId = 10;
   const contact = (id: number, name: string, fingerprint: string, request = false, secure = false): Contact => ({
     id,
@@ -774,6 +808,16 @@ function previewApi(): Api {
     async setBluetooth(on) {
       settings = { ...settings, bluetooth: on };
     },
+    async setNearby(on) {
+      settings = { ...settings, nearby: on };
+      setTimeout(() => emit({ type: "nearbyChanged", people: on ? nearbyPeople.length : 0 }), 600);
+    },
+    async nearby() {
+      return settings.nearby ? nearbyPeople.map((person) => ({ ...person })) : [];
+    },
+    async wifiAware() {
+      return "on";
+    },
     async restart() {
       location.reload();
     },
@@ -792,6 +836,7 @@ function previewApi(): Api {
         lanProblem,
         bluetoothOn: settings.bluetooth,
         bluetoothPeers: settings.bluetooth ? 1 : 0,
+        wifiAwarePeers: 1,
         internetOn: true,
         internetRelays: 3,
         internetRefusal: null,

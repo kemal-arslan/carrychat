@@ -25,6 +25,7 @@ import androidx.core.content.ContextCompat
 class CarryChatService : Service() {
   private var multicastLock: WifiManager.MulticastLock? = null
   private var bluetooth: BleLink? = null
+  private var wifiAware: WifiAwareLink? = null
 
   override fun onCreate() {
     super.onCreate()
@@ -37,6 +38,9 @@ class CarryChatService : Service() {
       acquire()
     }
     bluetooth = BleLink(this).also { it.start() }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && WifiAwareLink.supported(this)) {
+      wifiAware = WifiAwareLink(this).also { it.start() }
+    }
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -86,6 +90,8 @@ class CarryChatService : Service() {
   override fun onDestroy() {
     bluetooth?.stop()
     bluetooth = null
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) wifiAware?.stop()
+    wifiAware = null
     multicastLock?.release()
     multicastLock = null
     super.onDestroy()

@@ -11,6 +11,7 @@ pub mod internet;
 mod journey;
 pub mod lan;
 pub mod lora;
+mod nearby;
 pub mod store;
 mod sync;
 
@@ -28,6 +29,7 @@ pub use crate::internet::{InternetConfig, TorState};
 pub use crate::journey::{Journey, Step, Via};
 pub use crate::lan::{LanConfig, LanProblem};
 pub use crate::lora::LoraDevice;
+pub use crate::nearby::NearbyPerson;
 use crate::store::Store;
 pub use crate::sync::Link;
 
@@ -203,6 +205,8 @@ pub struct Settings {
     pub tor: bool,
     /// Whether the node uses Bluetooth LE. It takes effect when the app starts.
     pub bluetooth: bool,
+    /// Whether people nearby who turned it on too can see us, and we them.
+    pub nearby: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -216,6 +220,8 @@ pub struct Status {
     pub bluetooth_on: bool,
     /// Nodes connected over Bluetooth LE right now.
     pub bluetooth_peers: usize,
+    /// Nodes connected over Wi-Fi Aware right now, phone to phone.
+    pub wifi_aware_peers: usize,
     /// Whether a Meshtastic device is connected for the LoRa link.
     pub lora_connected: bool,
     /// Frames waiting for airtime on LoRa.
@@ -254,7 +260,13 @@ pub enum Event {
     #[serde(rename_all = "camelCase")]
     MessageMoved { contact_id: i64, message_id: i64 },
     #[serde(rename_all = "camelCase")]
-    PeersChanged { lan: usize, bluetooth: usize },
+    PeersChanged {
+        lan: usize,
+        bluetooth: usize,
+        wifi_aware: usize,
+    },
+    /// Someone nearby became visible, or went away.
+    NearbyChanged { people: usize },
     /// The Meshtastic device of the LoRa link connected or went away.
     LoraChanged { connected: bool },
     /// The contact read some of our messages.
@@ -301,6 +313,7 @@ pub(crate) struct Shared {
     pub(crate) lora: lora::Lora,
     pub(crate) internet: internet::Internet,
     internet_on: std::sync::atomic::AtomicBool,
+    pub(crate) nearby: nearby::Nearby,
 }
 
 impl Node {
@@ -321,6 +334,7 @@ impl Node {
     }
 
     fn new(engine: Engine) -> Self {
+        let visible = engine.settings().is_ok_and(|settings| settings.nearby);
         Self {
             shared: Arc::new(Shared {
                 engine: Mutex::new(engine),
@@ -330,6 +344,7 @@ impl Node {
                 lora: lora::Lora::new(),
                 internet: internet::Internet::new(),
                 internet_on: std::sync::atomic::AtomicBool::new(false),
+                nearby: nearby::Nearby::new(visible),
             }),
         }
     }
@@ -381,6 +396,19 @@ impl Node {
 
     pub fn set_read_receipts(&self, on: bool) -> Result<()> {
         self.shared.engine().set_read_receipts(on)
+    }
+
+    /// Becomes visible to people nearby who are visible too, or stops. It
+    /// applies at once and is kept for the next start.
+    pub fn set_nearby(&self, on: bool) -> Result<()> {
+        self.shared.engine().set_nearby(on)?;
+        self.shared.set_nearby_visible(on);
+        Ok(())
+    }
+
+    /// The people nearby who are visible, while this node is.
+    pub fn nearby(&self) -> Vec<NearbyPerson> {
+        self.shared.nearby_people()
     }
 
     /// Chooses whether the internet link goes over Tor from its next start.
@@ -626,6 +654,7 @@ impl Node {
             lan_problem: self.shared.lan.problem(),
             bluetooth_on: self.shared.engine().settings()?.bluetooth,
             bluetooth_peers: self.shared.peers.count(Link::Bluetooth),
+            wifi_aware_peers: self.shared.peers.count(Link::WifiAware),
             lora_connected: self.shared.lora.connected(),
             lora_waiting: self.shared.lora.waiting(),
             internet_relays: self.shared.internet.connected(),

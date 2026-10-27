@@ -540,7 +540,26 @@ impl Engine {
             read_receipts: self.store.meta("read_receipts")?.as_deref() != Some(b"0".as_slice()),
             tor: self.store.meta("tor")?.as_deref() == Some(b"1".as_slice()),
             bluetooth: self.store.meta("bluetooth")?.as_deref() != Some(b"0".as_slice()),
+            nearby: self.store.meta("nearby")?.as_deref() == Some(b"1".as_slice()),
         })
+    }
+
+    /// Whether people nearby who are visible too can see us.
+    pub fn set_nearby(&self, on: bool) -> Result<()> {
+        self.store.set_meta("nearby", if on { b"1" } else { b"0" })
+    }
+
+    /// Our own card, as contacts get it.
+    pub fn card(&self) -> ContactCard {
+        self.identity.card()
+    }
+
+    /// The id of the listed contact with this card's key, if there is one.
+    pub fn contact_id_of(&self, card: &ContactCard) -> Option<i64> {
+        self.contacts
+            .iter()
+            .find(|contact| !contact.hidden && contact.card.dh_key() == card.dh_key())
+            .map(|contact| contact.id)
     }
 
     /// Whether the node uses Bluetooth LE, from its next start.

@@ -183,7 +183,7 @@ Flat. Surfaces are told apart by fill (surface vs surface-muted) and hairlines (
 - **Network rows:** icon tile, name, state in words (green when live), and a switch where the link can be turned on or off. Changes that need a restart show one restart row.
 - **Sheets:** every dialog is a bottom sheet with a grab handle, a 20px title and its actions at the bottom, full width on phones and 440px wide, centred, on desktops. They close by dragging down, tapping the scrim or Escape.
 - **Empty states** say what to do next in one sentence.
-- **Planned, needing core support:** a "Nearby" row of contacts reachable right now, which needs the node to learn who is behind a nearby device without exposing identities to strangers.
+- **People nearby:** a "Be visible nearby" switch on People. While it is on, People lists the visible people nearby with the link they are on, and Chats shows them as a row of ringed avatars above the filters; tapping one opens a chat, adding them as a contact first. Visibility is mutual and off by default.
 
 ## Do's and Don'ts
 

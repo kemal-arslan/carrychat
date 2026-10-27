@@ -420,8 +420,12 @@ async fn run_node(
                     "· LoRa device {}",
                     if connected { "connected" } else { "gone" }
                 ),
-                Ok(Event::PeersChanged { lan, bluetooth }) => {
-                    println!("· {} node(s) nearby", lan + bluetooth)
+                Ok(Event::PeersChanged { lan, bluetooth, wifi_aware }) => {
+                    println!("· {} node(s) nearby", lan + bluetooth + wifi_aware)
+                }
+                Ok(Event::NearbyChanged { .. }) => {
+                    let people: Vec<String> = node.nearby().into_iter().map(|person| person.name).collect();
+                    println!("· visible nearby: {}", if people.is_empty() { "nobody".to_owned() } else { people.join(", ") });
                 }
                 Ok(Event::InternetChanged { relays }) => match node.status().ok().and_then(|status| status.internet_tor) {
                     Some(TorState::Starting) => println!("· starting Tor"),

@@ -15,6 +15,7 @@ use crate::{now, Event, Shared};
 pub enum Via {
     Lan,
     Bluetooth,
+    WifiAware,
     Internet,
     Lora,
     File,
@@ -25,6 +26,7 @@ impl Via {
         match self {
             Via::Lan => "lan",
             Via::Bluetooth => "bluetooth",
+            Via::WifiAware => "wifiAware",
             Via::Internet => "internet",
             Via::Lora => "lora",
             Via::File => "file",
@@ -35,6 +37,7 @@ impl Via {
         Some(match text {
             "lan" => Via::Lan,
             "bluetooth" => Via::Bluetooth,
+            "wifiAware" => Via::WifiAware,
             "internet" => Via::Internet,
             "lora" => Via::Lora,
             "file" => Via::File,
@@ -48,6 +51,7 @@ impl From<Link> for Via {
         match link {
             Link::Lan => Via::Lan,
             Link::Bluetooth => Via::Bluetooth,
+            Link::WifiAware => Via::WifiAware,
         }
     }
 }

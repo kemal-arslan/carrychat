@@ -1,6 +1,6 @@
 # CarryChat
 
-**Offline-first, end-to-end encrypted messaging between phones and computers over any link: local network, Bluetooth, LoRa radio, internet or a file on a USB stick.**
+**Offline-first, end-to-end encrypted messaging between phones and computers over any link: local network, Bluetooth, Wi-Fi Aware, LoRa radio, internet or a file on a USB stick.**
 
 CarryChat is a store-and-forward messenger. Each message is sealed into a bundle of at most 4 KiB, kept until a link towards the recipient exists, and passed from device to device on the way. Devices that carry a bundle can neither read it nor tell who sent it or who it is for. The internet is one link among several, not a requirement.
 
@@ -16,6 +16,7 @@ CarryChat sends each message over the best link it has, and keeps it until one a
 | --- | --- | --- |
 | Local network | a building or a campus | the router works but the internet doesn't |
 | Bluetooth LE | a few dozen metres, further from phone to phone | there is no network at all |
+| Wi-Fi Aware | around a hundred metres, phone to phone, fast enough for photos | there is no router and no internet (Android phones that support it) |
 | LoRa radio ([Meshtastic](https://meshtastic.org)) | kilometres per hop, further over community relays | there is no internet at all |
 | Internet ([Nostr](https://nostr.com) relays) | anywhere | normal days, or whenever one computer on the path is online |
 | File on a USB stick | as far as someone carries it | nothing else reaches |
@@ -54,6 +55,8 @@ npm run tauri dev
 
 Create your identity and give your card (**My card**, also as a QR code, under **Me** or the QR button) to the people you want to hear from, or add theirs with **Add contact** on **People**. Only one side needs the other's card: the first message introduces the sender, and the recipient accepts the request. The pencil button on **Chats** also starts a group with contacts you have written to, or joins a public channel. CarryChat devices on the same network find each other by themselves, and while there is internet, messages also go through public Nostr relays, so devices on different networks reach each other. The **Network** tab shows each link: if your network blocks them, use **Connect to an address** there with the other device's address, and **Export to a file** writes everything waiting to be delivered to a `.carrychat` file that someone can carry to another CarryChat device and import there.
 
+**Be visible nearby**, on **People**, shows the people around you who turned it on too, over the local network, Bluetooth or Wi-Fi Aware, and lets you write to them without exchanging cards first. While it is off, no one nearby sees you and you see no one.
+
 `npm run dev` opens the interface in a browser with sample data, without building the app.
 
 ### Command line
@@ -91,7 +94,7 @@ carrychat erase --yes                           # delete identity, contacts and 
 2. **Local network link, message store, desktop app, command line, USB export and import** (done)
 3. **LoRa link through a Meshtastic radio** (written: the command line uses a device over USB or TCP; field tests and the apps come next)
 4. **Internet link over Nostr** (done). Computers with internet also pass on what they carry for computers without it. Fetching for those computers is still open.
-5. **Android app and Bluetooth link** (done). iOS app, HF radio
+5. **Android app, Bluetooth and Wi-Fi Aware links, people nearby** (done; Wi-Fi Aware waits for a test between two phones). iOS app, HF radio
 
 ## Build
 

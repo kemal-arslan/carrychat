@@ -75,6 +75,11 @@ class MainActivity : TauriActivity() {
       wanted += Manifest.permission.BLUETOOTH_SCAN
       wanted += Manifest.permission.BLUETOOTH_ADVERTISE
       wanted += Manifest.permission.BLUETOOTH_CONNECT
+    }
+    // Wi-Fi Aware finds phones nearby with its own permission from Android 13,
+    // and with the location permission before that, as Bluetooth did before 12.
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      wanted += Manifest.permission.NEARBY_WIFI_DEVICES
     } else {
       wanted += Manifest.permission.ACCESS_FINE_LOCATION
     }

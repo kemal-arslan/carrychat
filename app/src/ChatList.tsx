@@ -1,10 +1,11 @@
 import { CaretRightIcon, HourglassMediumIcon, MagnifyingGlassIcon, QrCodeIcon, XIcon } from "@phosphor-icons/react";
 import { useState } from "react";
-import type { Channel, Contact, Group, Status } from "./api";
+import type { Channel, Contact, Group, NearbyPerson, Status } from "./api";
 import { Avatar } from "./Avatar";
 import { shortTime } from "./format";
 import { useI18n } from "./i18n";
 import { summary } from "./links";
+import { ViaIcon } from "./Via";
 
 type Kind = "contact" | "group" | "channel";
 
@@ -30,12 +31,15 @@ type Props = {
   /** The open conversation, highlighted where the list stays in view. */
   active: { kind: Kind; id: number } | null;
   onOpen: (kind: Kind, id: number) => void;
+  /** People nearby who are visible, while we are. */
+  nearby: NearbyPerson[];
+  onNearby: (person: NearbyPerson) => void;
   onNetwork: () => void;
   onCard: () => void;
 };
 
 /** Every conversation in one list: people, groups and channels, newest first. */
-export function ChatList({ contacts, groups, channels, status, active, onOpen, onNetwork, onCard }: Props) {
+export function ChatList({ contacts, groups, channels, status, active, onOpen, nearby, onNearby, onNetwork, onCard }: Props) {
   const { t, language } = useI18n();
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState<string | null>(null);
@@ -140,6 +144,22 @@ export function ChatList({ contacts, groups, channels, status, active, onOpen, o
         <span>{line.text}</span>
         <CaretRightIcon size={13} weight="bold" />
       </button>
+
+      {nearby.length > 0 && (
+        <div className="nearby-row" aria-label={t.nearbyTitle}>
+          {nearby.map((person) => (
+            <button key={person.session} className="near" onClick={() => onNearby(person)}>
+              <span className="ring">
+                <Avatar name={person.name} size={52} />
+                <span className="near-badge" title={t.nearbyVia(person.link)}>
+                  <ViaIcon via={person.link} size={12} />
+                </span>
+              </span>
+              <span className="near-name">{person.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="chips" role="tablist">
         {chips.map((chip) => (

@@ -4,11 +4,12 @@
 //! process, opened by the screen or by the service, staying alive without a
 //! window, making a window again for a screen that opens later, announcing
 //! messages while there is no page to do it, and syncing over the Bluetooth
-//! connections that the service's `BleLink` makes (§9.5).
+//! and Wi-Fi Aware connections that the service's `BleLink` and
+//! `WifiAwareLink` make (§9.5, §9.6).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
 use carrychat_node::{Event, FileView, Link, Node};
@@ -305,25 +306,76 @@ fn body(text: &str, file: Option<&FileView>, settings: Notifications) -> String 
     if settings.turkish { tr } else { en }.to_owned()
 }
 
+/// How Wi-Fi Aware stands, as `WifiAwareLink` last said: 0 unsupported, 1 off, 2 on.
+static WIFI_AWARE: AtomicI32 = AtomicI32::new(0);
+
+pub fn wifi_aware() -> &'static str {
+    match WIFI_AWARE.load(Ordering::Relaxed) {
+        2 => "on",
+        1 => "off",
+        _ => "unsupported",
+    }
+}
+
+/// `Aware.state(state)`: Wi-Fi Aware became available or went away.
+#[no_mangle]
+pub extern "system" fn Java_dev_kemalarslan_carrychat_Aware_state(
+    _env: JNIEnv,
+    _class: JClass,
+    state: jint,
+) {
+    WIFI_AWARE.store(state, Ordering::Relaxed);
+}
+
 /// The node, while it uses Bluetooth.
 static BLUETOOTH: Mutex<Option<Node>> = Mutex::new(None);
 
-/// The Kotlin `Ble` class, which sends and closes connections.
+/// The Kotlin classes that move a link's bytes: `Ble` and `Aware`.
 static BLE: OnceLock<(JavaVM, GlobalRef)> = OnceLock::new();
+static AWARE: OnceLock<(JavaVM, GlobalRef)> = OnceLock::new();
 
-/// Each open connection's incoming bytes, by the id Kotlin gave it.
-static CONNECTIONS: Mutex<Option<HashMap<i32, mpsc::UnboundedSender<Vec<u8>>>>> = Mutex::new(None);
+/// Each open connection's incoming bytes, by its bridge and the id Kotlin gave it.
+static CONNECTIONS: Mutex<Option<HashMap<(Bridge, i32), mpsc::UnboundedSender<Vec<u8>>>>> =
+    Mutex::new(None);
 
 /// Bytes the stream hands Kotlin at a time; it cuts them to the connection's MTU.
 const SEND_LEN: usize = 4096;
 const BUFFER_LEN: usize = 64 * 1024;
 
-pub fn set_bluetooth(node: &Node, on: bool) {
-    *lock(&BLUETOOTH) = on.then(|| node.clone());
+/// A platform link whose connections Kotlin makes: Bluetooth LE (§9.5) or
+/// Wi-Fi Aware (§9.6). Both carry the sync stream the same way.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Bridge {
+    Ble,
+    Aware,
 }
 
-fn bluetooth() -> Option<Node> {
-    lock(&BLUETOOTH).clone()
+impl Bridge {
+    fn class(self) -> &'static OnceLock<(JavaVM, GlobalRef)> {
+        match self {
+            Bridge::Ble => &BLE,
+            Bridge::Aware => &AWARE,
+        }
+    }
+
+    fn link(self) -> Link {
+        match self {
+            Bridge::Ble => Link::Bluetooth,
+            Bridge::Aware => Link::WifiAware,
+        }
+    }
+
+    /// The node, while it uses this link. Wi-Fi Aware has no switch of its own.
+    fn node(self) -> Option<Node> {
+        match self {
+            Bridge::Ble => lock(&BLUETOOTH).clone(),
+            Bridge::Aware => lock(&NODE).clone(),
+        }
+    }
+}
+
+pub fn set_bluetooth(node: &Node, on: bool) {
+    *lock(&BLUETOOTH) = on.then(|| node.clone());
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -338,19 +390,14 @@ fn session_of(env: &JNIEnv, bytes: &JByteArray) -> Option<u64> {
     Some(u64::from_be_bytes(bytes.try_into().ok()?))
 }
 
-/// `Ble.session()`: the session id to advertise, or null while the node does
-/// not use Bluetooth.
-#[no_mangle]
-pub extern "system" fn Java_dev_kemalarslan_carrychat_Ble_session(
-    env: JNIEnv,
-    class: JClass,
-) -> jbyteArray {
-    if BLE.get().is_none() {
-        if let (Ok(vm), Ok(class)) = (env.get_java_vm(), env.new_global_ref(&class)) {
-            let _ = BLE.set((vm, class));
+/// The session id to announce, or null while the node does not use the link.
+fn session(bridge: Bridge, env: &JNIEnv, class: &JClass) -> jbyteArray {
+    if bridge.class().get().is_none() {
+        if let (Ok(vm), Ok(class)) = (env.get_java_vm(), env.new_global_ref(class)) {
+            let _ = bridge.class().set((vm, class));
         }
     }
-    match bluetooth() {
+    match bridge.node() {
         Some(node) => env
             .byte_array_from_slice(&node.session().to_be_bytes())
             .map(JByteArray::into_raw)
@@ -359,15 +406,11 @@ pub extern "system" fn Java_dev_kemalarslan_carrychat_Ble_session(
     }
 }
 
-/// `Ble.shouldConnect(peer)`: whether to connect to a node seen advertising.
-#[no_mangle]
-pub extern "system" fn Java_dev_kemalarslan_carrychat_Ble_shouldConnect(
-    env: JNIEnv,
-    _class: JClass,
-    peer: JByteArray,
-) -> jboolean {
-    let yes = bluetooth()
-        .zip(session_of(&env, &peer))
+/// Whether to connect to a node seen announcing itself.
+fn should_connect(bridge: Bridge, env: &JNIEnv, peer: &JByteArray) -> jboolean {
+    let yes = bridge
+        .node()
+        .zip(session_of(env, peer))
         .is_some_and(|(node, peer)| node.should_connect(peer));
     if yes {
         JNI_TRUE
@@ -376,37 +419,25 @@ pub extern "system" fn Java_dev_kemalarslan_carrychat_Ble_shouldConnect(
     }
 }
 
-/// `Ble.dialEnded(peer)`: a connection to that node could not be made.
-#[no_mangle]
-pub extern "system" fn Java_dev_kemalarslan_carrychat_Ble_dialEnded(
-    env: JNIEnv,
-    _class: JClass,
-    peer: JByteArray,
-) {
-    if let (Some(node), Some(peer)) = (bluetooth(), session_of(&env, &peer)) {
+/// A connection to that node could not be made.
+fn dial_ended(bridge: Bridge, env: &JNIEnv, peer: &JByteArray) {
+    if let (Some(node), Some(peer)) = (bridge.node(), session_of(env, peer)) {
         node.dial_ended(peer);
     }
 }
 
-/// `Ble.opened(id, peer)`: a connection is ready to carry the stream. `peer`
-/// is the session id of the node this side connected to, null if the other
-/// side connected.
-#[no_mangle]
-pub extern "system" fn Java_dev_kemalarslan_carrychat_Ble_opened(
-    env: JNIEnv,
-    _class: JClass,
-    id: jint,
-    peer: JByteArray,
-) {
-    let Some(node) = bluetooth() else {
-        close(id);
+/// A connection is ready to carry the stream. `peer` is the session id of
+/// the node this side connected to, null if the other side connected.
+fn opened(bridge: Bridge, env: &JNIEnv, id: jint, peer: &JByteArray) {
+    let Some(node) = bridge.node() else {
+        close(bridge, id);
         return;
     };
-    let dialed = session_of(&env, &peer);
+    let dialed = session_of(env, peer);
     let (incoming, mut received) = mpsc::unbounded_channel::<Vec<u8>>();
     lock(&CONNECTIONS)
         .get_or_insert_with(HashMap::new)
-        .insert(id, incoming);
+        .insert((bridge, id), incoming);
     let (sync_end, link_end) = tokio::io::duplex(BUFFER_LEN);
     let (sync_reader, sync_writer) = tokio::io::split(sync_end);
     let (mut link_reader, mut link_writer) = tokio::io::split(link_end);
@@ -423,56 +454,43 @@ pub extern "system" fn Java_dev_kemalarslan_carrychat_Ble_opened(
         let outgoing = tauri::async_runtime::spawn(async move {
             let mut buffer = vec![0; SEND_LEN];
             while let Ok(len @ 1..) = link_reader.read(&mut buffer).await {
-                if let Err(error) = send(id, &buffer[..len]) {
-                    eprintln!("Could not send over Bluetooth: {error}");
+                if let Err(error) = send(bridge, id, &buffer[..len]) {
+                    eprintln!("Could not send over a nearby link: {error}");
                     break;
                 }
             }
         });
-        node.sync_over(Link::Bluetooth, sync_reader, sync_writer, dialed)
+        node.sync_over(bridge.link(), sync_reader, sync_writer, dialed)
             .await;
         incoming.abort();
         outgoing.abort();
-        forget(id);
-        close(id);
+        forget(bridge, id);
+        close(bridge, id);
     });
 }
 
-/// `Ble.received(id, data)`: bytes of a connection's stream.
-#[no_mangle]
-pub extern "system" fn Java_dev_kemalarslan_carrychat_Ble_received(
-    env: JNIEnv,
-    _class: JClass,
-    id: jint,
-    data: JByteArray,
-) {
-    let Ok(bytes) = env.convert_byte_array(&data) else {
+/// Bytes of a connection's stream.
+fn received(bridge: Bridge, env: &JNIEnv, id: jint, data: &JByteArray) {
+    let Ok(bytes) = env.convert_byte_array(data) else {
         return;
     };
-    if let Some(incoming) = lock(&CONNECTIONS).as_ref().and_then(|map| map.get(&id)) {
+    if let Some(incoming) = lock(&CONNECTIONS)
+        .as_ref()
+        .and_then(|map| map.get(&(bridge, id)))
+    {
         let _ = incoming.send(bytes);
     }
 }
 
-/// `Ble.closed(id)`: the connection is gone.
-#[no_mangle]
-pub extern "system" fn Java_dev_kemalarslan_carrychat_Ble_closed(
-    _env: JNIEnv,
-    _class: JClass,
-    id: jint,
-) {
-    forget(id);
-}
-
-fn forget(id: i32) {
+fn forget(bridge: Bridge, id: i32) {
     if let Some(map) = lock(&CONNECTIONS).as_mut() {
-        map.remove(&id);
+        map.remove(&(bridge, id));
     }
 }
 
-/// `Ble.send(id, data)`.
-fn send(id: i32, data: &[u8]) -> jni::errors::Result<()> {
-    let Some((vm, class)) = BLE.get() else {
+/// `Ble.send(id, data)` or `Aware.send(id, data)`.
+fn send(bridge: Bridge, id: i32, data: &[u8]) -> jni::errors::Result<()> {
+    let Some((vm, class)) = bridge.class().get() else {
         return Ok(());
     };
     let mut env = vm.attach_current_thread_as_daemon()?;
@@ -490,9 +508,9 @@ fn send(id: i32, data: &[u8]) -> jni::errors::Result<()> {
     sent.map(drop)
 }
 
-/// `Ble.close(id)`.
-fn close(id: i32) {
-    let Some((vm, class)) = BLE.get() else {
+/// `Ble.close(id)` or `Aware.close(id)`.
+fn close(bridge: Bridge, id: i32) {
+    let Some((vm, class)) = bridge.class().get() else {
         return;
     };
     let Ok(mut env) = vm.attach_current_thread_as_daemon() else {
@@ -506,3 +524,62 @@ fn close(id: i32) {
         let _ = env.exception_clear();
     }
 }
+
+/// The JNI entry points of one bridge's Kotlin class.
+macro_rules! bridge_entry_points {
+    ($bridge:expr, $session:ident, $should_connect:ident, $dial_ended:ident, $opened:ident, $received:ident, $closed:ident) => {
+        #[no_mangle]
+        pub extern "system" fn $session(env: JNIEnv, class: JClass) -> jbyteArray {
+            session($bridge, &env, &class)
+        }
+
+        #[no_mangle]
+        pub extern "system" fn $should_connect(
+            env: JNIEnv,
+            _class: JClass,
+            peer: JByteArray,
+        ) -> jboolean {
+            should_connect($bridge, &env, &peer)
+        }
+
+        #[no_mangle]
+        pub extern "system" fn $dial_ended(env: JNIEnv, _class: JClass, peer: JByteArray) {
+            dial_ended($bridge, &env, &peer)
+        }
+
+        #[no_mangle]
+        pub extern "system" fn $opened(env: JNIEnv, _class: JClass, id: jint, peer: JByteArray) {
+            opened($bridge, &env, id, &peer)
+        }
+
+        #[no_mangle]
+        pub extern "system" fn $received(env: JNIEnv, _class: JClass, id: jint, data: JByteArray) {
+            received($bridge, &env, id, &data)
+        }
+
+        #[no_mangle]
+        pub extern "system" fn $closed(_env: JNIEnv, _class: JClass, id: jint) {
+            forget($bridge, id)
+        }
+    };
+}
+
+bridge_entry_points!(
+    Bridge::Ble,
+    Java_dev_kemalarslan_carrychat_Ble_session,
+    Java_dev_kemalarslan_carrychat_Ble_shouldConnect,
+    Java_dev_kemalarslan_carrychat_Ble_dialEnded,
+    Java_dev_kemalarslan_carrychat_Ble_opened,
+    Java_dev_kemalarslan_carrychat_Ble_received,
+    Java_dev_kemalarslan_carrychat_Ble_closed
+);
+
+bridge_entry_points!(
+    Bridge::Aware,
+    Java_dev_kemalarslan_carrychat_Aware_session,
+    Java_dev_kemalarslan_carrychat_Aware_shouldConnect,
+    Java_dev_kemalarslan_carrychat_Aware_dialEnded,
+    Java_dev_kemalarslan_carrychat_Aware_opened,
+    Java_dev_kemalarslan_carrychat_Aware_received,
+    Java_dev_kemalarslan_carrychat_Aware_closed
+);

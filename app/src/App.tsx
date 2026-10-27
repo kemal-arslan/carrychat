@@ -17,6 +17,7 @@ import {
   type GroupMessage,
   type Member,
   type Message,
+  type NearbyPerson,
   type Post,
   type Profile,
   type Status,
@@ -114,6 +115,10 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
   const refreshGroups = useCallback(() => api.groups().then(setGroups), []);
   const refreshChannels = useCallback(() => api.channels().then(setChannels), []);
   const refreshStatus = useCallback(() => api.status().then(setStatus), []);
+  // Whether we are visible nearby, and who is, while we are.
+  const [nearbyOn, setNearbyOn] = useState<boolean | null>(null);
+  const [nearby, setNearby] = useState<NearbyPerson[]>([]);
+  const refreshNearby = useCallback(() => api.nearby().then(setNearby), []);
 
   const show = useCallback((text: string, action?: Notice["action"]) => {
     const next = { text, action };
@@ -184,6 +189,11 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
   }, [language]);
 
   useEffect(() => {
+    api.settings().then((settings) => setNearbyOn(settings.nearby));
+    refreshNearby();
+  }, [refreshNearby]);
+
+  useEffect(() => {
     refreshContacts();
     refreshGroups();
     refreshChannels();
@@ -250,6 +260,8 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
             current.map((message) => (message.id === event.messageId ? { ...message, delivered: true } : message)),
           );
           refreshContacts();
+        } else if (event.type === "nearbyChanged") {
+          refreshNearby();
         } else if (event.type === "messageMoved") {
           // A message left by a new link: its bubble shows the link.
           if (event.contactId === selectedRef.current) api.messages(event.contactId).then(setMessages);
@@ -298,7 +310,7 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
       api.onError(show),
     ];
     return () => stops.forEach((stop) => stop.then((unlisten) => unlisten()));
-  }, [refreshContacts, refreshGroups, refreshChannels, refreshStatus, show, markSelectedRead]);
+  }, [refreshContacts, refreshGroups, refreshChannels, refreshStatus, refreshNearby, show, markSelectedRead]);
 
   const contact = contacts.find((candidate) => candidate.id === selected) ?? null;
   const group = groups.find((candidate) => candidate.id === selectedGroup) ?? null;
@@ -349,6 +361,33 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
       if (selectedChannelRef.current === channelId) api.posts(channelId).then(setPosts);
       refreshChannels();
       show(t.unmuted(nick));
+    } catch (error) {
+      show(String(error));
+    }
+  }
+
+  async function toggleNearby(on: boolean) {
+    setNearbyOn(on);
+    try {
+      await api.setNearby(on);
+      refreshNearby();
+    } catch (error) {
+      setNearbyOn(!on);
+      show(String(error));
+    }
+  }
+
+  /** Opens a chat with someone nearby, adding them as a contact first if needed. */
+  async function openNearby(person: NearbyPerson) {
+    if (person.contactId !== null) {
+      selectContact(person.contactId);
+      return;
+    }
+    try {
+      const added = await api.addContact(person.card);
+      await refreshContacts();
+      refreshNearby();
+      selectContact(added.id);
     } catch (error) {
       show(String(error));
     }
@@ -474,6 +513,8 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
               onOpen={(kind, id) =>
                 kind === "contact" ? selectContact(id) : kind === "group" ? selectGroup(id) : selectChannel(id)
               }
+              nearby={nearbyOn ? nearby : []}
+              onNearby={openNearby}
               onNetwork={() => setTab("network")}
               onCard={() => setDialog("card")}
             />
@@ -482,6 +523,10 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
             <People
               contacts={contacts}
               activeId={narrow ? null : selected}
+              nearbyOn={nearbyOn}
+              nearby={nearby}
+              onNearbyOn={toggleNearby}
+              onNearby={openNearby}
               onOpen={selectContact}
               onAdd={() => setDialog("add")}
               onCard={() => setDialog("card")}

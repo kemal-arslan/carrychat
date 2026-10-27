@@ -255,6 +255,17 @@ const en = {
   myCardHint: "Show it so others can add you",
   theme: "Appearance",
   filterWaiting: "On the way",
+  nearbyTitle: "Nearby",
+  nearbyVisible: "Be visible nearby",
+  nearbyVisibleHint:
+    "While this is on, you see people nearby who turned it on too, and they see you: your name and card. While it is off, no one sees you and you see no one.",
+  nearbyNone: "No one visible nearby yet.",
+  nearbyVia: (link: string) =>
+    ({ bluetooth: "Nearby over Bluetooth", lan: "On the same network", wifiAware: "Nearby over Wi-Fi" })[link] ?? link,
+  wifiAwareName: "Wi-Fi Aware",
+  wifiAwareHint: "Phones connect over Wi-Fi directly, with no router and no internet.",
+  wifiAwareUnsupported: "This phone does not support it",
+  wifiAwareOff: "Turn on Wi-Fi to use it",
   onTheWay: "On the way",
   loraName: "LoRa radio",
   fileName: "File",
@@ -265,6 +276,7 @@ const en = {
     ({
       lan: "Left over the local network",
       bluetooth: "Left over Bluetooth",
+      wifiAware: "Left over Wi-Fi Aware",
       internet: "Went out to the internet",
       lora: "Sent by LoRa radio",
       file: "Written to a file",
@@ -550,6 +562,17 @@ const tr: Strings = {
   myCardHint: "Seni eklemeleri için göster",
   theme: "Görünüm",
   filterWaiting: "Yolda",
+  nearbyTitle: "Yakınımdakiler",
+  nearbyVisible: "Yakınımdakilere görün",
+  nearbyVisibleHint:
+    "Açıkken, bunu açmış yakındaki kişileri görürsün, onlar da seni: adını ve kartını. Kapalıyken kimse seni göremez, sen de kimseyi göremezsin.",
+  nearbyNone: "Yakında görünen kimse yok.",
+  nearbyVia: (link) =>
+    ({ bluetooth: "Bluetooth ile yakında", lan: "Aynı ağda", wifiAware: "Wi-Fi ile yakında" })[link] ?? link,
+  wifiAwareName: "Wi-Fi Aware",
+  wifiAwareHint: "Telefonlar modem ve internet olmadan doğrudan Wi-Fi ile bağlanır.",
+  wifiAwareUnsupported: "Bu telefon desteklemiyor",
+  wifiAwareOff: "Kullanmak için Wi-Fi'ı aç",
   onTheWay: "Yolda",
   loraName: "LoRa telsizi",
   fileName: "Dosya",
@@ -560,6 +583,7 @@ const tr: Strings = {
     ({
       lan: "Yerel ağdan yola çıktı",
       bluetooth: "Bluetooth ile yola çıktı",
+      wifiAware: "Wi-Fi Aware ile yola çıktı",
       internet: "İnternete çıktı",
       lora: "LoRa telsiziyle gönderildi",
       file: "Dosyaya yazıldı",

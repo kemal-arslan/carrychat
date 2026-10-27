@@ -14,6 +14,7 @@ use serde::Serialize;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 
+use crate::nearby::{Nearby, NEARBY};
 use crate::{now, Error, Event, Result, Shared};
 
 const HAVE: u8 = 0x10;
@@ -32,6 +33,8 @@ const PATIENCE_SIGHTINGS: u32 = 3;
 pub enum Link {
     Lan,
     Bluetooth,
+    /// Wi-Fi between phones with no access point (§9.6).
+    WifiAware,
 }
 
 type Outbox = mpsc::UnboundedSender<Vec<u8>>;
@@ -161,6 +164,9 @@ pub(crate) async fn run<R, W>(
             let _ = outbox.send(frame);
         }
     }
+    if shared.nearby.visible() {
+        let _ = outbox.send(Nearby::ask());
+    }
     let heartbeat = tokio::spawn(heartbeat(outbox.clone()));
     while let Ok(Ok(frame)) = tokio::time::timeout(READ_TIMEOUT, read_frame(&mut reader)).await {
         // A frame that does not parse is skipped, as on every link.
@@ -170,6 +176,7 @@ pub(crate) async fn run<R, W>(
     heartbeat.abort();
     writer.abort();
     shared.peers.unregister(peer, &outbox);
+    shared.nearby_forget(peer);
     shared.peers_changed();
 }
 
@@ -178,6 +185,7 @@ impl Shared {
         self.emit(Event::PeersChanged {
             lan: self.peers.count(Link::Lan),
             bluetooth: self.peers.count(Link::Bluetooth),
+            wifi_aware: self.peers.count(Link::WifiAware),
         });
     }
 }
@@ -218,6 +226,7 @@ fn handle_frame(
             }
         }
         Some(&HELLO) => {}
+        Some(&NEARBY) => shared.nearby_frame(peer, link, outbox, &frame[1..]),
         _ => {
             let handled = shared.handle(Frame::from_bytes(frame)?)?;
             shared.dispatch(handled, Some(peer));

@@ -111,6 +111,7 @@ button.small {
 
 /* Buttons that are rows, tabs or icons rather than buttons to look at. */
 .chat-row,
+.near,
 .row-item,
 .tab,
 .head-main,
@@ -513,6 +514,60 @@ input[type="checkbox"] {
 
 .dot.live {
   background: #22c55e;
+}
+
+/* People nearby who are visible, above the chat list. */
+.nearby-row {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.near {
+  flex: none;
+  width: 62px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.near .ring {
+  position: relative;
+  padding: 2px;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+}
+
+.near-badge {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 0 0 1px var(--line), 0 1px 3px rgb(0 0 0 / 0.08);
+}
+
+.near-name {
+  max-width: 62px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.via-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .chips {
