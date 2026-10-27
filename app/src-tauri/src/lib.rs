@@ -181,8 +181,15 @@ async fn listen_heard(
     state: State<'_, AppState>,
     request: tauri::ipc::Request<'_>,
 ) -> CommandResult<Option<HeardCard>> {
-    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
-        return Err("expected samples".to_owned());
+    let bytes: Vec<u8> = match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => bytes.clone(),
+        // Android sends every request as JSON, the bytes as an array of numbers.
+        tauri::ipc::InvokeBody::Json(serde_json::Value::Array(values)) => values
+            .iter()
+            .map(|value| value.as_u64().and_then(|byte| u8::try_from(byte).ok()))
+            .collect::<Option<_>>()
+            .ok_or("expected samples")?,
+        tauri::ipc::InvokeBody::Json(_) => return Err("expected samples".to_owned()),
     };
     let Some((number, samples)) = bytes.split_first_chunk::<4>() else {
         return Err("expected samples".to_owned());

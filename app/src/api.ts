@@ -397,6 +397,12 @@ function fromBase64(text: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
+function toArrayBuffer(data: ArrayBuffer | ArrayBufferView | number[]): ArrayBuffer {
+  if (data instanceof ArrayBuffer) return data;
+  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice().buffer;
+  return new Uint8Array(data).buffer;
+}
+
 async function call<T>(command: string, args?: Record<string, unknown> | Uint8Array): Promise<T> {
   try {
     return await invoke<T>(command, args);
@@ -440,7 +446,8 @@ function desktopApi(): Api {
     rename: (name) => call("rename", { name }),
     contacts: () => call("contacts"),
     addContact: (card) => call("add_contact", { card }),
-    cardSound: () => call("card_sound"),
+    // Android hands raw bytes to the page as an array of numbers, not a buffer.
+    cardSound: () => call<ArrayBuffer | ArrayBufferView | number[]>("card_sound").then(toArrayBuffer),
     listenStart: (rate) => call("listen_start", { rate }),
     // The samples go as the request's body, not as JSON, after the listening's number.
     listenHeard(listening, samples) {

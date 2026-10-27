@@ -84,8 +84,8 @@ export function AddContactDialog({ onClose, onAdded }: { onClose: () => void; on
           setHeardName(heard.name);
         }),
       );
-    } catch {
-      setError(t.soundNoMicrophone);
+    } catch (failure) {
+      setError(`${t.soundNoMicrophone} ${errorText(failure)}`);
     }
   }
 
@@ -156,6 +156,7 @@ export function MyCardDialog({ profile, onClose }: { profile: Profile; onClose: 
   const [copied, setCopied] = useState(false);
   const [qr, setQr] = useState<string | null>(null);
   const playing = useSound();
+  const [playError, setPlayError] = useState<string | null>(null);
   const nfc = useNfc();
 
   // Held to a phone adding a contact, this one gives its card while the sheet is open.
@@ -167,7 +168,8 @@ export function MyCardDialog({ profile, onClose }: { profile: Profile; onClose: 
 
   function play() {
     if (playing.active) return playing.stop();
-    playing.start(playCard).catch(() => {});
+    setPlayError(null);
+    playing.start(playCard).catch((failure) => setPlayError(`${t.soundCannotPlay} ${errorText(failure)}`));
   }
 
   useEffect(() => {
@@ -190,6 +192,7 @@ export function MyCardDialog({ profile, onClose }: { profile: Profile; onClose: 
       <p className="hint">{t.cardFingerprint}</p>
       <p className="fingerprint large">{profile.fingerprint}</p>
       {playing.active && <p className="hint">{t.soundPlaying}</p>}
+      {playError && <p className="hint error">{playError}</p>}
       {nfc && <p className="hint">{t.nfcOffer}</p>}
       <div className="dialog-actions">
         <button onClick={onClose}>{t.close}</button>

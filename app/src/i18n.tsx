@@ -96,6 +96,7 @@ const en = {
   soundListening: "Listening… Ask them to play their card by sound, close to this device.",
   soundHeard: (name: string) => `${name}'s card was heard. Add them to finish.`,
   soundNoMicrophone: "The microphone could not be used.",
+  soundCannotPlay: "The card could not be played.",
   nfcOffer: "Or hold this phone back to back with theirs, while Add contact is open on it.",
   nfcRead: "Or hold this phone back to back with theirs, while My card is open on it.",
   copied: "Copied",
@@ -330,7 +331,7 @@ const en = {
   reticulumIntro:
     "Reticulum is a network that runs over radios, serial lines and the internet alike. CarryChat connects to one of its nodes and reaches the other CarryChat nodes on that network.",
   reticulumAddress: "Node address",
-  reticulumAddressHint: "A node running rnsd with a TCP server interface, on this computer or elsewhere.",
+  reticulumAddressHint: "A node running rnsd with a TCP server interface, on this device or elsewhere.",
   reticulumWaiting: "Waiting to go out",
   reticulumCarryChatAt: (ago: string) => `CarryChat came over Reticulum ${ago} ago`,
   reticulumCarryChatNever: "No CarryChat has come over Reticulum yet",
@@ -478,6 +479,7 @@ const tr: Strings = {
   soundListening: "Dinleniyor… Karşıdaki kartını bu cihazın yakınında sesle çalsın.",
   soundHeard: (name) => `${name} kişisinin kartı duyuldu. Bitirmek için Ekle'ye bas.`,
   soundNoMicrophone: "Mikrofon kullanılamadı.",
+  soundCannotPlay: "Kart çalınamadı.",
   nfcOffer: "Ya da bu telefonu karşıdakinin telefonuyla sırt sırta tut; onda Kişi ekle açık olsun.",
   nfcRead: "Ya da bu telefonu karşıdakinin telefonuyla sırt sırta tut; onda Kartım açık olsun.",
   copied: "Kopyalandı",
@@ -707,7 +709,7 @@ const tr: Strings = {
   reticulumIntro:
     "Reticulum; telsizler, seri hatlar ve internet üzerinde aynı şekilde çalışan bir ağ. CarryChat onun bir düğümüne bağlanır ve o ağdaki diğer CarryChat düğümlerine ulaşır.",
   reticulumAddress: "Düğüm adresi",
-  reticulumAddressHint: "TCP sunucu arayüzü açık bir rnsd düğümü; bu bilgisayarda ya da başka bir yerde.",
+  reticulumAddressHint: "TCP sunucu arayüzü açık bir rnsd düğümü; bu cihazda ya da başka bir yerde.",
   reticulumWaiting: "Gönderilmeyi bekleyen",
   reticulumCarryChatAt: (ago) => `Reticulum'dan en son ${ago} önce CarryChat geldi`,
   reticulumCarryChatNever: "Reticulum'dan henüz CarryChat gelmedi",

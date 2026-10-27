@@ -17,10 +17,15 @@ export async function playCard(): Promise<() => void> {
   const wav = await api.cardSound();
   const context = new AudioContext();
   const source = context.createBufferSource();
-  source.buffer = await context.decodeAudioData(wav);
-  source.loop = true;
-  source.connect(context.destination);
-  source.start();
+  try {
+    source.buffer = await context.decodeAudioData(wav);
+    source.loop = true;
+    source.connect(context.destination);
+    source.start();
+  } catch (error) {
+    void context.close();
+    throw error;
+  }
   let stopped = false;
   return () => {
     if (stopped) return;
