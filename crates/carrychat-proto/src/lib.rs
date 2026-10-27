@@ -15,6 +15,7 @@ pub mod identity;
 pub mod intro;
 pub mod pair;
 pub mod ratchet;
+pub mod sound;
 
 pub use error::{Error, Result};
 

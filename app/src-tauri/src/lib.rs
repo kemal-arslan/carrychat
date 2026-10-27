@@ -7,9 +7,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use carrychat_node::{
-    ChannelView, ContactView, GroupMessageView, GroupView, ImportReport, InternetConfig, Journey,
-    LanConfig, LoraDevice, LoraPort, LoraStatus, MessageView, MutedView, NearbyPerson, Node,
-    PostView, Profile, Settings, Status,
+    CardListener, ChannelView, ContactView, GroupMessageView, GroupView, HeardCard, ImportReport,
+    InternetConfig, Journey, LanConfig, LoraDevice, LoraPort, LoraStatus, MessageView, MutedView,
+    NearbyPerson, Node, PostView, Profile, Settings, Status,
 };
 use data_encoding::BASE64;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -21,6 +21,8 @@ mod android;
 struct AppState {
     dir: PathBuf,
     node: Mutex<Option<Node>>,
+    /// Listens for a card played as sound, while the add-contact sheet does.
+    listener: Mutex<Option<CardListener>>,
 }
 
 type CommandResult<T> = Result<T, String>;
@@ -136,6 +138,55 @@ fn contacts(state: State<'_, AppState>) -> CommandResult<Vec<ContactView>> {
 #[tauri::command]
 fn add_contact(state: State<'_, AppState>, card: String) -> CommandResult<ContactView> {
     state.node()?.add_contact(&card).map_err(text)
+}
+
+/// This device's card as sound (§3.2): one round, a WAV file the page
+/// plays over and over.
+#[tauri::command]
+async fn card_sound(state: State<'_, AppState>) -> CommandResult<tauri::ipc::Response> {
+    let wav = state.node()?.card_sound().map_err(text)?;
+    Ok(tauri::ipc::Response::new(wav))
+}
+
+/// Starts listening for a card played as sound, from a microphone giving
+/// `rate` samples a second.
+#[tauri::command]
+fn listen_start(state: State<'_, AppState>, rate: u32) {
+    *state
+        .listener
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(CardListener::new(rate));
+}
+
+/// The microphone's next samples, as 16-bit little-endian, in the request's
+/// body. Returns the card once it has been heard whole.
+#[tauri::command]
+async fn listen_heard(
+    state: State<'_, AppState>,
+    request: tauri::ipc::Request<'_>,
+) -> CommandResult<Option<HeardCard>> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("expected samples".to_owned());
+    };
+    let samples: Vec<f32> = bytes
+        .chunks_exact(2)
+        .map(|pair| f32::from(i16::from_le_bytes([pair[0], pair[1]])) / 32768.0)
+        .collect();
+    let mut listener = state
+        .listener
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    Ok(listener
+        .as_mut()
+        .and_then(|listener| listener.push(&samples)))
+}
+
+#[tauri::command]
+fn listen_stop(state: State<'_, AppState>) {
+    *state
+        .listener
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
 }
 
 #[tauri::command]
@@ -606,6 +657,7 @@ pub fn run() {
             app.manage(AppState {
                 dir,
                 node: Mutex::new(node),
+                listener: Mutex::new(None),
             });
             Ok(())
         })
@@ -614,6 +666,10 @@ pub fn run() {
             create_profile,
             contacts,
             add_contact,
+            card_sound,
+            listen_start,
+            listen_heard,
+            listen_stop,
             accept_contact,
             decline_contact,
             mark_read,

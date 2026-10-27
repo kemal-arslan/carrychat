@@ -47,6 +47,17 @@ The text form is `carrychat:` followed by the card in base64url without padding,
 
 v0 has no contact discovery over the network. One person gives their card to the other, in person or over a channel they already trust. The first message then carries the sender's card the other way (§5.5). Fingerprints are compared either way.
 
+### 3.2 Cards over sound
+
+Two devices side by side can exchange a card as sound, with nothing else in common: one plays its card through the speaker, the other listens through the microphone. Implemented in `crates/carrychat-proto/src/sound.rs`.
+
+- **Tones.** 96 tones, `1875 + 46.875·k` Hz for `k` from 0 to 95, in six channels of 16: channel `c` uses tones `16c` to `16c + 15`. Tones 46.875 Hz apart are orthogonal over a window of 1/46.875 s, and the range suits phone speakers and microphones.
+- **Symbols.** A symbol lasts 100 ms and fades in and out over 5 ms. A data symbol sounds one tone per channel, a nibble each: channel 0 carries the high nibble of the first byte, channel 1 its low nibble, and so on, three bytes a symbol. Every tone in a symbol is equally loud.
+- **Round.** 100 ms of silence; a start marker of four symbols that alternate tones `{0, 8}` and `{4, 12}` in every channel, two at once, which no data symbol has; a header symbol `0xCC || len || ~len`; the `len` bytes, zero-padded to whole symbols; 400 ms of silence. One round carries up to 255 bytes. A card of 143 bytes takes about 5.5 seconds.
+- **Sending.** The sender plays rounds over and over until it is stopped. Nothing is added to check the bytes: a card verifies its own signature (§3.1), and the listener keeps listening when one does not.
+- **Listening.** The listener measures every tone over windows of 1/46.875 s every quarter window, with Goertzel's algorithm at whatever rate the microphone gives. A marker starts wherever, for four symbols in a row, the marker's tones hold at least half of each channel's energy on average; a run of such starts is timed from its middle. Each symbol is read from the windows that lie wholly within it after its first 30 ms, where the room still echoes the symbol before, and each channel's loudest tone gives its nibble. A header that does not read right drops the round.
+- **Apps.** Under **My card**, *Play by sound* plays the card; under **Add contact**, *Listen* fills in the card once it is heard, and adding it is as for a pasted card. The page turns off the browser's echo cancellation, noise suppression and gain control, which would take the tones for noise.
+
 ## 4. Pair keys
 
 For a pair of contacts:

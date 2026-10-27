@@ -9,6 +9,9 @@ import { isPermissionGranted, requestPermission, sendNotification } from "@tauri
 
 export type Profile = { name: string; fingerprint: string; card: string };
 
+/** A card heard over sound, its signature verified. */
+export type HeardCard = { card: string; name: string };
+
 export type Contact = {
   id: number;
   name: string;
@@ -253,6 +256,13 @@ export interface Api {
   rename(name: string): Promise<Profile>;
   contacts(): Promise<Contact[]>;
   addContact(card: string): Promise<Contact>;
+  /** This device's card as sound: one round, a WAV file to play over and over. */
+  cardSound(): Promise<ArrayBuffer>;
+  /** Starts listening for a card played as sound, from a microphone at `rate` samples a second. */
+  listenStart(rate: number): Promise<void>;
+  /** The microphone's next samples, 16-bit; gives the card once it has been heard whole. */
+  listenHeard(samples: Uint8Array): Promise<HeardCard | null>;
+  listenStop(): Promise<void>;
   acceptContact(contactId: number): Promise<Contact>;
   declineContact(contactId: number): Promise<void>;
   messages(contactId: number): Promise<Message[]>;
@@ -363,12 +373,39 @@ function fromBase64(text: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
-async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+async function call<T>(command: string, args?: Record<string, unknown> | Uint8Array): Promise<T> {
   try {
     return await invoke<T>(command, args);
   } catch (error) {
     throw new Error(String(error));
   }
+}
+
+/** When the preview started listening for a card. */
+let listeningSince = 0;
+
+/** Half a second of 2 kHz, as a WAV file, for the preview's card sound. */
+function beep(): ArrayBuffer {
+  const rate = 48_000;
+  const samples = rate / 2;
+  const view = new DataView(new ArrayBuffer(44 + samples * 2));
+  const text = (at: number, value: string) => [...value].forEach((char, index) => view.setUint8(at + index, char.charCodeAt(0)));
+  text(0, "RIFF");
+  view.setUint32(4, 36 + samples * 2, true);
+  text(8, "WAVEfmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, rate, true);
+  view.setUint32(28, rate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  text(36, "data");
+  view.setUint32(40, samples * 2, true);
+  for (let index = 0; index < samples; index++) {
+    view.setInt16(44 + index * 2, Math.sin((2 * Math.PI * 2000 * index) / rate) * 8000, true);
+  }
+  return view.buffer;
 }
 
 function desktopApi(): Api {
@@ -379,6 +416,11 @@ function desktopApi(): Api {
     rename: (name) => call("rename", { name }),
     contacts: () => call("contacts"),
     addContact: (card) => call("add_contact", { card }),
+    cardSound: () => call("card_sound"),
+    listenStart: (rate) => call("listen_start", { rate }),
+    // The samples go as the request's body, not as JSON.
+    listenHeard: (samples) => call("listen_heard", samples),
+    listenStop: () => call("listen_stop"),
     acceptContact: (contactId) => call("accept_contact", { contactId }),
     declineContact: (contactId) => call("decline_contact", { contactId }),
     messages: (contactId) => call("messages", { contactId }),
@@ -644,6 +686,17 @@ function previewApi(): Api {
     async contacts() {
       return summarize();
     },
+    async cardSound() {
+      return beep();
+    },
+    async listenStart() {
+      listeningSince = Date.now();
+    },
+    async listenHeard() {
+      // The preview hears a card three seconds in.
+      return Date.now() - listeningSince > 3000 ? { card: "carrychat:elif", name: "Elif" } : null;
+    },
+    async listenStop() {},
     async addContact(card) {
       if (!card.trim().startsWith("carrychat:")) throw new Error("invalid card prefix");
       const fromGroup = groups.flatMap((group) => group.members).find((candidate) => candidate.card === card);

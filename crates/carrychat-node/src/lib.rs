@@ -12,6 +12,7 @@ mod journey;
 pub mod lan;
 pub mod lora;
 mod nearby;
+mod sound;
 pub mod store;
 mod sync;
 
@@ -30,6 +31,7 @@ pub use crate::journey::{Journey, Step, Via};
 pub use crate::lan::{LanConfig, LanProblem};
 pub use crate::lora::{LoraDevice, LoraFirmware, LoraNode, LoraPort, LoraStatus};
 pub use crate::nearby::NearbyPerson;
+pub use crate::sound::{CardListener, HeardCard};
 use crate::store::Store;
 pub use crate::sync::Link;
 
@@ -363,6 +365,12 @@ impl Node {
 
     pub fn profile(&self) -> Profile {
         self.shared.engine().profile()
+    }
+
+    /// This node's card as sound (§3.2): one round, a WAV file to play over
+    /// and over until the other device has heard it.
+    pub fn card_sound(&self) -> Result<Vec<u8>> {
+        sound::wav(&self.profile().card)
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<Event> {

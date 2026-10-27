@@ -25,6 +25,7 @@ import {
 import { MAX_NAME_BYTES, clockTime, fullTime, utf8Length } from "./format";
 import { useI18n } from "./i18n";
 import { Sheet } from "./Sheet";
+import { canListen, listenForCard, playCard, useSound } from "./sound";
 import { ViaIcon } from "./Via";
 
 const Dialog = Sheet;
@@ -38,6 +39,26 @@ export function AddContactDialog({ onClose, onAdded }: { onClose: () => void; on
   const [card, setCard] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [added, setAdded] = useState<Contact | null>(null);
+  // Listening for a card played by sound, and whose card was heard.
+  const listening = useSound();
+  const [heardName, setHeardName] = useState<string | null>(null);
+
+  async function listen() {
+    if (listening.active) return listening.stop();
+    setError(null);
+    setHeardName(null);
+    try {
+      await listening.start(() =>
+        listenForCard((heard) => {
+          listening.stop();
+          setCard(heard.card);
+          setHeardName(heard.name);
+        }),
+      );
+    } catch {
+      setError(t.soundNoMicrophone);
+    }
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -79,11 +100,18 @@ export function AddContactDialog({ onClose, onAdded }: { onClose: () => void; on
           placeholder="carrychat:…"
           autoFocus
         />
-        <p className={error ? "hint error" : "hint"}>{error ?? t.addHint}</p>
+        <p className={error ? "hint error" : "hint"}>
+          {error ?? (listening.active ? t.soundListening : heardName ? t.soundHeard(heardName) : t.addHint)}
+        </p>
         <div className="dialog-actions">
           <button type="button" onClick={onClose}>
             {t.cancel}
           </button>
+          {canListen() && (
+            <button type="button" onClick={listen}>
+              {listening.active ? t.soundStop : t.soundListen}
+            </button>
+          )}
           <button className="primary" disabled={card.trim() === ""}>
             {t.add}
           </button>
@@ -97,6 +125,12 @@ export function MyCardDialog({ profile, onClose }: { profile: Profile; onClose: 
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const [qr, setQr] = useState<string | null>(null);
+  const playing = useSound();
+
+  function play() {
+    if (playing.active) return playing.stop();
+    playing.start(playCard).catch(() => {});
+  }
 
   useEffect(() => {
     QRCode.toString(profile.card, { type: "svg", margin: 1, errorCorrectionLevel: "M" }).then((svg) =>
@@ -117,8 +151,10 @@ export function MyCardDialog({ profile, onClose }: { profile: Profile; onClose: 
       <textarea className="mono" rows={4} readOnly value={profile.card} onFocus={(event) => event.target.select()} />
       <p className="hint">{t.cardFingerprint}</p>
       <p className="fingerprint large">{profile.fingerprint}</p>
+      {playing.active && <p className="hint">{t.soundPlaying}</p>}
       <div className="dialog-actions">
         <button onClick={onClose}>{t.close}</button>
+        <button onClick={play}>{playing.active ? t.soundStop : t.soundSend}</button>
         <button className="primary" onClick={copy}>
           {copied ? t.copied : t.copyCard}
         </button>
