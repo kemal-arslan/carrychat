@@ -181,6 +181,13 @@ async fn listen_heard(
         .and_then(|listener| listener.push(&samples)))
 }
 
+/// A card read over NFC (§3.3), in its text form, once its signature
+/// verifies.
+#[tauri::command]
+fn read_card(card: String) -> CommandResult<HeardCard> {
+    HeardCard::from_text(&card).ok_or_else(|| "The card did not read right".to_owned())
+}
+
 #[tauri::command]
 fn listen_stop(state: State<'_, AppState>) {
     *state
@@ -670,6 +677,7 @@ pub fn run() {
             listen_start,
             listen_heard,
             listen_stop,
+            read_card,
             accept_contact,
             decline_contact,
             mark_read,

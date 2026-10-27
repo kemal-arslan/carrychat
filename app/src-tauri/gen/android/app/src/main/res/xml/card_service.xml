@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Cards over NFC (§3.3): CarryChat's AID, routed to CardService while the screen is unlocked. -->
+<host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/nfc_card"
+    android:requireDeviceUnlock="true">
+    <aid-group android:description="@string/nfc_card" android:category="other">
+        <aid-filter android:name="F043415252594348" />
+    </aid-group>
+</host-apdu-service>

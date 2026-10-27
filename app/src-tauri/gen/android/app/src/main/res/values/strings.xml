@@ -6,4 +6,5 @@
     <string name="background_text">Messages arrive and are passed on while the app is closed.</string>
     <string name="background_stop">Turn off</string>
     <string name="messages_channel">Messages</string>
+    <string name="nfc_card">CarryChat contact card</string>
 </resources>

@@ -3,6 +3,8 @@ package dev.kemalarslan.carrychat
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.drawable.ColorDrawable
+import android.nfc.NfcAdapter
+import android.nfc.Tag
 import android.os.Build
 import android.os.Bundle
 import android.view.View
@@ -12,8 +14,13 @@ import androidx.activity.enableEdgeToEdge
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import org.json.JSONObject
 
 class MainActivity : TauriActivity() {
+  private var webView: WebView? = null
+  /** Whether the page wants cards read by NFC, as while adding a contact. */
+  private var readingCards = false
+
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
@@ -28,7 +35,19 @@ class MainActivity : TauriActivity() {
   }
 
   override fun onWebViewCreate(webView: WebView) {
+    this.webView = webView
     webView.addJavascriptInterface(Page(), "CarryChatAndroid")
+  }
+
+  // Android lets only the activity in front read NFC.
+  override fun onResume() {
+    super.onResume()
+    if (readingCards) startReadingCards()
+  }
+
+  override fun onPause() {
+    super.onPause()
+    NfcAdapter.getDefaultAdapter(this)?.disableReaderMode(this)
   }
 
   /** What the page asks of the activity. */
@@ -44,6 +63,42 @@ class MainActivity : TauriActivity() {
     @JavascriptInterface
     fun leave() {
       runOnUiThread { moveTaskToBack(true) }
+    }
+
+    /** Whether this phone can pass cards over NFC (§3.3), with NFC turned on. */
+    @JavascriptInterface
+    fun nfcAvailable(): Boolean =
+      NfcAdapter.getDefaultAdapter(this@MainActivity)?.isEnabled == true &&
+        packageManager.hasSystemFeature(PackageManager.FEATURE_NFC_HOST_CARD_EMULATION)
+
+    /** Offers this card to a phone that reads it over NFC, or, given null, nothing. */
+    @JavascriptInterface
+    fun nfcOffer(card: String?) {
+      CardService.offer(card)
+    }
+
+    /** Reads cards over NFC while `on`; each is sent to the page as a `carrychat-nfc` event. */
+    @JavascriptInterface
+    fun nfcRead(on: Boolean) {
+      runOnUiThread {
+        readingCards = on
+        if (on) startReadingCards() else NfcAdapter.getDefaultAdapter(this@MainActivity)?.disableReaderMode(this@MainActivity)
+      }
+    }
+  }
+
+  private fun startReadingCards() {
+    val adapter = NfcAdapter.getDefaultAdapter(this) ?: return
+    val flags = NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_NFC_B or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK
+    adapter.enableReaderMode(this, ::cardTag, flags, null)
+  }
+
+  /** A phone was held to this one: hands the card it offers to the page. */
+  private fun cardTag(tag: Tag) {
+    val card = CardService.read(tag) ?: return
+    runOnUiThread {
+      val detail = JSONObject.quote(card)
+      webView?.evaluateJavascript("window.dispatchEvent(new CustomEvent('carrychat-nfc', { detail: $detail }))", null)
     }
   }
 

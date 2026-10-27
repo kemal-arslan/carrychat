@@ -58,6 +58,13 @@ Two devices side by side can exchange a card as sound, with nothing else in comm
 - **Listening.** The listener measures every tone over windows of 1/46.875 s every quarter window, with Goertzel's algorithm at whatever rate the microphone gives. A marker starts wherever, for four symbols in a row, the marker's tones hold at least half of each channel's energy on average; a run of such starts is timed from its middle. Each symbol is read from the windows that lie wholly within it after its first 30 ms, where the room still echoes the symbol before, and each channel's loudest tone gives its nibble. A header that does not read right drops the round.
 - **Apps.** Under **My card**, *Play by sound* plays the card; under **Add contact**, *Listen* fills in the card once it is heard, and adding it is as for a pasted card. The page turns off the browser's echo cancellation, noise suppression and gain control, which would take the tones for noise.
 
+### 3.3 Cards over NFC
+
+Two Android phones held back to back pass a card over NFC: the one giving its card answers as a contactless smart card would, and the other reads it. Implemented in the Android app (`CardService.kt`, `MainActivity.kt`), with the card verified by the node.
+
+- **Giving.** While the card sheet is open, the phone offers its card through host card emulation, for the AID `F0 43 41 52 52 59 43 48` (`F0`, which marks a proprietary AID, then "CARRYCH"), in the category "other". Android routes it to CarryChat only while the screen is unlocked; with the sheet closed, the phone answers `6A 82`.
+- **Reading.** While the add-contact sheet is open, the phone reads NFC-A and NFC-B tags in reader mode and sends `SELECT` by name for the AID: `00 A4 04 00 08 || AID || 00`. The reply is the card's bytes (§3.1) followed by `90 00`; a card is at most 162 bytes, so it fits one reply. The node verifies its signature before it is shown, and adding it is as for a pasted card.
+
 ## 4. Pair keys
 
 For a pair of contacts:

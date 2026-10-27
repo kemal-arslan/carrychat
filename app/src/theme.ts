@@ -11,7 +11,13 @@ declare global {
      * On Android, the activity: it colours the status and navigation bars,
      * and leaves for Home when the back button has nothing left to close.
      */
-    CarryChatAndroid?: { setDark(dark: boolean): void; leave(): void };
+    CarryChatAndroid?: {
+      setDark(dark: boolean): void;
+      leave(): void;
+      nfcAvailable(): boolean;
+      nfcOffer(card: string | null): void;
+      nfcRead(on: boolean): void;
+    };
   }
 }
 

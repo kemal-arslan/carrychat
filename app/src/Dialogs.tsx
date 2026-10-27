@@ -30,6 +30,12 @@ import { ViaIcon } from "./Via";
 
 const Dialog = Sheet;
 
+/** Whether this phone passes cards over NFC (§3.3), as the sheet opens. */
+function useNfc(): boolean {
+  const [nfc] = useState(() => window.CarryChatAndroid?.nfcAvailable?.() ?? false);
+  return nfc;
+}
+
 function errorText(failure: unknown): string {
   return String(failure).replace(/^Error: /, "");
 }
@@ -39,9 +45,32 @@ export function AddContactDialog({ onClose, onAdded }: { onClose: () => void; on
   const [card, setCard] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [added, setAdded] = useState<Contact | null>(null);
-  // Listening for a card played by sound, and whose card was heard.
+  // Listening for a card played by sound, or reading one over NFC, and whose card was heard.
   const listening = useSound();
   const [heardName, setHeardName] = useState<string | null>(null);
+  const nfc = useNfc();
+
+  useEffect(() => {
+    const android = window.CarryChatAndroid;
+    if (!nfc) return;
+    const onCard = async (event: Event) => {
+      try {
+        const heard = await api.readCard((event as CustomEvent<string>).detail);
+        listening.stop();
+        setCard(heard.card);
+        setHeardName(heard.name);
+        setError(null);
+      } catch (failure) {
+        setError(errorText(failure));
+      }
+    };
+    android?.nfcRead(true);
+    window.addEventListener("carrychat-nfc", onCard);
+    return () => {
+      android?.nfcRead(false);
+      window.removeEventListener("carrychat-nfc", onCard);
+    };
+  }, [nfc, listening.stop]);
 
   async function listen() {
     if (listening.active) return listening.stop();
@@ -103,6 +132,7 @@ export function AddContactDialog({ onClose, onAdded }: { onClose: () => void; on
         <p className={error ? "hint error" : "hint"}>
           {error ?? (listening.active ? t.soundListening : heardName ? t.soundHeard(heardName) : t.addHint)}
         </p>
+        {nfc && !heardName && <p className="hint">{t.nfcRead}</p>}
         <div className="dialog-actions">
           <button type="button" onClick={onClose}>
             {t.cancel}
@@ -126,6 +156,14 @@ export function MyCardDialog({ profile, onClose }: { profile: Profile; onClose: 
   const [copied, setCopied] = useState(false);
   const [qr, setQr] = useState<string | null>(null);
   const playing = useSound();
+  const nfc = useNfc();
+
+  // Held to a phone adding a contact, this one gives its card while the sheet is open.
+  useEffect(() => {
+    if (!nfc) return;
+    window.CarryChatAndroid?.nfcOffer(profile.card);
+    return () => window.CarryChatAndroid?.nfcOffer(null);
+  }, [nfc, profile.card]);
 
   function play() {
     if (playing.active) return playing.stop();
@@ -152,6 +190,7 @@ export function MyCardDialog({ profile, onClose }: { profile: Profile; onClose: 
       <p className="hint">{t.cardFingerprint}</p>
       <p className="fingerprint large">{profile.fingerprint}</p>
       {playing.active && <p className="hint">{t.soundPlaying}</p>}
+      {nfc && <p className="hint">{t.nfcOffer}</p>}
       <div className="dialog-actions">
         <button onClick={onClose}>{t.close}</button>
         <button onClick={play}>{playing.active ? t.soundStop : t.soundSend}</button>

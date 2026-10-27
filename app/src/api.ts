@@ -263,6 +263,8 @@ export interface Api {
   /** The microphone's next samples, 16-bit; gives the card once it has been heard whole. */
   listenHeard(samples: Uint8Array): Promise<HeardCard | null>;
   listenStop(): Promise<void>;
+  /** A card read over NFC, in its text form, once its signature verifies. */
+  readCard(card: string): Promise<HeardCard>;
   acceptContact(contactId: number): Promise<Contact>;
   declineContact(contactId: number): Promise<void>;
   messages(contactId: number): Promise<Message[]>;
@@ -421,6 +423,7 @@ function desktopApi(): Api {
     // The samples go as the request's body, not as JSON.
     listenHeard: (samples) => call("listen_heard", samples),
     listenStop: () => call("listen_stop"),
+    readCard: (card) => call("read_card", { card }),
     acceptContact: (contactId) => call("accept_contact", { contactId }),
     declineContact: (contactId) => call("decline_contact", { contactId }),
     messages: (contactId) => call("messages", { contactId }),
@@ -697,6 +700,9 @@ function previewApi(): Api {
       return Date.now() - listeningSince > 3000 ? { card: "carrychat:elif", name: "Elif" } : null;
     },
     async listenStop() {},
+    async readCard(card) {
+      return { card, name: "Elif" };
+    },
     async addContact(card) {
       if (!card.trim().startsWith("carrychat:")) throw new Error("invalid card prefix");
       const fromGroup = groups.flatMap((group) => group.members).find((candidate) => candidate.card === card);

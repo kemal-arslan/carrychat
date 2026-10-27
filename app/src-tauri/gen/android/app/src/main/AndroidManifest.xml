@@ -22,6 +22,10 @@
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:usesPermissionFlags="neverForLocation" />
     <uses-feature android:name="android.hardware.wifi.aware" android:required="false" />
     <uses-feature android:name="android.hardware.wifi.direct" android:required="false" />
+    <!-- NFC: passing contact cards between phones held together. -->
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
+    <uses-feature android:name="android.hardware.nfc.hce" android:required="false" />
     <!-- The service that keeps messages arriving while the app is closed. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
@@ -55,6 +59,18 @@
             android:name=".CarryChatService"
             android:exported="false"
             android:foregroundServiceType="remoteMessaging|connectedDevice" />
+
+        <service
+            android:name=".CardService"
+            android:exported="true"
+            android:permission="android.permission.BIND_NFC_SERVICE">
+            <intent-filter>
+                <action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.nfc.cardemulation.host_apdu_service"
+                android:resource="@xml/card_service" />
+        </service>
 
         <receiver
             android:name=".BootReceiver"

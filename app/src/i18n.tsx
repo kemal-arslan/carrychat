@@ -96,6 +96,8 @@ const en = {
   soundListening: "Listening… Ask them to play their card by sound, close to this device.",
   soundHeard: (name: string) => `${name}'s card was heard. Add them to finish.`,
   soundNoMicrophone: "The microphone could not be used.",
+  nfcOffer: "Or hold this phone back to back with theirs, while Add contact is open on it.",
+  nfcRead: "Or hold this phone back to back with theirs, while My card is open on it.",
   copied: "Copied",
 
   connectTitle: "Connect to a device",
@@ -458,6 +460,8 @@ const tr: Strings = {
   soundListening: "Dinleniyor… Karşıdaki kartını bu cihazın yakınında sesle çalsın.",
   soundHeard: (name) => `${name} kişisinin kartı duyuldu. Bitirmek için Ekle'ye bas.`,
   soundNoMicrophone: "Mikrofon kullanılamadı.",
+  nfcOffer: "Ya da bu telefonu karşıdakinin telefonuyla sırt sırta tut; onda Kişi ekle açık olsun.",
+  nfcRead: "Ya da bu telefonu karşıdakinin telefonuyla sırt sırta tut; onda Kartım açık olsun.",
   copied: "Kopyalandı",
 
   connectTitle: "Bir cihaza bağlan",

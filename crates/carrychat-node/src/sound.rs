@@ -1,16 +1,31 @@
-//! Cards over sound (§3.2): this node's card played as sound, and a
-//! listener that hears another's.
+//! Cards passed between devices side by side: this node's card played as
+//! sound and a listener that hears another's (§3.2), and cards read over
+//! NFC (§3.3).
 
 use carrychat_proto::identity::ContactCard;
 use carrychat_proto::sound;
 use serde::Serialize;
 
-/// A card heard over sound, its signature verified.
+/// A card heard over sound or read over NFC, its signature verified.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct HeardCard {
     /// The `carrychat:` card text, as it would be pasted.
     pub card: String,
     pub name: String,
+}
+
+impl HeardCard {
+    /// A card in its `carrychat:` text form, if its signature verifies.
+    pub fn from_text(text: &str) -> Option<Self> {
+        Self::verified(ContactCard::from_text(text).ok()?)
+    }
+
+    fn verified(card: ContactCard) -> Option<Self> {
+        Some(Self {
+            card: card.to_text(),
+            name: card.name().to_owned(),
+        })
+    }
 }
 
 /// Listens to a microphone for a card played as sound.
@@ -27,11 +42,7 @@ impl CardListener {
     /// was heard wrong, and listening goes on.
     pub fn push(&mut self, samples: &[f32]) -> Option<HeardCard> {
         let bytes = self.0.push(samples)?;
-        let card = ContactCard::from_bytes(&bytes).ok()?;
-        Some(HeardCard {
-            card: card.to_text(),
-            name: card.name().to_owned(),
-        })
+        HeardCard::verified(ContactCard::from_bytes(&bytes).ok()?)
     }
 }
 
