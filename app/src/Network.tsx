@@ -19,6 +19,9 @@ import { bluetoothLabel, internetLabel, lanLabel, linkStates, loraLabel, reticul
 import { LoraSheet } from "./LoraSheet";
 import { ReticulumSheet } from "./ReticulumSheet";
 
+/** Bluetooth as the node started with it: a change shows the restart row until the app restarts. */
+let bluetoothAtStart: boolean | null = null;
+
 type Props = {
   status: Status | null;
   preview: boolean;
@@ -32,9 +35,9 @@ type Props = {
 export function Network({ status, preview, onNetworkHelp, onConnect, onImport, onExport }: Props) {
   const { t } = useI18n();
   const { lan, bluetooth, internet, nearby } = linkStates(status);
-  // Tor and Bluetooth as the node started with them, and as now chosen.
-  const [atStart, setAtStart] = useState<{ tor: boolean; bluetooth: boolean } | null>(null);
-  const [tor, setTor] = useState(false);
+  // Tor and Bluetooth as now chosen. Whether the node uses Tor shows in its
+  // status; Bluetooth as it started with is kept for as long as the page runs.
+  const [tor, setTor] = useState<boolean | null>(null);
   const [bluetoothOn, setBluetoothOn] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Only phones have Wi-Fi Aware and Wi-Fi Direct; they come and go with Wi-Fi.
@@ -54,7 +57,7 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
 
   useEffect(() => {
     api.settings().then((settings) => {
-      setAtStart({ tor: settings.tor, bluetooth: settings.bluetooth });
+      bluetoothAtStart ??= settings.bluetooth;
       setTor(settings.tor);
       setBluetoothOn(settings.bluetooth);
     });
@@ -70,7 +73,10 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
     await api.setBluetooth(on).catch((failure) => setError(String(failure).replace(/^Error: /, "")));
   }
 
-  const needsRestart = atStart !== null && (tor !== atStart.tor || bluetoothOn !== atStart.bluetooth);
+  // The switches wait for the settings to load.
+  const loaded = tor !== null;
+  const torChanged = status !== null && status.internetOn && tor !== null && tor !== (status.internetTor !== null);
+  const needsRestart = torChanged || (bluetoothAtStart !== null && bluetoothOn !== bluetoothAtStart);
   const lanTrouble = lan === "blocked" || lan === "failed";
   const hint =
     nearby > 0 ? (internet === "up" ? t.nearbyOnline : t.nearbyOffline) : internet === "up" ? t.internetOnly : t.waitingHere;
@@ -125,7 +131,7 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
           <input
             type="checkbox"
             checked={bluetoothOn}
-            disabled={atStart === null}
+            disabled={!loaded}
             onChange={(event) => toggleBluetooth(event.target.checked)}
             aria-label={t.bluetoothSetting}
           />
@@ -202,8 +208,8 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
           </span>
           <input
             type="checkbox"
-            checked={tor}
-            disabled={atStart === null}
+            checked={tor ?? false}
+            disabled={!loaded}
             onChange={(event) => toggleTor(event.target.checked)}
             aria-label={t.torSetting}
           />

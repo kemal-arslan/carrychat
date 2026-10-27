@@ -328,12 +328,18 @@ class WifiAwareLink(private val context: Context) {
     }
   }
 
+  /** Asks for a data path; one Android refuses ends like one that never came. */
   private fun request(specifier: WifiAwareNetworkSpecifier, callback: ConnectivityManager.NetworkCallback) {
     val request = NetworkRequest.Builder()
       .addTransportType(NetworkCapabilities.TRANSPORT_WIFI_AWARE)
       .setNetworkSpecifier(specifier)
       .build()
-    connectivity.requestNetwork(request, callback, handler, DATA_PATH_TIMEOUT_MS)
+    try {
+      connectivity.requestNetwork(request, callback, handler, DATA_PATH_TIMEOUT_MS)
+    } catch (error: RuntimeException) {
+      Log.w(TAG, "No Wi-Fi Aware data path: $error")
+      handler.post { callback.onUnavailable() }
+    }
   }
 
   private fun release(callback: ConnectivityManager.NetworkCallback) {

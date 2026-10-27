@@ -274,11 +274,14 @@ export interface Api {
   addContact(card: string): Promise<Contact>;
   /** This device's card as sound: one round, a WAV file to play over and over. */
   cardSound(): Promise<ArrayBuffer>;
-  /** Starts listening for a card played as sound, from a microphone at `rate` samples a second. */
-  listenStart(rate: number): Promise<void>;
+  /**
+   * Starts listening for a card played as sound, from a microphone at `rate` samples a second. Gives the
+   * listening's number, which the calls for it name, so that one ended late cannot end the next.
+   */
+  listenStart(rate: number): Promise<number>;
   /** The microphone's next samples, 16-bit; gives the card once it has been heard whole. */
-  listenHeard(samples: Uint8Array): Promise<HeardCard | null>;
-  listenStop(): Promise<void>;
+  listenHeard(listening: number, samples: Int16Array): Promise<HeardCard | null>;
+  listenStop(listening: number): Promise<void>;
   /** A card read over NFC, in its text form, once its signature verifies. */
   readCard(card: string): Promise<HeardCard>;
   acceptContact(contactId: number): Promise<Contact>;
@@ -439,9 +442,14 @@ function desktopApi(): Api {
     addContact: (card) => call("add_contact", { card }),
     cardSound: () => call("card_sound"),
     listenStart: (rate) => call("listen_start", { rate }),
-    // The samples go as the request's body, not as JSON.
-    listenHeard: (samples) => call("listen_heard", samples),
-    listenStop: () => call("listen_stop"),
+    // The samples go as the request's body, not as JSON, after the listening's number.
+    listenHeard(listening, samples) {
+      const body = new Uint8Array(4 + samples.byteLength);
+      new DataView(body.buffer).setUint32(0, listening, true);
+      body.set(new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength), 4);
+      return call("listen_heard", body);
+    },
+    listenStop: (listening) => call("listen_stop", { listening }),
     readCard: (card) => call("read_card", { card }),
     acceptContact: (contactId) => call("accept_contact", { contactId }),
     declineContact: (contactId) => call("decline_contact", { contactId }),
@@ -722,6 +730,7 @@ function previewApi(): Api {
     },
     async listenStart() {
       listeningSince = Date.now();
+      return 1;
     },
     async listenHeard() {
       // The preview hears a card three seconds in.

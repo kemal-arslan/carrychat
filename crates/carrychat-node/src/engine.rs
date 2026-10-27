@@ -454,6 +454,26 @@ impl Engine {
         self.store.mark_uploaded(id)
     }
 
+    /// What a link that comes up later should carry from us: our own
+    /// bundles still waiting for a receipt, then the receipts for the
+    /// `receipts` latest bundles delivered to us.
+    pub fn pending_own(&self, now: u32, receipts: usize) -> Result<Vec<Frame>> {
+        let mut frames = Vec::new();
+        for bundle in self.store.own_bundles(now)? {
+            frames.extend(self.passed_on(&bundle)?);
+        }
+        frames.extend(
+            self.store
+                .received_tombstones(receipts)?
+                .into_iter()
+                .map(|tombstone| Frame::Tombstone {
+                    hop_limit: DEFAULT_HOP_LIMIT,
+                    tombstone,
+                }),
+        );
+        Ok(frames)
+    }
+
     /// Tombstones of the latest bundles delivered to us, to post again.
     pub fn received_tombstones(&self) -> Result<Vec<Frame>> {
         Ok(self

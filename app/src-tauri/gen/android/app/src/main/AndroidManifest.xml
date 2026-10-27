@@ -19,6 +19,8 @@
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
     <!-- Wi-Fi Aware and Wi-Fi Direct: phones connecting over Wi-Fi with no access point. -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <!-- Wi-Fi Aware asks Android for a data path with requestNetwork, which needs it. -->
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:usesPermissionFlags="neverForLocation" />
     <uses-feature android:name="android.hardware.wifi.aware" android:required="false" />
     <uses-feature android:name="android.hardware.wifi.direct" android:required="false" />

@@ -39,8 +39,17 @@ export async function listenForCard(onHeard: (card: HeardCard) => void): Promise
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
   });
-  const context = new AudioContext();
-  await api.listenStart(context.sampleRate);
+  let context: AudioContext | null = null;
+  let listening: number;
+  try {
+    context = new AudioContext();
+    listening = await api.listenStart(context.sampleRate);
+  } catch (error) {
+    // The microphone goes off again if listening could not start.
+    stream.getTracks().forEach((track) => track.stop());
+    void context?.close();
+    throw error;
+  }
   const input = context.createMediaStreamSource(stream);
   // ScriptProcessor runs in every web view the app does; what it outputs stays silent.
   const processor = context.createScriptProcessor(4096, 1, 1);
@@ -66,7 +75,7 @@ export async function listenForCard(onHeard: (card: HeardCard) => void): Promise
     input.disconnect();
     stream.getTracks().forEach((track) => track.stop());
     void context.close();
-    void api.listenStop();
+    void api.listenStop(listening);
   };
   const timer = window.setInterval(async () => {
     if (sending || heard.length === 0) return;
@@ -79,7 +88,7 @@ export async function listenForCard(onHeard: (card: HeardCard) => void): Promise
     }
     heard = [];
     try {
-      const card = await api.listenHeard(new Uint8Array(samples.buffer));
+      const card = await api.listenHeard(listening, samples);
       if (card && !stopped) {
         stop();
         onHeard(card);

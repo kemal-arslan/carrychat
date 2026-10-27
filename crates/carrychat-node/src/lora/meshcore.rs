@@ -35,6 +35,8 @@ pub const RESP_NO_MORE_MESSAGES: u8 = 10;
 pub const RESP_DEVICE_INFO: u8 = 13;
 pub const RESP_CHANNEL_INFO: u8 = 18;
 pub const RESP_CHANNEL_DATA: u8 = 27;
+/// The replies to `CMD_SYNC_NEXT_MESSAGE`: a message of any kind, or none.
+pub const MESSAGES: &[u8] = &[7, 8, RESP_NO_MORE_MESSAGES, 16, 17, RESP_CHANNEL_DATA];
 
 /// Codes from here up are pushed by the device at any time, not replies.
 pub const PUSH_FIRST: u8 = 0x80;

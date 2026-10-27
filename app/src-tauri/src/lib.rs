@@ -4,6 +4,7 @@
 use std::io::Write;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
 use carrychat_node::{
@@ -21,8 +22,10 @@ mod android;
 struct AppState {
     dir: PathBuf,
     node: Mutex<Option<Node>>,
-    /// Listens for a card played as sound, while the add-contact sheet does.
-    listener: Mutex<Option<CardListener>>,
+    /// Listens for a card played as sound, while the add-contact sheet does,
+    /// with the number the page knows that listening by.
+    listener: Mutex<Option<(u32, CardListener)>>,
+    listenings: AtomicU32,
 }
 
 type CommandResult<T> = Result<T, String>;
@@ -156,17 +159,23 @@ async fn card_sound(state: State<'_, AppState>) -> CommandResult<tauri::ipc::Res
 }
 
 /// Starts listening for a card played as sound, from a microphone giving
-/// `rate` samples a second.
+/// `rate` samples a second, in place of any listening before. Returns the
+/// listening's number, which the other calls name, so that a listening the
+/// page ended late cannot end the next.
 #[tauri::command]
-fn listen_start(state: State<'_, AppState>, rate: u32) {
+fn listen_start(state: State<'_, AppState>, rate: u32) -> u32 {
+    let listening = state.listenings.fetch_add(1, Ordering::Relaxed) + 1;
     *state
         .listener
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(CardListener::new(rate));
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+        Some((listening, CardListener::new(rate)));
+    listening
 }
 
-/// The microphone's next samples, as 16-bit little-endian, in the request's
-/// body. Returns the card once it has been heard whole.
+/// The microphone's next samples in the request's body: the listening's
+/// number as a little-endian `u32`, then 16-bit little-endian samples.
+/// Returns the card once it has been heard whole.
 #[tauri::command]
 async fn listen_heard(
     state: State<'_, AppState>,
@@ -175,7 +184,10 @@ async fn listen_heard(
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err("expected samples".to_owned());
     };
-    let samples: Vec<f32> = bytes
+    let Some((number, samples)) = bytes.split_first_chunk::<4>() else {
+        return Err("expected samples".to_owned());
+    };
+    let samples: Vec<f32> = samples
         .chunks_exact(2)
         .map(|pair| f32::from(i16::from_le_bytes([pair[0], pair[1]])) / 32768.0)
         .collect();
@@ -183,9 +195,12 @@ async fn listen_heard(
         .listener
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    Ok(listener
-        .as_mut()
-        .and_then(|listener| listener.push(&samples)))
+    Ok(match listener.as_mut() {
+        Some((listening, listener)) if *listening == u32::from_le_bytes(*number) => {
+            listener.push(&samples)
+        }
+        _ => None,
+    })
 }
 
 /// A card read over NFC (§3.3), in its text form, once its signature
@@ -195,12 +210,19 @@ fn read_card(card: String) -> CommandResult<HeardCard> {
     HeardCard::from_text(&card).ok_or_else(|| "The card did not read right".to_owned())
 }
 
+/// Ends listening `listening`, unless another started since.
 #[tauri::command]
-fn listen_stop(state: State<'_, AppState>) {
-    *state
+fn listen_stop(state: State<'_, AppState>, listening: u32) {
+    let mut listener = state
         .listener
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if listener
+        .as_ref()
+        .is_some_and(|(current, _)| *current == listening)
+    {
+        *listener = None;
+    }
 }
 
 #[tauri::command]
@@ -686,6 +708,7 @@ pub fn run() {
                 dir,
                 node: Mutex::new(node),
                 listener: Mutex::new(None),
+                listenings: AtomicU32::new(0),
             });
             Ok(())
         })

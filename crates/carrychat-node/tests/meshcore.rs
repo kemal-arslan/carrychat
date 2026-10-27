@@ -25,6 +25,12 @@ const PUBLIC: [u8; 16] = [
 /// Starts the radio. Devices are numbered 1, 2, 3… in the order they
 /// connect, and have `slots` channel slots, of which `taken` are in use.
 async fn start_radio(slots: u8, taken: u8) -> (LoraDevice, Air) {
+    start_radio_with(slots, taken, false).await
+}
+
+/// A radio whose devices, when `slow`, take long enough over their first
+/// answer that the node asks again, and then answer both.
+async fn start_radio_with(slots: u8, taken: u8, slow: bool) -> (LoraDevice, Air) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let device = LoraDevice::Tcp(listener.local_addr().unwrap().to_string());
     let air: Air = Arc::default();
@@ -35,6 +41,8 @@ async fn start_radio(slots: u8, taken: u8) -> (LoraDevice, Air) {
         while let Ok((stream, _)) = listener.accept().await {
             number += 1;
             let mut device = Companion::new(number, slots, taken);
+            // How many times a slow device has been asked what it is.
+            let mut asked = if slow { 0 } else { u8::MAX };
             let waves = waves.clone();
             let log = log.clone();
             tokio::spawn(async move {
@@ -47,11 +55,21 @@ async fn start_radio(slots: u8, taken: u8) -> (LoraDevice, Air) {
                         read = reader.read(&mut buffer) => {
                             let Ok(len @ 1..) = read else { return };
                             deframer.push(&buffer[..len]);
-                            let mut replies = Vec::new();
+                            let mut replies: Vec<Vec<u8>> = Vec::new();
                             while let Some(body) = deframer.next_frame() {
                                 if let Some(sent) = device.flooded(&body) {
                                     log.lock().unwrap().push(sent.clone());
                                     let _ = waves.send(sent);
+                                }
+                                if asked < 2 && body[0] == meshcore::CMD_APP_START {
+                                    asked += 1;
+                                    // The first answer comes after the node asked
+                                    // again, the second a moment after the first.
+                                    let delay = if asked == 1 { 2500 } else { 300 };
+                                    for reply in replies.drain(..) {
+                                        let _ = writer.write_all(&meshcore::frame_from_device(&reply)).await;
+                                    }
+                                    tokio::time::sleep(Duration::from_millis(delay)).await;
                                 }
                                 replies.extend(device.answer(&body));
                             }
@@ -322,4 +340,18 @@ async fn a_device_with_no_free_channel_slot_is_left_as_it_is() {
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert!(air.lock().unwrap().is_empty());
     assert!(alice.node.lora().waiting > 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn late_answers_do_not_get_mixed_up() {
+    // The device answers what it is late, so the node asks twice and both
+    // answers come; the second must not pass for the answer to what the
+    // node asks next.
+    let (device, _air) = start_radio_with(8, 1, true).await;
+    let alice = node("alice");
+    tune_in(&alice.node, &device).await;
+    let status = alice.node.lora();
+    assert_eq!(status.firmware, Some(LoraFirmware::MeshCore));
+    assert_eq!(status.radio.as_deref(), Some("869.525 MHz, SF7, 250 kHz"));
+    assert!(!status.no_free_channel);
 }

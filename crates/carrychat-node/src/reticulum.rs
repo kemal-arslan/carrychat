@@ -32,8 +32,15 @@ const PATH_REQUEST_GAP: Duration = Duration::from_millis(500);
 /// Destinations kept across restarts.
 const MAX_KEPT_PEERS: usize = 64;
 /// A node that hears a CarryChat node it did not know announces itself
-/// again, so the newcomer learns of it too, but at most this often.
-const WELCOME_INTERVAL: Duration = Duration::from_secs(10 * 60);
+/// again, so the newcomer learns of it too: up to this many at once, then
+/// one more every `WELCOME_REFILL`, about what transport nodes pass on
+/// before they hold a destination's announces back. A welcome that has to
+/// wait is made late, not dropped.
+const WELCOME_BURST: f64 = 5.0;
+const WELCOME_REFILL: Duration = Duration::from_secs(10 * 60);
+/// Receipts for the latest messages delivered to us that go to a CarryChat
+/// node newly heard, with our own messages still waiting for a receipt.
+const PENDING_RECEIPTS: usize = 32;
 /// How long an announced CarryChat destination counts as there.
 const PEER_WITHIN_SECS: u32 = 6 * 60 * 60;
 /// Frames waiting to go out. Past these, the oldest carried one goes first,
@@ -91,6 +98,8 @@ struct Seen {
 struct Queue {
     own: VecDeque<Vec<u8>>,
     carried: VecDeque<Vec<u8>>,
+    /// Frames for one destination only: what waited for a node newly heard.
+    backlog: VecDeque<([u8; wire::HASH_LEN], Vec<u8>)>,
 }
 
 pub(crate) struct Reticulum {
@@ -136,7 +145,7 @@ impl Reticulum {
             connected: self.connected(),
             destination: seen.own.as_ref().map(|own| hex(own)),
             peers,
-            waiting: queue.own.len() + queue.carried.len(),
+            waiting: queue.own.len() + queue.carried.len() + queue.backlog.len(),
             carrychat_at: seen.carrychat_at,
         }
     }
@@ -153,14 +162,10 @@ impl Reticulum {
         if !self.started.load(Ordering::Relaxed) {
             return false;
         }
-        let packets: Vec<Vec<u8>> = match frame {
-            Frame::Bundle(bundle) => match frames_for(bundle, wire::MTU) {
-                Ok(frames) => frames.iter().map(Frame::to_bytes).collect(),
-                Err(_) => return false,
-            },
-            Frame::Tombstone { .. } => vec![frame.to_bytes()],
-            Frame::Fragment(_) | Frame::Chunk(_) => return false,
-        };
+        let packets = packets(frame);
+        if packets.is_empty() {
+            return false;
+        }
         {
             let mut queue = lock(&self.queue);
             let own = own || matches!(frame, Frame::Tombstone { .. });
@@ -186,6 +191,56 @@ impl Reticulum {
             .filter(|peer| now.saturating_sub(peer.at) <= PEER_WITHIN_SECS)
             .map(|peer| peer.announce.clone())
             .collect()
+    }
+}
+
+/// A frame as the packets that carry it over Reticulum: a bundle, whole or
+/// in fragments, or a tombstone. File chunks do not go over Reticulum.
+fn packets(frame: &Frame) -> Vec<Vec<u8>> {
+    match frame {
+        Frame::Bundle(bundle) => frames_for(bundle, wire::MTU)
+            .map(|frames| frames.iter().map(Frame::to_bytes).collect())
+            .unwrap_or_default(),
+        Frame::Tombstone { .. } => vec![frame.to_bytes()],
+        Frame::Fragment(_) | Frame::Chunk(_) => Vec::new(),
+    }
+}
+
+/// Welcomes this node may still make: up to `WELCOME_BURST`, refilled at
+/// one every `WELCOME_REFILL`.
+struct Welcomes {
+    left: f64,
+    at: tokio::time::Instant,
+}
+
+impl Welcomes {
+    fn new() -> Self {
+        Self {
+            left: WELCOME_BURST,
+            at: tokio::time::Instant::now(),
+        }
+    }
+
+    fn refill(&mut self) {
+        let now = tokio::time::Instant::now();
+        let refilled = now.duration_since(self.at).as_secs_f64() / WELCOME_REFILL.as_secs_f64();
+        self.left = (self.left + refilled).min(WELCOME_BURST);
+        self.at = now;
+    }
+
+    /// How long until a welcome may be made.
+    fn wait(&mut self) -> Duration {
+        self.refill();
+        if self.left >= 1.0 {
+            Duration::ZERO
+        } else {
+            WELCOME_REFILL.mul_f64(1.0 - self.left)
+        }
+    }
+
+    fn spend(&mut self) {
+        self.refill();
+        self.left -= 1.0;
     }
 }
 
@@ -287,9 +342,35 @@ async fn session(
     let start = tokio::time::Instant::now();
     let mut announce_timer = tokio::time::interval_at(start + ANNOUNCE_INTERVAL, ANNOUNCE_INTERVAL);
     let mut ask_timer = tokio::time::interval(PATH_REQUEST_GAP);
-    let mut welcomed: Option<tokio::time::Instant> = None;
+    let mut welcomes = Welcomes::new();
+    let mut welcome_due = false;
     let mut buffer = vec![0; 4096];
     loop {
+        let welcome_in = welcome_due.then(|| welcomes.wait());
+        if welcome_in == Some(Duration::ZERO) {
+            welcomes.spend();
+            welcome_due = false;
+            writer
+                .write_all(&announce(identity, announced, false))
+                .await?;
+            continue;
+        }
+        // What waited for a node newly heard goes to it alone.
+        let backlog = shared.upgrade().and_then(|node| {
+            let next = lock(&node.reticulum.queue).backlog.pop_front()?;
+            let peer = lock(&node.reticulum.seen)
+                .peers
+                .get(&next.0)?
+                .announce
+                .clone();
+            Some((peer, next.1))
+        });
+        if let Some((peer, frame)) = backlog {
+            writer
+                .write_all(&wire::frame(&wire::data_packet(&peer, &frame)))
+                .await?;
+            continue;
+        }
         // Every frame waiting goes to every destination heard lately.
         let peers = shared
             .upgrade()
@@ -332,16 +413,12 @@ async fn session(
                         Reply::PathResponse => {
                             writer.write_all(&announce(identity, announced, true)).await?;
                         }
-                        Reply::Welcome => {
-                            if welcomed.is_none_or(|at| at.elapsed() >= WELCOME_INTERVAL) {
-                                welcomed = Some(tokio::time::Instant::now());
-                                writer.write_all(&announce(identity, announced, false)).await?;
-                            }
-                        }
+                        Reply::Welcome => welcome_due = true,
                     }
                 }
             }
             () = wake.notified() => {}
+            () = tokio::time::sleep(welcome_in.unwrap_or_default()), if welcome_in.is_some() => {}
             _ = announce_timer.tick() => {
                 writer.write_all(&announce(identity, announced, false)).await?;
             }
@@ -393,22 +470,35 @@ fn take(
             {
                 return Reply::Nothing;
             }
+            let at = now();
             let new = !seen.peers.contains_key(&announce.destination);
-            seen.peers.insert(
-                announce.destination,
-                Peer {
-                    announce,
-                    at: now(),
-                },
-            );
-            node.reticulum.wake.notify_one();
-            if !new {
-                return Reply::Nothing;
-            }
-            let packed = pack_peers(&seen.peers);
+            // Not heard in this run yet, or not lately: it may have missed
+            // what we sent meanwhile, or before the link started.
+            let fresh = seen
+                .peers
+                .get(&announce.destination)
+                .is_none_or(|peer| at.saturating_sub(peer.at) > PEER_WITHIN_SECS);
+            let destination = announce.destination;
+            seen.peers.insert(destination, Peer { announce, at });
+            let packed = new.then(|| pack_peers(&seen.peers));
             drop(seen);
-            let _ = node.engine().set_reticulum_peers(&packed);
-            Reply::Welcome
+            if fresh {
+                let pending = node.engine().pending_own(at, PENDING_RECEIPTS);
+                let mut queue = lock(&node.reticulum.queue);
+                for frame in pending.unwrap_or_default() {
+                    for packet in packets(&frame) {
+                        queue.backlog.push_back((destination, packet));
+                    }
+                }
+            }
+            node.reticulum.wake.notify_one();
+            match packed {
+                Some(packed) => {
+                    let _ = node.engine().set_reticulum_peers(&packed);
+                    Reply::Welcome
+                }
+                None => Reply::Nothing,
+            }
         }
         PacketType::Data if packet.destination == *own => {
             let Some(bytes) = identity.decrypt(&packet.data) else {

@@ -232,3 +232,42 @@ async fn a_restarted_node_asks_for_the_paths_it_knew() {
     };
     assert_eq!(message.body, "Yeniden merhaba");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_written_before_the_link_started_goes_out() {
+    let (address, _network) = start_network().await;
+    let alice = node("alice");
+    let bob = node("bob");
+    let bob_id = alice.node.add_contact(&bob.node.profile().card).unwrap().id;
+    bob.node.add_contact(&alice.node.profile().card).unwrap();
+    alice
+        .node
+        .send_text(bob_id, "Reticulum açılmadan yazıldı")
+        .unwrap();
+    let mut bob_events = bob.node.subscribe();
+    bob.node.set_reticulum(Some(&address)).unwrap();
+    alice.node.set_reticulum(Some(&address)).unwrap();
+
+    let Event::MessageReceived { message } = next_event(&mut bob_events, |event| {
+        matches!(event, Event::MessageReceived { .. })
+    })
+    .await
+    else {
+        unreachable!()
+    };
+    assert_eq!(message.body, "Reticulum açılmadan yazıldı");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_third_node_learns_of_the_two_before_it() {
+    let (address, _network) = start_network().await;
+    let nodes = [node("alice"), node("bob"), node("carol")];
+    for (index, test) in nodes.iter().enumerate() {
+        test.node.set_reticulum(Some(&address)).unwrap();
+        hears(&test.node, index).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+    for test in &nodes {
+        hears(&test.node, 2).await;
+    }
+}

@@ -302,3 +302,28 @@ async fn the_link_says_what_its_device_hears_and_can_be_turned_off() {
         Some(device.to_string())
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_written_before_the_device_connected_goes_out() {
+    let (device, _air) = start_radio().await;
+    let alice = node("alice");
+    let bob = node("bob");
+    let bob_id = alice.node.add_contact(&bob.node.profile().card).unwrap().id;
+    bob.node.add_contact(&alice.node.profile().card).unwrap();
+    alice
+        .node
+        .send_text(bob_id, "Telsiz bağlanmadan yazıldı")
+        .unwrap();
+    tune_in(&bob.node, &device).await;
+    let mut bob_events = bob.node.subscribe();
+    tune_in(&alice.node, &device).await;
+
+    let Event::MessageReceived { message } = next_event(&mut bob_events, |event| {
+        matches!(event, Event::MessageReceived { .. })
+    })
+    .await
+    else {
+        unreachable!()
+    };
+    assert_eq!(message.body, "Telsiz bağlanmadan yazıldı");
+}
