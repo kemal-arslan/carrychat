@@ -168,6 +168,8 @@ export type Status = {
   lanProblem: LanProblem | null;
   bluetoothOn: boolean;
   bluetoothPeers: number;
+  /** Whether this device's Bluetooth is on; null until the app knows. */
+  bluetoothRadio: boolean | null;
   wifiAwarePeers: number;
   internetOn: boolean;
   internetRelays: number;
@@ -836,6 +838,7 @@ function previewApi(): Api {
         lanProblem,
         bluetoothOn: settings.bluetooth,
         bluetoothPeers: settings.bluetooth ? 1 : 0,
+        bluetoothRadio: true,
         wifiAwarePeers: 1,
         internetOn: true,
         internetRelays: 3,

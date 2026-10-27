@@ -220,6 +220,9 @@ pub struct Status {
     pub bluetooth_on: bool,
     /// Nodes connected over Bluetooth LE right now.
     pub bluetooth_peers: usize,
+    /// Whether this device's Bluetooth is turned on, once the platform has
+    /// said.
+    pub bluetooth_radio: Option<bool>,
     /// Nodes connected over Wi-Fi Aware right now, phone to phone.
     pub wifi_aware_peers: usize,
     /// Whether a Meshtastic device is connected for the LoRa link.
@@ -313,6 +316,8 @@ pub(crate) struct Shared {
     pub(crate) lora: lora::Lora,
     pub(crate) internet: internet::Internet,
     internet_on: std::sync::atomic::AtomicBool,
+    /// Whether this device's Bluetooth is on: 0 not known yet, 1 off, 2 on.
+    bluetooth_radio: std::sync::atomic::AtomicU8,
     pub(crate) nearby: nearby::Nearby,
 }
 
@@ -344,6 +349,7 @@ impl Node {
                 lora: lora::Lora::new(),
                 internet: internet::Internet::new(),
                 internet_on: std::sync::atomic::AtomicBool::new(false),
+                bluetooth_radio: std::sync::atomic::AtomicU8::new(0),
                 nearby: nearby::Nearby::new(visible),
             }),
         }
@@ -466,11 +472,8 @@ impl Node {
             };
             (message, frame, tag)
         };
-        self.shared.peers.broadcast(&frame.to_bytes(), None);
-        self.shared.internet.post_bundle(&frame, &tag);
-        self.shared.lora.send(&frame, true);
+        self.shared.send_own_frames(&[(frame, tag)]);
         self.shared.internet.renew_subscription();
-        self.shared.internet.probe();
         Ok(message)
     }
 
@@ -654,6 +657,15 @@ impl Node {
             lan_problem: self.shared.lan.problem(),
             bluetooth_on: self.shared.engine().settings()?.bluetooth,
             bluetooth_peers: self.shared.peers.count(Link::Bluetooth),
+            bluetooth_radio: match self
+                .shared
+                .bluetooth_radio
+                .load(std::sync::atomic::Ordering::Relaxed)
+            {
+                1 => Some(false),
+                2 => Some(true),
+                _ => None,
+            },
             wifi_aware_peers: self.shared.peers.count(Link::WifiAware),
             lora_connected: self.shared.lora.connected(),
             lora_waiting: self.shared.lora.waiting(),
@@ -761,6 +773,12 @@ impl Node {
     #[cfg(feature = "bluetooth")]
     pub async fn start_bluetooth(&self) -> Result<()> {
         bluetooth::start(&self.shared).await
+    }
+
+    /// Notes whether this device's Bluetooth is on, for platform code that
+    /// runs the Bluetooth LE link itself (§9.5).
+    pub fn set_bluetooth_radio(&self, on: bool) {
+        self.shared.set_bluetooth_radio(on);
     }
 
     /// The id this run of the node goes by on nearby links, for platform
@@ -897,6 +915,11 @@ impl Shared {
         if !frames.is_empty() {
             self.internet.renew_subscription();
         }
+    }
+
+    pub(crate) fn set_bluetooth_radio(&self, on: bool) {
+        self.bluetooth_radio
+            .store(if on { 2 } else { 1 }, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub(crate) fn emit(&self, event: Event) {

@@ -6,7 +6,9 @@
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter, WriteType};
+use btleplug::api::{
+    Central, CentralEvent, CentralState, Manager as _, Peripheral as _, ScanFilter, WriteType,
+};
 use btleplug::platform::{Adapter, Manager, Peripheral};
 use futures_util::StreamExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -39,6 +41,10 @@ pub(crate) async fn start(shared: &Arc<Shared>) -> Result<()> {
         .into_iter()
         .next()
         .ok_or(Error::Invalid("there is no Bluetooth adapter"))?;
+    if let Ok(state) = adapter.adapter_state().await {
+        note_radio(shared, state);
+    }
+    tokio::spawn(watch_radio(Arc::downgrade(shared), adapter.clone()));
     adapter
         .start_scan(ScanFilter {
             services: vec![SERVICE],
@@ -46,6 +52,30 @@ pub(crate) async fn start(shared: &Arc<Shared>) -> Result<()> {
         .await?;
     tokio::spawn(sweep_loop(Arc::downgrade(shared), adapter));
     Ok(())
+}
+
+/// Notes whether Bluetooth is on whenever that changes, for the status.
+async fn watch_radio(shared: Weak<Shared>, adapter: Adapter) {
+    let Ok(mut events) = adapter.events().await else {
+        return;
+    };
+    while let Some(event) = events.next().await {
+        let CentralEvent::StateUpdate(state) = event else {
+            continue;
+        };
+        let Some(shared) = shared.upgrade() else {
+            return;
+        };
+        note_radio(&shared, state);
+    }
+}
+
+fn note_radio(shared: &Shared, state: CentralState) {
+    match state {
+        CentralState::PoweredOn => shared.set_bluetooth_radio(true),
+        CentralState::PoweredOff => shared.set_bluetooth_radio(false),
+        CentralState::Unknown => {}
+    }
 }
 
 /// Every few seconds, connects to the CarryChat nodes seen so far that are not

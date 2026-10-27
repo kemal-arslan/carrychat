@@ -151,6 +151,7 @@ White on the accent is 5.2:1. Text-muted on surface is 5.0:1; text-faint is for 
 - **Phone (640px and below):** one screen at a time.
   - A bottom navigation bar (Material 3) with four destinations: Chats, People, Network, Me. The active one has a tinted pill behind a filled icon.
   - Opening a conversation covers the tab and hides the bar; Android's back key and the back arrow return.
+  - Android's back key closes what is on top: a sheet, then the conversation, then any tab other than Chats. On Chats it sends the app to the background, as Home does.
   - A floating button sits above the bar on Chats (start something new) and People (add a contact).
 - **Desktop:** the same four destinations live in a 360px column on the left, with the navigation bar at its foot; the open conversation fills the rest.
 - **Chats:** large title with search and "my card" buttons, a one-line link summary that opens Network, filter chips (All, Unread, Groups, Channels), then rows with no separators: a 50px avatar, name, time, last message and unread count.
@@ -180,8 +181,8 @@ Flat. Surfaces are told apart by fill (surface vs surface-muted) and hairlines (
 - **On the way:** the chat list has a filter for conversations with messages that have not arrived, which show an hourglass before their last message.
 - **Composer:** an attach button, a pill-shaped field that grows to five lines, and one round accent button that is a microphone while the field is empty and a send arrow once there is text. The packet count appears above the field only when the text needs more than one radio packet, or when something is wrong.
 - **Link summary** (chat list): a coloured dot (green when any link is open, grey when none) and one sentence, such as "No internet · 3 devices nearby".
-- **Network rows:** icon tile, name, state in words (green when live), and a switch where the link can be turned on or off. Changes that need a restart show one restart row.
-- **Sheets:** every dialog is a bottom sheet with a grab handle, a 20px title and its actions at the bottom, full width on phones and 440px wide, centred, on desktops. They close by dragging down, tapping the scrim or Escape.
+- **Network rows:** icon tile, name, state in words (green when live), and a switch where the link can be turned on or off. A link whose radio is off says what to turn on, such as "Turn on Bluetooth to use it". Changes that need a restart show one restart row.
+- **Sheets:** every dialog is a bottom sheet with a grab handle, a 20px title and its actions at the bottom, full width on phones and 440px wide, centred, on desktops. They close by dragging down, tapping the scrim, Escape or Android's back key.
 - **Empty states** say what to do next in one sentence.
 - **People nearby:** a "Be visible nearby" switch on People. While it is on, People lists the visible people nearby with the link they are on, and Chats shows them as a row of ringed avatars above the filters; tapping one opens a chat, adding them as a contact first. Visibility is mutual and off by default.
 

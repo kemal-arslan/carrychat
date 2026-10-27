@@ -22,6 +22,7 @@ import {
   type Profile,
   type Status,
 } from "./api";
+import { useBackStep } from "./back";
 import { ChannelChat } from "./ChannelChat";
 import { Chat } from "./Chat";
 import { ChatList } from "./ChatList";
@@ -491,6 +492,9 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
       : contact
         ? { kind: "contact" as const, id: contact.id }
         : null;
+  // Android's back button leaves the conversation, then returns to the chats.
+  useBackStep(narrow && active !== null, back);
+  useBackStep(tab !== "chats", () => setTab("chats"));
 
   const tabs: { tab: Tab; label: string; icon: Icon; badge?: number }[] = [
     { tab: "chats", label: t.tabChats, icon: ChatCircleIcon, badge: unread },

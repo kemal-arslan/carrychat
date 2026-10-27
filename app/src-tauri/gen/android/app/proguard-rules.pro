@@ -30,6 +30,6 @@
 
 # The page calls these through the WebView's JavaScript bridge.
 -keepattributes JavascriptInterface
--keepclassmembers class dev.kemalarslan.carrychat.MainActivity$Bars {
+-keepclassmembers class dev.kemalarslan.carrychat.MainActivity$Page {
     @android.webkit.JavascriptInterface <methods>;
 }

@@ -28,15 +28,22 @@ class MainActivity : TauriActivity() {
   }
 
   override fun onWebViewCreate(webView: WebView) {
-    webView.addJavascriptInterface(Bars(), "CarryChatAndroid")
+    webView.addJavascriptInterface(Page(), "CarryChatAndroid")
   }
 
-  /** Lets the page give the status and navigation bars its light or dark theme. */
-  inner class Bars {
+  /** What the page asks of the activity. */
+  inner class Page {
+    /** Gives the status and navigation bars the page's light or dark theme. */
     @JavascriptInterface
     fun setDark(dark: Boolean) {
       getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(DARK, dark).apply()
       runOnUiThread { paintBars(dark) }
+    }
+
+    /** The back button had nothing left to close on the page. */
+    @JavascriptInterface
+    fun leave() {
+      runOnUiThread { moveTaskToBack(true) }
     }
   }
 
@@ -48,12 +55,6 @@ class MainActivity : TauriActivity() {
       isAppearanceLightStatusBars = !dark
       isAppearanceLightNavigationBars = !dark
     }
-  }
-
-  /** Back on the list keeps the app running behind other apps, as Home does. */
-  @Suppress("OVERRIDE_DEPRECATION")
-  override fun onBackPressed() {
-    moveTaskToBack(true)
   }
 
   /**

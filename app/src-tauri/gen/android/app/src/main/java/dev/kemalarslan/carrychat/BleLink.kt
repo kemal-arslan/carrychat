@@ -44,6 +44,8 @@ object Ble {
   @JvmStatic external fun opened(id: Int, peer: ByteArray?)
   @JvmStatic external fun received(id: Int, data: ByteArray)
   @JvmStatic external fun closed(id: Int)
+  /** Whether the phone's Bluetooth is on, for the status. */
+  @JvmStatic external fun state(on: Boolean)
 
   @Volatile internal var link: BleLink? = null
 
@@ -156,6 +158,7 @@ class BleLink(private val context: Context) {
 
   private fun refresh() {
     val adapter = manager?.adapter
+    Ble.state(adapter?.isEnabled == true)
     val session = if (adapter != null && adapter.isEnabled && hasPermissions()) Ble.session() else null
     if (session == null || !session.contentEquals(this.session)) {
       stopAll()

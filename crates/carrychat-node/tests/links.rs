@@ -190,7 +190,7 @@ async fn a_platform_link_syncs_like_the_local_network() {
     };
     assert_eq!(message.body, "Bluetooth'tan merhaba");
 
-    bob.node.send_text(alice_id, "Aldım").unwrap();
+    let reply = bob.node.send_text(alice_id, "Aldım").unwrap();
     let Event::MessageReceived { message } = next_event(&mut alice_events, |event| {
         matches!(event, Event::MessageReceived { .. })
     })
@@ -199,6 +199,12 @@ async fn a_platform_link_syncs_like_the_local_network() {
         unreachable!()
     };
     assert_eq!(message.body, "Aldım");
+    // Written while the two were connected, the reply left over that link.
+    let steps = bob.node.journey(reply.id).unwrap().steps;
+    assert_eq!(
+        steps.iter().map(|step| step.via).collect::<Vec<_>>(),
+        vec![Via::Bluetooth]
+    );
     let status = alice.node.status().unwrap();
     assert_eq!((status.bluetooth_peers, status.lan_peers), (1, 0));
 

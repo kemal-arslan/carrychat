@@ -4,7 +4,7 @@ import type { useI18n } from "./i18n";
 type Strings = ReturnType<typeof useI18n>["t"];
 
 export type LanState = "off" | "waiting" | "up" | "blocked" | "failed";
-export type BluetoothState = "off" | "waiting" | "up";
+export type BluetoothState = "off" | "radioOff" | "waiting" | "up";
 export type InternetState = "off" | "waiting" | "up" | "failed";
 
 /** How each link stands, read from the node's status. */
@@ -17,7 +17,13 @@ export function linkStates(status: Status | null) {
         : status.lanPeers > 0
           ? "up"
           : "waiting";
-  const bluetooth: BluetoothState = !status?.bluetoothOn ? "off" : status.bluetoothPeers > 0 ? "up" : "waiting";
+  const bluetooth: BluetoothState = !status?.bluetoothOn
+    ? "off"
+    : status.bluetoothRadio === false
+      ? "radioOff"
+      : status.bluetoothPeers > 0
+        ? "up"
+        : "waiting";
   const tor = status?.internetTor ?? null;
   const internet: InternetState = !status?.internetOn
     ? "off"
@@ -54,7 +60,12 @@ export function lanLabel(state: LanState, status: Status | null, t: Strings): st
 }
 
 export function bluetoothLabel(state: BluetoothState, status: Status | null, t: Strings): string {
-  return { off: t.stateOff, waiting: t.stateLooking, up: t.nearbyCount(status?.bluetoothPeers ?? 0) }[state];
+  return {
+    off: t.stateOff,
+    radioOff: t.bluetoothRadioOff,
+    waiting: t.stateLooking,
+    up: t.nearbyCount(status?.bluetoothPeers ?? 0),
+  }[state];
 }
 
 export function wifiAwareLabel(state: WifiAware, status: Status | null, t: Strings): string {

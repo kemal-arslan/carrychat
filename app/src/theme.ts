@@ -7,8 +7,11 @@ const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
 
 declare global {
   interface Window {
-    /** On Android, the activity colours the status and navigation bars. */
-    CarryChatAndroid?: { setDark(dark: boolean): void };
+    /**
+     * On Android, the activity: it colours the status and navigation bars,
+     * and leaves for Home when the back button has nothing left to close.
+     */
+    CarryChatAndroid?: { setDark(dark: boolean): void; leave(): void };
   }
 }
 

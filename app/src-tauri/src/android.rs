@@ -327,6 +327,18 @@ pub extern "system" fn Java_dev_kemalarslan_carrychat_Aware_state(
     WIFI_AWARE.store(state, Ordering::Relaxed);
 }
 
+/// `Ble.state(on)`: whether the phone's Bluetooth is on, every few seconds.
+#[no_mangle]
+pub extern "system" fn Java_dev_kemalarslan_carrychat_Ble_state(
+    _env: JNIEnv,
+    _class: JClass,
+    on: jboolean,
+) {
+    if let Some(node) = lock(&NODE).clone() {
+        node.set_bluetooth_radio(on == JNI_TRUE);
+    }
+}
+
 /// The node, while it uses Bluetooth.
 static BLUETOOTH: Mutex<Option<Node>> = Mutex::new(None);
 
