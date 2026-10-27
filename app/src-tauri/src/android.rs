@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
-use carrychat_node::lora::meshtastic::{frame_body, Deframer};
-use carrychat_node::{Event, FileView, Link, LoraDevice, Node};
+use carrychat_node::lora::{meshcore, meshtastic};
+use carrychat_node::{Event, FileView, Link, LoraDevice, LoraFirmware, Node};
 use jni::objects::{GlobalRef, JByteArray, JClass, JObject, JString, JValue};
 use jni::sys::{jboolean, jbyteArray, jint, jstring, JNI_FALSE, JNI_TRUE};
 use jni::{JNIEnv, JavaVM};
@@ -600,11 +600,14 @@ bridge_entry_points!(
 );
 
 /// The Kotlin side of LoRa over Bluetooth LE: `Lora`, which connects to the
-/// Meshtastic device chosen and moves its messages one by one, unframed.
+/// Meshtastic or MeshCore device chosen and moves its messages one by one,
+/// unframed.
 static LORA: OnceLock<(JavaVM, GlobalRef)> = OnceLock::new();
 /// The device's messages, framed, to the LoRa link while it runs.
 static LORA_INCOMING: Mutex<Option<mpsc::UnboundedSender<Vec<u8>>>> = Mutex::new(None);
-/// Meshtastic devices the last scan found.
+/// Whether the device connected runs MeshCore rather than Meshtastic.
+static LORA_MESHCORE: AtomicBool = AtomicBool::new(false);
+/// LoRa devices the last scan found.
 static LORA_FOUND: Mutex<Vec<FoundDevice>> = Mutex::new(Vec::new());
 
 /// `Lora.device()`: the Bluetooth address of the device chosen, or null.
@@ -631,13 +634,25 @@ pub extern "system" fn Java_dev_kemalarslan_carrychat_Lora_device(
         .map_or(std::ptr::null_mut(), JString::into_raw)
 }
 
-/// `Lora.opened()`: connected to the device. The link runs over the
-/// connection until either side ends it.
+/// `Lora.opened(meshcore)`: connected to the device, which runs MeshCore
+/// or else Meshtastic. The link runs over the connection until either side
+/// ends it.
 #[no_mangle]
-pub extern "system" fn Java_dev_kemalarslan_carrychat_Lora_opened(_env: JNIEnv, _class: JClass) {
+pub extern "system" fn Java_dev_kemalarslan_carrychat_Lora_opened(
+    _env: JNIEnv,
+    _class: JClass,
+    meshcore: jboolean,
+) {
     let Some(node) = lock(&NODE).clone() else {
         lora_call("close");
         return;
+    };
+    let meshcore = meshcore != 0;
+    LORA_MESHCORE.store(meshcore, Ordering::Relaxed);
+    let firmware = if meshcore {
+        LoraFirmware::MeshCore
+    } else {
+        LoraFirmware::Meshtastic
     };
     let (incoming, mut received) = mpsc::unbounded_channel::<Vec<u8>>();
     *lock(&LORA_INCOMING) = Some(incoming);
@@ -655,16 +670,25 @@ pub extern "system" fn Java_dev_kemalarslan_carrychat_Lora_opened(_env: JNIEnv, 
         });
         // The link writes framed messages; the device takes them one by one.
         let outgoing = tauri::async_runtime::spawn(async move {
-            let mut deframer = Deframer::default();
+            let mut meshtastic = meshtastic::Deframer::default();
+            let mut meshcore = meshcore::Deframer::new(meshcore::TO_DEVICE);
             let mut buffer = vec![0; SEND_LEN];
             while let Ok(len @ 1..) = link_reader.read(&mut buffer).await {
-                deframer.push(&buffer[..len]);
-                while let Some(body) = deframer.next_frame() {
-                    lora_send(&body);
+                let bytes = &buffer[..len];
+                if firmware == LoraFirmware::MeshCore {
+                    meshcore.push(bytes);
+                    while let Some(body) = meshcore.next_frame() {
+                        lora_send(&body);
+                    }
+                } else {
+                    meshtastic.push(bytes);
+                    while let Some(body) = meshtastic.next_frame() {
+                        lora_send(&body);
+                    }
                 }
             }
         });
-        if let Err(error) = node.lora_over(lora_reader, lora_writer).await {
+        if let Err(error) = node.lora_over(firmware, lora_reader, lora_writer).await {
             eprintln!("LoRa over Bluetooth: {error}");
         }
         incoming.abort();
@@ -684,8 +708,13 @@ pub extern "system" fn Java_dev_kemalarslan_carrychat_Lora_received(
     let Ok(body) = env.convert_byte_array(&data) else {
         return;
     };
+    let framed = if LORA_MESHCORE.load(Ordering::Relaxed) {
+        meshcore::frame_from_device(&body)
+    } else {
+        meshtastic::frame_body(&body)
+    };
     if let Some(incoming) = lock(&LORA_INCOMING).as_ref() {
-        let _ = incoming.send(frame_body(&body));
+        let _ = incoming.send(framed);
     }
 }
 
@@ -696,7 +725,7 @@ pub extern "system" fn Java_dev_kemalarslan_carrychat_Lora_closed(_env: JNIEnv, 
     lock(&LORA_INCOMING).take();
 }
 
-/// `Lora.found(address, name)`: a Meshtastic device the scan found.
+/// `Lora.found(address, name)`: a LoRa device the scan found.
 #[no_mangle]
 pub extern "system" fn Java_dev_kemalarslan_carrychat_Lora_found(
     mut env: JNIEnv,
@@ -719,7 +748,8 @@ pub extern "system" fn Java_dev_kemalarslan_carrychat_Lora_found(
     }
 }
 
-/// Looks for Meshtastic devices over Bluetooth for a few seconds.
+/// Looks for Meshtastic and MeshCore devices over Bluetooth for a few
+/// seconds.
 pub fn lora_scan() {
     lock(&LORA_FOUND).clear();
     lora_call("scan");

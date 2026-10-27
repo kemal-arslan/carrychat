@@ -1,8 +1,11 @@
-//! The LoRa link (§9.2): frames travel as Meshtastic packets, broadcast on
-//! the device's primary channel. The node talks to the device over TCP (a
-//! device on the network, or meshtasticd) or a USB serial port, or platform
-//! code connects it, as Android does over Bluetooth LE.
+//! The LoRa link (§9.2): frames travel through a Meshtastic device, as
+//! packets broadcast on its primary channel, or a MeshCore device, as
+//! datagrams flooded on a channel of their own. The node talks to the device
+//! over TCP (a device on the network, or meshtasticd) or a USB serial port,
+//! and finds out which kind it is, or platform code connects it, as Android
+//! does over Bluetooth LE.
 
+pub mod meshcore;
 pub mod meshtastic;
 
 use std::collections::{HashMap, VecDeque};
@@ -10,7 +13,7 @@ use std::fmt;
 use std::io;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant};
 
@@ -22,6 +25,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, Notify};
 use tokio::task::AbortHandle;
 
+use self::meshcore::{ChannelData, Contact, SelfInfo};
 use self::meshtastic::{
     from_radio, mesh_packet, to_radio, Data, Deframer, FromRadio, Heartbeat, MeshPacket,
     Modulation, NodeInfo, ToRadio, User,
@@ -41,15 +45,50 @@ const RECONNECT_DELAY: Duration = Duration::from_secs(10);
 const CONFIG_TIMEOUT: Duration = Duration::from_secs(30);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(300);
 const DEFAULT_HOP_LIMIT: u32 = 3;
-/// How far back the devices heard count: Meshtastic devices announce
-/// themselves every three hours by default.
-const HEARD_WITHIN_SECS: u32 = 3 * 60 * 60;
+/// How long a device has to answer as MeshCore does before it is taken for
+/// a Meshtastic one. The question is asked twice, for a device that resets
+/// as its serial port opens.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(4);
+/// How long a MeshCore device has to answer a command.
+const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
+/// How often the node asks a MeshCore device for messages it did not say
+/// were waiting, and for the devices it knows.
+const SYNC_INTERVAL: Duration = Duration::from_secs(60);
+const CONTACTS_INTERVAL: Duration = Duration::from_secs(600);
+/// How long to wait when a MeshCore device's send queue is full.
+const BUSY_DELAY: Duration = Duration::from_secs(2);
 
-/// Where the Meshtastic device is.
+/// What a LoRa device runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub enum LoraFirmware {
+    Meshtastic,
+    MeshCore,
+}
+
+impl LoraFirmware {
+    /// The most a packet carries.
+    fn mtu(self) -> usize {
+        match self {
+            Self::Meshtastic => meshtastic::MTU,
+            Self::MeshCore => meshcore::MTU,
+        }
+    }
+
+    /// How far back the devices heard count: Meshtastic devices announce
+    /// themselves every three hours by default, MeshCore repeaters every 47.
+    fn heard_within(self) -> u32 {
+        match self {
+            Self::Meshtastic => 3 * 60 * 60,
+            Self::MeshCore => 48 * 60 * 60,
+        }
+    }
+}
+
+/// Where the Meshtastic or MeshCore device is.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LoraDevice {
-    /// `host:port` of a device on the network, or of meshtasticd, which
-    /// listens on port 4403.
+    /// `host:port` of a device on the network: Meshtastic devices and
+    /// meshtasticd listen on port 4403, MeshCore devices on 5000.
     Tcp(String),
     /// A USB serial port, such as `/dev/cu.usbserial-0001`.
     Serial(PathBuf),
@@ -96,20 +135,28 @@ pub struct LoraStatus {
     /// The device in use, as `LoraDevice` writes it.
     pub device: Option<String>,
     pub connected: bool,
+    /// What the device runs, once it has answered.
+    pub firmware: Option<LoraFirmware>,
     /// The device's own name.
     pub name: Option<String>,
-    /// The radio region it is set to, such as `EU_868`. A device whose
-    /// region is `UNSET` does not transmit.
+    /// The radio region a Meshtastic device is set to, such as `EU_868`.
+    /// A device whose region is `UNSET` does not transmit.
     pub region: Option<String>,
+    /// A MeshCore device's frequency, spreading factor and bandwidth.
+    pub radio: Option<String>,
+    /// A MeshCore device with every channel slot taken, so CarryChat's
+    /// channel could not be added.
+    pub no_free_channel: bool,
     /// Frames waiting for airtime.
     pub waiting: usize,
-    /// Other Meshtastic devices heard in the last three hours, latest first.
+    /// Other devices heard in the last `heard_within` seconds, latest first.
     pub heard: Vec<LoraNode>,
+    pub heard_within: u32,
     /// When CarryChat last came in over LoRa, in seconds since the epoch.
     pub carrychat_at: Option<u32>,
 }
 
-/// A Meshtastic device the device heard.
+/// A device the device heard.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoraNode {
@@ -125,6 +172,9 @@ pub struct LoraNode {
 pub(crate) struct Lora {
     started: AtomicBool,
     connected: AtomicBool,
+    /// The most a packet carries: a MeshCore one's, until the device says
+    /// it runs Meshtastic.
+    mtu: AtomicUsize,
     queue: Mutex<Queue>,
     wake: Arc<Notify>,
     device: Mutex<Option<LoraDevice>>,
@@ -133,11 +183,15 @@ pub(crate) struct Lora {
     seen: Mutex<Seen>,
 }
 
-/// What the device told about itself and the devices it hears.
+/// What the device told about itself and the devices it hears, by their
+/// Meshtastic node number or the start of their MeshCore public key.
 #[derive(Default)]
 struct Seen {
+    firmware: Option<LoraFirmware>,
     me: Option<u32>,
     region: Option<i32>,
+    radio: Option<String>,
+    no_free_channel: bool,
     nodes: HashMap<u32, Heard>,
     carrychat_at: Option<u32>,
 }
@@ -156,8 +210,7 @@ impl Seen {
         if let Some(user) = &info.user {
             heard.name = Some(display_name(user));
         }
-        // The device's clock may never have been set.
-        if info.last_heard > 1_600_000_000 && info.last_heard <= now + 86_400 {
+        if plausible(info.last_heard, now) {
             heard.at = heard.at.max(Some(info.last_heard));
         }
         if info.snr != 0.0 {
@@ -188,6 +241,30 @@ impl Seen {
             }
         }
     }
+
+    fn contact(&mut self, contact: &Contact, now: u32) {
+        let heard = self
+            .nodes
+            .entry(meshcore::key_number(&contact.public_key))
+            .or_default();
+        if !contact.name.is_empty() {
+            heard.name = Some(contact.name.clone());
+        }
+        if plausible(contact.heard_at, now) {
+            heard.at = heard.at.max(Some(contact.heard_at));
+        }
+        heard.hops = contact.hops();
+    }
+
+    fn advert(&mut self, key: u32, now: u32) {
+        self.nodes.entry(key).or_default().at = Some(now);
+    }
+}
+
+/// Whether a time from the device's clock, which may never have been set,
+/// can be right.
+fn plausible(at: u32, now: u32) -> bool {
+    at > 1_600_000_000 && at <= now + 86_400
 }
 
 /// A device's long name, or else its short name or id.
@@ -217,6 +294,11 @@ impl Queue {
     fn next(&mut self) -> Option<Vec<u8>> {
         self.own.pop_front().or_else(|| self.carried.pop_front())
     }
+
+    /// Puts back a packet the device could not take yet, to go first.
+    fn put_back(&mut self, packet: Vec<u8>) {
+        self.own.push_front(packet);
+    }
 }
 
 impl Lora {
@@ -224,6 +306,7 @@ impl Lora {
         Self {
             started: AtomicBool::new(false),
             connected: AtomicBool::new(false),
+            mtu: AtomicUsize::new(meshcore::MTU),
             queue: Mutex::default(),
             wake: Arc::new(Notify::new()),
             device: Mutex::new(None),
@@ -234,6 +317,10 @@ impl Lora {
 
     pub(crate) fn status(&self, now: u32) -> LoraStatus {
         let seen = lock(&self.seen);
+        let heard_within = seen
+            .firmware
+            .unwrap_or(LoraFirmware::Meshtastic)
+            .heard_within();
         let mut heard: Vec<LoraNode> = seen
             .nodes
             .iter()
@@ -241,7 +328,7 @@ impl Lora {
             .filter_map(|(num, heard)| {
                 let at = heard
                     .at
-                    .filter(|at| now.saturating_sub(*at) <= HEARD_WITHIN_SECS)?;
+                    .filter(|at| now.saturating_sub(*at) <= heard_within)?;
                 Some(LoraNode {
                     name: heard.name.clone().unwrap_or_else(|| format!("!{num:08x}")),
                     at,
@@ -250,17 +337,21 @@ impl Lora {
                 })
             })
             .collect();
-        heard.sort_by(|a, b| b.at.cmp(&a.at));
+        heard.sort_by_key(|node| std::cmp::Reverse(node.at));
         LoraStatus {
             device: lock(&self.device).as_ref().map(ToString::to_string),
             connected: self.connected(),
+            firmware: seen.firmware,
             name: seen
                 .me
                 .and_then(|me| seen.nodes.get(&me))
                 .and_then(|me| me.name.clone()),
             region: seen.region.map(meshtastic::region_name),
+            radio: seen.radio.clone(),
+            no_free_channel: seen.no_free_channel,
             waiting: self.waiting(),
             heard,
+            heard_within,
             carrychat_at: seen.carrychat_at,
         }
     }
@@ -287,7 +378,7 @@ impl Lora {
             return false;
         }
         let packets = match frame {
-            Frame::Bundle(bundle) => match frames_for(bundle, meshtastic::MTU) {
+            Frame::Bundle(bundle) => match frames_for(bundle, self.mtu.load(Ordering::Relaxed)) {
                 Ok(frames) => frames.iter().map(Frame::to_bytes).collect(),
                 Err(_) => return false,
             },
@@ -337,6 +428,7 @@ pub(crate) fn stop(shared: &Shared) {
     *lock(&lora.device) = None;
     *lock(&lora.queue) = Queue::default();
     *lock(&lora.seen) = Seen::default();
+    lora.mtu.store(meshcore::MTU, Ordering::Relaxed);
     if lora.connected.swap(false, Ordering::Relaxed) {
         shared.emit(Event::LoraChanged { connected: false });
     }
@@ -346,7 +438,7 @@ pub(crate) fn stop(shared: &Shared) {
 async fn run(shared: Weak<Shared>, device: LoraDevice) {
     loop {
         let result = match open(&device).await {
-            Ok(stream) => session(&shared, stream).await,
+            Ok(stream) => session(&shared, stream, None).await,
             Err(error) => Err(error),
         };
         if !ended(&shared, &result) {
@@ -356,9 +448,15 @@ async fn run(shared: Weak<Shared>, device: LoraDevice) {
     }
 }
 
-/// Runs the link over a connection platform code made to the device,
-/// carrying the stream framing as a serial port does, until it ends.
-pub(crate) async fn over<R, W>(shared: &Arc<Shared>, reader: R, writer: W) -> Result<()>
+/// Runs the link over a connection platform code made to a device running
+/// `firmware`, carrying the stream framing as a serial port does, until it
+/// ends.
+pub(crate) async fn over<R, W>(
+    shared: &Arc<Shared>,
+    firmware: LoraFirmware,
+    reader: R,
+    writer: W,
+) -> Result<()>
 where
     R: AsyncRead + Unpin + Send + 'static,
     W: AsyncWrite + Unpin + Send + 'static,
@@ -367,7 +465,7 @@ where
         return Err(Error::Invalid("no LoRa device is chosen"));
     }
     let shared = Arc::downgrade(shared);
-    let result = session(&shared, stream_of(reader, writer)).await;
+    let result = session(&shared, stream_of(reader, writer), Some(firmware)).await;
     ended(&shared, &result);
     Ok(result?)
 }
@@ -433,7 +531,7 @@ where
     Stream { incoming, outgoing }
 }
 
-/// A serial port a Meshtastic device may be on.
+/// A serial port a LoRa device may be on.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoraPort {
@@ -517,15 +615,86 @@ fn open_serial(_path: &std::path::Path) -> io::Result<Stream> {
     ))
 }
 
+/// One connection: finds out what the device runs, unless platform code
+/// knows, then speaks its protocol until the connection ends.
+async fn session(
+    shared: &Weak<Shared>,
+    mut stream: Stream,
+    firmware: Option<LoraFirmware>,
+) -> io::Result<()> {
+    let firmware = match firmware {
+        Some(firmware) => firmware,
+        None => probe(&mut stream).await?,
+    };
+    if let Some(node) = shared.upgrade() {
+        node.lora.mtu.store(firmware.mtu(), Ordering::Relaxed);
+        lock(&node.lora.seen).firmware = Some(firmware);
+    }
+    match firmware {
+        LoraFirmware::Meshtastic => meshtastic_session(shared, stream).await,
+        LoraFirmware::MeshCore => meshcore_session(shared, stream).await,
+    }
+}
+
+/// Asks the device what it is as MeshCore's apps do; one that does not
+/// answer is taken for a Meshtastic device. MeshCore goes first: over TCP,
+/// a MeshCore device loses track of its frames when Meshtastic's come in,
+/// while a Meshtastic device skips what is not its own.
+async fn probe(stream: &mut Stream) -> io::Result<LoraFirmware> {
+    let ask = |stream: &Stream| {
+        stream
+            .outgoing
+            .send(meshcore::frame(&meshcore::app_start()))
+            .map_err(|_| io::Error::from(io::ErrorKind::BrokenPipe))
+    };
+    ask(stream)?;
+    let mut deframer = meshcore::Deframer::new(meshcore::FROM_DEVICE);
+    let mut again = Box::pin(tokio::time::sleep(PROBE_TIMEOUT / 2));
+    let mut asked_again = false;
+    let answered = tokio::time::timeout(PROBE_TIMEOUT, async {
+        loop {
+            tokio::select! {
+                bytes = stream.incoming.recv() => {
+                    let bytes = bytes.ok_or_else(|| io::Error::from(io::ErrorKind::UnexpectedEof))?;
+                    deframer.push(&bytes);
+                    while let Some(body) = deframer.next_frame() {
+                        if SelfInfo::parse(&body).is_some() {
+                            return Ok::<(), io::Error>(());
+                        }
+                    }
+                }
+                () = &mut again, if !asked_again => {
+                    asked_again = true;
+                    ask(stream)?;
+                }
+            }
+        }
+    })
+    .await;
+    match answered {
+        Ok(result) => result.map(|()| LoraFirmware::MeshCore),
+        Err(_) => Ok(LoraFirmware::Meshtastic),
+    }
+}
+
+/// Marks the link connected, so frames go out.
+fn now_connected(shared: &Weak<Shared>) {
+    if let Some(node) = shared.upgrade() {
+        node.lora.connected.store(true, Ordering::Relaxed);
+        node.emit(Event::LoraChanged { connected: true });
+    }
+}
+
 /// What the device reported about its radio.
 struct Radio {
     modulation: Modulation,
     hop_limit: u32,
 }
 
-/// One connection: asks for the configuration, then sends from the queue
-/// within the airtime budget and takes in the packets the device hears.
-async fn session(shared: &Weak<Shared>, mut stream: Stream) -> io::Result<()> {
+/// One connection to a Meshtastic device: asks for the configuration, then
+/// sends from the queue within the airtime budget and takes in the packets
+/// the device hears.
+async fn meshtastic_session(shared: &Weak<Shared>, mut stream: Stream) -> io::Result<()> {
     let send = |message: &ToRadio| {
         stream
             .outgoing
@@ -582,10 +751,7 @@ async fn session(shared: &Weak<Shared>, mut stream: Stream) -> io::Result<()> {
         Err(_) => return Err(io::Error::other("the device sent no configuration")),
     }
 
-    if let Some(node) = shared.upgrade() {
-        node.lora.connected.store(true, Ordering::Relaxed);
-        node.emit(Event::LoraChanged { connected: true });
-    }
+    now_connected(shared);
     let Some(wake) = shared.upgrade().map(|node| Arc::clone(&node.lora.wake)) else {
         return Ok(());
     };
@@ -659,28 +825,272 @@ fn note(shared: &Weak<Shared>, payload: from_radio::Payload) {
     }
 }
 
-/// Takes in a CarryChat frame the device heard. It is handled like a frame
-/// from any link, and passed on to every link but LoRa: the mesh already
-/// floods it there.
+/// Takes in a packet a Meshtastic device heard, if it carries CarryChat.
 fn take(shared: &Weak<Shared>, packet: MeshPacket) {
     let Some(mesh_packet::Payload::Decoded(data)) = packet.payload else {
         return;
     };
-    if data.portnum != meshtastic::PRIVATE_APP {
-        return;
+    if data.portnum == meshtastic::PRIVATE_APP {
+        take_frame(shared, &data.payload);
     }
+}
+
+/// Takes in a CarryChat frame the device heard. It is handled like a frame
+/// from any link, and passed on to every link but LoRa: the mesh already
+/// floods it there.
+fn take_frame(shared: &Weak<Shared>, bytes: &[u8]) {
     let Some(shared) = shared.upgrade() else {
         return;
     };
     // A frame that does not parse is skipped, as on every link; file chunks
     // never belong on LoRa.
-    let frame = match Frame::from_bytes(&data.payload) {
+    let frame = match Frame::from_bytes(bytes) {
         Ok(Frame::Chunk(_)) | Err(_) => return,
         Ok(frame) => frame,
     };
     lock(&shared.lora.seen).carrychat_at = Some(now());
     if let Ok(handled) = shared.handle(frame.clone()) {
         shared.dispatch_from_lora(handled, &frame);
+    }
+}
+
+/// A MeshCore device, asked one command at a time, with what it pushes
+/// meanwhile taken in.
+struct Companion {
+    shared: Weak<Shared>,
+    stream: Stream,
+    deframer: meshcore::Deframer,
+    /// The device said messages are waiting, or it is time to ask.
+    messages_waiting: bool,
+}
+
+impl Companion {
+    fn send(&self, body: &[u8]) -> io::Result<()> {
+        self.stream
+            .outgoing
+            .send(meshcore::frame(body))
+            .map_err(|_| io::Error::from(io::ErrorKind::BrokenPipe))
+    }
+
+    /// The next frame from the device, whatever it is.
+    async fn next_frame(&mut self) -> io::Result<Vec<u8>> {
+        loop {
+            if let Some(body) = self.deframer.next_frame() {
+                return Ok(body);
+            }
+            let bytes = self
+                .stream
+                .incoming
+                .recv()
+                .await
+                .ok_or_else(|| io::Error::from(io::ErrorKind::UnexpectedEof))?;
+            self.deframer.push(&bytes);
+        }
+    }
+
+    /// The device's next reply, taking in what it pushes before it.
+    async fn reply(&mut self) -> io::Result<Vec<u8>> {
+        tokio::time::timeout(REPLY_TIMEOUT, async {
+            loop {
+                let body = self.next_frame().await?;
+                if body[0] < meshcore::PUSH_FIRST {
+                    return Ok(body);
+                }
+                self.pushed(&body);
+            }
+        })
+        .await
+        .unwrap_or_else(|_| Err(io::Error::other("the device did not answer")))
+    }
+
+    async fn ask(&mut self, body: &[u8]) -> io::Result<Vec<u8>> {
+        self.send(body)?;
+        self.reply().await
+    }
+
+    /// Takes in what the device pushes: devices heard, and that messages
+    /// are waiting.
+    fn pushed(&mut self, body: &[u8]) {
+        let Some(node) = self.shared.upgrade() else {
+            return;
+        };
+        match body[0] {
+            meshcore::PUSH_MSG_WAITING => self.messages_waiting = true,
+            meshcore::PUSH_ADVERT if body.len() >= 33 => {
+                lock(&node.lora.seen).advert(meshcore::key_number(&body[1..33]), now());
+            }
+            meshcore::PUSH_NEW_ADVERT => {
+                if let Some(contact) = Contact::parse(body) {
+                    lock(&node.lora.seen).contact(&contact, now());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The slot of CarryChat's channel, which is added to the first free
+    /// slot if the device does not have it yet. None when every slot is
+    /// taken.
+    async fn carrychat_channel(&mut self, slots: u8) -> io::Result<Option<u8>> {
+        let secret = meshcore::channel_secret();
+        let mut free = None;
+        for index in 0..slots {
+            let reply = self.ask(&[meshcore::CMD_GET_CHANNEL, index]).await?;
+            let Some(channel) = meshcore::ChannelInfo::parse(&reply) else {
+                continue;
+            };
+            if channel.secret == secret {
+                return Ok(Some(index));
+            }
+            if channel.is_free() && free.is_none() {
+                free = Some(index);
+            }
+        }
+        let Some(index) = free else {
+            return Ok(None);
+        };
+        let reply = self
+            .ask(&meshcore::set_channel(
+                index,
+                meshcore::CHANNEL_NAME,
+                &secret,
+            ))
+            .await?;
+        Ok((reply[0] == meshcore::RESP_OK).then_some(index))
+    }
+
+    /// Takes in the devices the device knows.
+    async fn contacts(&mut self) -> io::Result<()> {
+        let reply = self.ask(&[meshcore::CMD_GET_CONTACTS]).await?;
+        if reply[0] != meshcore::RESP_CONTACTS_START {
+            return Ok(());
+        }
+        loop {
+            let reply = self.reply().await?;
+            let Some(contact) = Contact::parse(&reply) else {
+                return Ok(());
+            };
+            if let Some(node) = self.shared.upgrade() {
+                lock(&node.lora.seen).contact(&contact, now());
+            }
+        }
+    }
+
+    /// Fetches the messages waiting on the device and takes in CarryChat's
+    /// datagrams on `channel`. Other messages are meant for MeshCore's own
+    /// apps, and are dropped.
+    async fn sync(&mut self, channel: Option<u8>) -> io::Result<()> {
+        self.messages_waiting = false;
+        loop {
+            let reply = self.ask(&[meshcore::CMD_SYNC_NEXT_MESSAGE]).await?;
+            match reply[0] {
+                meshcore::RESP_NO_MORE_MESSAGES | meshcore::RESP_ERR => return Ok(()),
+                meshcore::RESP_CHANNEL_DATA => {
+                    let Some(data) = ChannelData::parse(&reply) else {
+                        continue;
+                    };
+                    if Some(data.channel) == channel && data.data_type == meshcore::DATA_TYPE {
+                        take_frame(&self.shared, &data.data);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// One connection to a MeshCore device: learns about it, sets its clock,
+/// finds or adds CarryChat's channel, then floods frames from the queue on
+/// it within the airtime budget and takes in the datagrams heard there.
+async fn meshcore_session(shared: &Weak<Shared>, stream: Stream) -> io::Result<()> {
+    let mut device = Companion {
+        shared: shared.clone(),
+        stream,
+        deframer: meshcore::Deframer::new(meshcore::FROM_DEVICE),
+        messages_waiting: true,
+    };
+    let info = device
+        .ask(&[meshcore::CMD_DEVICE_QUERY, meshcore::PROTOCOL_VERSION])
+        .await?;
+    let slots = meshcore::channel_count(&info);
+    let me = SelfInfo::parse(&device.ask(&meshcore::app_start()).await?)
+        .ok_or_else(|| io::Error::other("the device did not say what it is"))?;
+    let mut set_time = vec![meshcore::CMD_SET_DEVICE_TIME];
+    set_time.extend_from_slice(&now().to_le_bytes());
+    device.ask(&set_time).await?;
+    let channel = device.carrychat_channel(slots).await?;
+    if let Some(node) = shared.upgrade() {
+        let mut seen = lock(&node.lora.seen);
+        let key = meshcore::key_number(&me.public_key);
+        seen.me = Some(key);
+        seen.nodes.entry(key).or_default().name = Some(me.name.clone());
+        seen.radio = Some(me.radio());
+        seen.no_free_channel = channel.is_none();
+    }
+    device.contacts().await?;
+    let modulation = Modulation {
+        spread_factor: u32::from(me.spread_factor),
+        bandwidth_hz: me.bandwidth_hz,
+        coding_rate: u32::from(me.coding_rate.clamp(5, 8) - 4),
+    };
+
+    now_connected(shared);
+    let Some(wake) = shared.upgrade().map(|node| Arc::clone(&node.lora.wake)) else {
+        return Ok(());
+    };
+    let mut budget = Budget::new();
+    let mut sync = tokio::time::interval(SYNC_INTERVAL);
+    let mut contacts = tokio::time::interval(CONTACTS_INTERVAL);
+    contacts.tick().await;
+    loop {
+        if device.messages_waiting {
+            device.sync(channel).await?;
+            continue;
+        }
+        let Some(node) = shared.upgrade() else {
+            return Ok(());
+        };
+        let airtime = |len: usize| modulation.airtime(len + meshcore::OVERHEAD);
+        // Without CarryChat's channel, frames wait.
+        let next_len = channel.and(lock(&node.lora.queue).peek_len());
+        let wait = next_len.and_then(|len| budget.wait_for(airtime(len)));
+        let ready = next_len.is_some() && wait.is_none();
+        let packet = if ready {
+            lock(&node.lora.queue).next()
+        } else {
+            None
+        };
+        drop(node);
+        if let (Some(packet), Some(channel)) = (packet, channel) {
+            // Queued for a Meshtastic device before this one answered.
+            if packet.len() > meshcore::MTU {
+                continue;
+            }
+            let reply = device
+                .ask(&meshcore::send_channel_data(channel, &packet))
+                .await?;
+            if reply[..] == [meshcore::RESP_ERR, meshcore::ERR_TABLE_FULL] {
+                if let Some(node) = shared.upgrade() {
+                    lock(&node.lora.queue).put_back(packet);
+                }
+                tokio::time::sleep(BUSY_DELAY).await;
+            } else {
+                budget.spend(airtime(packet.len()));
+            }
+            continue;
+        }
+        tokio::select! {
+            body = device.next_frame() => {
+                let body = body?;
+                if body[0] >= meshcore::PUSH_FIRST {
+                    device.pushed(&body);
+                }
+            }
+            () = wake.notified() => {}
+            () = tokio::time::sleep(wait.unwrap_or_default()), if wait.is_some() => {}
+            _ = sync.tick() => device.messages_waiting = true,
+            _ = contacts.tick() => device.contacts().await?,
+        }
     }
 }
 

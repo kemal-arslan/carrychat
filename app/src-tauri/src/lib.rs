@@ -178,7 +178,7 @@ fn lora(state: State<'_, AppState>) -> CommandResult<LoraStatus> {
     Ok(state.node()?.lora())
 }
 
-/// Uses a Meshtastic device for LoRa, given as `tcp:host:port`, a serial
+/// Uses a Meshtastic or MeshCore device for LoRa, given as `tcp:host:port`, a serial
 /// port or `bluetooth:address`, or none.
 #[tauri::command]
 fn set_lora(state: State<'_, AppState>, device: Option<String>) -> CommandResult<()> {
@@ -189,7 +189,7 @@ fn set_lora(state: State<'_, AppState>, device: Option<String>) -> CommandResult
     state.node()?.set_lora(device).map_err(text)
 }
 
-/// USB serial ports a Meshtastic device may be on. Phones connect over
+/// USB serial ports a LoRa device may be on. Phones connect over
 /// Bluetooth instead.
 #[tauri::command]
 fn lora_ports() -> Vec<LoraPort> {
@@ -199,21 +199,22 @@ fn lora_ports() -> Vec<LoraPort> {
     Vec::new()
 }
 
-/// A Meshtastic device found over Bluetooth.
+/// A Meshtastic or MeshCore device found over Bluetooth.
 #[derive(Clone, serde::Serialize)]
 pub(crate) struct FoundDevice {
     pub address: String,
     pub name: Option<String>,
 }
 
-/// Starts looking for Meshtastic devices over Bluetooth, on a phone.
+/// Starts looking for Meshtastic and MeshCore devices over Bluetooth, on a
+/// phone.
 #[tauri::command]
 fn lora_scan() {
     #[cfg(target_os = "android")]
     android::lora_scan();
 }
 
-/// The Meshtastic devices found since the last `lora_scan`.
+/// The LoRa devices found since the last `lora_scan`.
 #[tauri::command]
 fn lora_found() -> Vec<FoundDevice> {
     #[cfg(target_os = "android")]

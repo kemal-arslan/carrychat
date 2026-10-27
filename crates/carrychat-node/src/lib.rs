@@ -28,7 +28,7 @@ pub use crate::error::{Error, Result};
 pub use crate::internet::{InternetConfig, TorState};
 pub use crate::journey::{Journey, Step, Via};
 pub use crate::lan::{LanConfig, LanProblem};
-pub use crate::lora::{LoraDevice, LoraNode, LoraPort, LoraStatus};
+pub use crate::lora::{LoraDevice, LoraFirmware, LoraNode, LoraPort, LoraStatus};
 pub use crate::nearby::NearbyPerson;
 use crate::store::Store;
 pub use crate::sync::Link;
@@ -207,7 +207,7 @@ pub struct Settings {
     pub bluetooth: bool,
     /// Whether people nearby who turned it on too can see us, and we them.
     pub nearby: bool,
-    /// The Meshtastic device chosen for LoRa: `tcp:host:port`, a serial port
+    /// The Meshtastic or MeshCore device chosen for LoRa: `tcp:host:port`, a serial port
     /// or `bluetooth:address`.
     pub lora_device: Option<String>,
 }
@@ -228,7 +228,7 @@ pub struct Status {
     pub bluetooth_radio: Option<bool>,
     /// Nodes connected over Wi-Fi Aware right now, phone to phone.
     pub wifi_aware_peers: usize,
-    /// Whether a Meshtastic device is connected for the LoRa link.
+    /// Whether a LoRa device is connected for the LoRa link.
     pub lora_connected: bool,
     /// Frames waiting for airtime on LoRa.
     pub lora_waiting: usize,
@@ -273,7 +273,7 @@ pub enum Event {
     },
     /// Someone nearby became visible, or went away.
     NearbyChanged { people: usize },
-    /// The Meshtastic device of the LoRa link connected or went away.
+    /// The device of the LoRa link connected or went away.
     LoraChanged { connected: bool },
     /// The contact read some of our messages.
     #[serde(rename_all = "camelCase")]
@@ -765,8 +765,8 @@ impl Node {
         lan::dial(&self.shared, addr, None).await
     }
 
-    /// Starts the LoRa link (§9.2) through a Meshtastic device, in place of
-    /// any other, connecting again whenever the connection ends.
+    /// Starts the LoRa link (§9.2) through a Meshtastic or MeshCore device,
+    /// in place of any other, connecting again whenever the connection ends.
     pub fn start_lora(&self, device: LoraDevice) -> Result<()> {
         lora::start(&self.shared, device)
     }
@@ -797,13 +797,14 @@ impl Node {
 
     /// Runs the LoRa link over a connection platform code made to the
     /// chosen device, such as Bluetooth LE on Android, carrying the stream
-    /// framing a serial port does. Returns when the connection ends.
-    pub async fn lora_over<R, W>(&self, reader: R, writer: W) -> Result<()>
+    /// framing a serial port does for `firmware`. Returns when the
+    /// connection ends.
+    pub async fn lora_over<R, W>(&self, firmware: LoraFirmware, reader: R, writer: W) -> Result<()>
     where
         R: tokio::io::AsyncRead + Unpin + Send + 'static,
         W: tokio::io::AsyncWrite + Unpin + Send + 'static,
     {
-        lora::over(&self.shared, reader, writer).await
+        lora::over(&self.shared, firmware, reader, writer).await
     }
 
     /// Starts looking for nearby nodes over Bluetooth LE and connecting to

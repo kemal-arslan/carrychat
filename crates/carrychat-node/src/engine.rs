@@ -549,8 +549,8 @@ impl Engine {
         })
     }
 
-    /// The Meshtastic device to use for LoRa, as `LoraDevice` writes it, or
-    /// none.
+    /// The Meshtastic or MeshCore device to use for LoRa, as `LoraDevice`
+    /// writes it, or none.
     pub fn set_lora_device(&self, device: Option<&str>) -> Result<()> {
         self.store
             .set_meta("lora_device", device.unwrap_or_default().as_bytes())

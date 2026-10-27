@@ -7,7 +7,7 @@ import { Sheet } from "./Sheet";
 /** How long a Bluetooth search runs on the phone. */
 const SEARCH_MS = 10_000;
 
-/** Choosing a Meshtastic device for LoRa, and what it hears once chosen. */
+/** Choosing a Meshtastic or MeshCore device for LoRa, and what it hears once chosen. */
 export function LoraSheet({ onClose }: { onClose: () => void }) {
   const { t } = useI18n();
   const [lora, setLora] = useState<LoraStatus | null>(null);
@@ -53,7 +53,7 @@ function Chosen({ lora, onForget }: { lora: LoraStatus; onForget: () => void }) 
           <span className="row-text">
             <b>{lora.name ?? t.loraDevice}</b>
             <span className={lora.connected ? "live" : undefined}>
-              {lora.connected ? t.loraConnected : t.stateConnecting}
+              {[lora.connected ? t.loraConnected : t.stateConnecting, lora.firmware].filter(Boolean).join(" · ")}
             </span>
           </span>
         </div>
@@ -62,6 +62,14 @@ function Chosen({ lora, onForget }: { lora: LoraStatus; onForget: () => void }) 
             <span className="row-text">
               <b>{t.loraRegion}</b>
               <span className={unset ? "trouble" : undefined}>{lora.region}</span>
+            </span>
+          </div>
+        )}
+        {lora.radio && (
+          <div className="row-item">
+            <span className="row-text">
+              <b>{t.loraRadio}</b>
+              <span>{lora.radio}</span>
             </span>
           </div>
         )}
@@ -75,8 +83,9 @@ function Chosen({ lora, onForget }: { lora: LoraStatus; onForget: () => void }) 
         )}
       </div>
       {unset && <p className="hint error">{t.loraRegionHint}</p>}
+      {lora.noFreeChannel && <p className="hint error">{t.loraNoFreeChannel}</p>}
       <p className="hint">{lora.carrychatAt === null ? t.loraCarryChatNever : t.loraCarryChatAt(ago(lora.carrychatAt))}</p>
-      <h2 className="group-label">{t.loraHeardTitle}</h2>
+      <h2 className="group-label">{t.loraHeardTitle(lora.heardWithin / 3600)}</h2>
       {lora.heard.length === 0 ? (
         <p className="hint">{t.loraNoneHeard}</p>
       ) : (
@@ -103,7 +112,7 @@ function Chosen({ lora, onForget }: { lora: LoraStatus; onForget: () => void }) 
 
 function Choose({ onChoose }: { onChoose: (device: string) => void }) {
   const { t } = useI18n();
-  // Phones reach Meshtastic devices over Bluetooth; computers over USB or the network.
+  // Phones reach LoRa devices over Bluetooth; computers over USB or the network.
   const phone = Boolean(window.CarryChatAndroid);
   return (
     <>
@@ -225,6 +234,7 @@ function Address({ onChoose }: { onChoose: (device: string) => void }) {
         onChange={(event) => setAddress(event.target.value)}
         placeholder="192.168.1.20:4403"
       />
+      <p className="hint">{t.loraPortHint}</p>
       <div className="dialog-actions">
         <button className="primary" disabled={address.trim() === ""}>
           {t.loraConnect}

@@ -99,8 +99,9 @@ enum Command {
         /// Also connect to nearby phones over Bluetooth LE.
         #[arg(long)]
         bluetooth: bool,
-        /// Also use a Meshtastic device for LoRa radio: its serial port, such
-        /// as /dev/cu.usbserial-0001, or tcp:host:port (meshtasticd: 4403).
+        /// Also use a Meshtastic or MeshCore device for LoRa radio: its serial
+        /// port, such as /dev/cu.usbserial-0001, or tcp:host:port (Meshtastic
+        /// and meshtasticd: 4403, MeshCore: 5000).
         #[arg(long, value_name = "DEVICE")]
         lora: Option<LoraDevice>,
         /// Send every line typed on standard input to this contact.

@@ -81,6 +81,7 @@ export function loraLabel(lora: LoraStatus | null, t: Strings): string {
   if (!lora?.device) return t.loraNoDevice;
   if (!lora.connected) return t.stateConnecting;
   if (lora.region === "UNSET") return t.loraNoRegion;
+  if (lora.noFreeChannel) return t.loraNoChannel;
   const heard = t.loraHeard(lora.heard.length);
   return lora.name ? `${lora.name} · ${heard}` : heard;
 }

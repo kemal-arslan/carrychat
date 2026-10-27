@@ -159,28 +159,36 @@ export type Settings = {
   tor: boolean;
   bluetooth: boolean;
   nearby: boolean;
-  /** The Meshtastic device chosen for LoRa: `tcp:host:port`, a serial port or `bluetooth:address`. */
+  /** The Meshtastic or MeshCore device chosen for LoRa: `tcp:host:port`, a serial port or `bluetooth:address`. */
   loraDevice: string | null;
 };
 
-/** A Meshtastic device the LoRa device heard. `at` is in seconds since the epoch. */
+/** A device the LoRa device heard. `at` is in seconds since the epoch. */
 export type LoraNode = { name: string; at: number; snr: number | null; hops: number | null };
 
-/** How the LoRa link stands. `region` "UNSET" means the device does not transmit. */
+/**
+ * How the LoRa link stands. A Meshtastic device has a `region`, and "UNSET" means it does not transmit; a
+ * MeshCore device has a `radio` setting, and `noFreeChannel` when CarryChat's channel could not be added.
+ * `heard` covers the last `heardWithin` seconds.
+ */
 export type LoraStatus = {
   device: string | null;
   connected: boolean;
+  firmware: "Meshtastic" | "MeshCore" | null;
   name: string | null;
   region: string | null;
+  radio: string | null;
+  noFreeChannel: boolean;
   waiting: number;
   heard: LoraNode[];
+  heardWithin: number;
   carrychatAt: number | null;
 };
 
-/** A USB serial port a Meshtastic device may be on. */
+/** A USB serial port a LoRa device may be on. */
 export type LoraPort = { path: string; label: string | null };
 
-/** A Meshtastic device found over Bluetooth. */
+/** A Meshtastic or MeshCore device found over Bluetooth. */
 export type FoundDevice = { address: string; name: string | null };
 
 /** How the internet link stands with Tor, when it goes over Tor. */
@@ -198,7 +206,7 @@ export type Status = {
   /** Whether this device's Bluetooth is on; null until the app knows. */
   bluetoothRadio: boolean | null;
   wifiAwarePeers: number;
-  /** Whether a Meshtastic device is connected for LoRa. */
+  /** Whether a LoRa device is connected. */
   loraConnected: boolean;
   /** Frames waiting for airtime on LoRa. */
   loraWaiting: number;
@@ -290,7 +298,7 @@ export interface Api {
   lora(): Promise<LoraStatus>;
   setLora(device: string | null): Promise<void>;
   loraPorts(): Promise<LoraPort[]>;
-  /** Starts looking for Meshtastic devices over Bluetooth, on a phone. */
+  /** Starts looking for Meshtastic and MeshCore devices over Bluetooth, on a phone. */
   loraScan(): Promise<void>;
   loraFound(): Promise<FoundDevice[]>;
   restart(): Promise<void>;
@@ -866,19 +874,26 @@ function previewApi(): Api {
     },
     async lora() {
       const device = settings.loraDevice;
+      const meshcore = device !== null && (device.endsWith(":5000") || device.includes("C8:2B:96"));
       return {
         device,
         connected: device !== null,
-        name: device === null ? null : "Meshtastic 3f2a",
-        region: device === null ? null : "EU_868",
+        firmware: device === null ? null : meshcore ? "MeshCore" : "Meshtastic",
+        name: device === null ? null : meshcore ? "Ayşe MeshCore" : "Meshtastic 3f2a",
+        region: device === null || meshcore ? null : "EU_868",
+        radio: meshcore ? "869.525 MHz, SF11, 250 kHz" : null,
+        noFreeChannel: false,
         waiting: 0,
         heard:
           device === null
             ? []
-            : [
-                { name: "Tepe röle", at: minutesAgo(4), snr: 6.25, hops: 0 },
-                { name: "Liman", at: minutesAgo(38), snr: -7.5, hops: 2 },
-              ],
+            : meshcore
+              ? [{ name: "Kale tekrarlayıcı", at: minutesAgo(95), snr: null, hops: 1 }]
+              : [
+                  { name: "Tepe röle", at: minutesAgo(4), snr: 6.25, hops: 0 },
+                  { name: "Liman", at: minutesAgo(38), snr: -7.5, hops: 2 },
+                ],
+        heardWithin: meshcore ? 48 * 60 * 60 : 3 * 60 * 60,
         carrychatAt: device === null ? null : minutesAgo(12),
       };
     },
@@ -891,7 +906,10 @@ function previewApi(): Api {
     },
     async loraScan() {},
     async loraFound() {
-      return [{ address: "D4:8A:FC:3F:2A:01", name: "Meshtastic_3f2a" }];
+      return [
+        { address: "D4:8A:FC:3F:2A:01", name: "Meshtastic_3f2a" },
+        { address: "C8:2B:96:0E:41:7A", name: "MeshCore-Ayse" },
+      ];
     },
     async restart() {
       location.reload();

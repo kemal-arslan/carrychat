@@ -17,7 +17,7 @@ CarryChat sends each message over the best link it has, and keeps it until one a
 | Local network | a building or a campus | the router works but the internet doesn't |
 | Bluetooth LE | a few dozen metres, further from phone to phone | there is no network at all |
 | Wi-Fi Aware | around a hundred metres, phone to phone, fast enough for photos | there is no router and no internet (Android phones that support it) |
-| LoRa radio ([Meshtastic](https://meshtastic.org)) | kilometres per hop, further over community relays | there is no internet at all |
+| LoRa radio ([Meshtastic](https://meshtastic.org) or [MeshCore](https://meshcore.io)) | kilometres per hop, further over community relays | there is no internet at all |
 | Internet ([Nostr](https://nostr.com) relays) | anywhere | normal days, or whenever one computer on the path is online |
 | File on a USB stick | as far as someone carries it | nothing else reaches |
 
@@ -57,7 +57,7 @@ Create your identity and give your card (**My card**, also as a QR code, under *
 
 **Be visible nearby**, on **People**, shows the people around you who turned it on too, over the local network, Bluetooth or Wi-Fi Aware, and lets you write to them without exchanging cards first. While it is off, no one nearby sees you and you see no one.
 
-**LoRa radio**, on **Network**, uses a [Meshtastic](https://meshtastic.org) device: a phone pairs with it over Bluetooth, a computer uses it over USB or the network. Once chosen, it shows the device's region and the Meshtastic devices it has heard in the last three hours, so you can tell whether a mesh is in range.
+**LoRa radio**, on **Network**, uses a [Meshtastic](https://meshtastic.org) or [MeshCore](https://meshcore.io) device: a phone pairs with it over Bluetooth, a computer uses it over USB or the network, and CarryChat finds out which kind it is. Once chosen, it shows the device's region or radio settings and the devices it has heard recently (three hours for Meshtastic, two days for MeshCore, whose repeaters announce themselves less often), so you can tell whether a mesh is in range. On a MeshCore device, CarryChat adds a `#carrychat` channel to a free slot.
 
 `npm run dev` opens the interface in a browser with sample data, without building the app.
 
@@ -75,7 +75,7 @@ carrychat save-file 3 photo.jpg                 # a file that arrived, by the nu
 carrychat run                                   # deliver, receive and relay (local network and internet)
 carrychat run --tor                             # the same, with the internet only over Tor
 carrychat run --bluetooth                       # also reach nearby phones over Bluetooth
-carrychat run --lora /dev/cu.usbserial-0001     # and LoRa through a Meshtastic device (or tcp:host:4403)
+carrychat run --lora /dev/cu.usbserial-0001     # and LoRa through a Meshtastic or MeshCore device (or tcp:host:port)
 carrychat export messages.carrychat                # or carry everything on a USB stick
 carrychat group create Mahalle Deniz Mehmet     # you become the group's admin
 carrychat group send Mahalle "Su dağıtımı okulun önünde."
@@ -94,7 +94,7 @@ carrychat erase --yes                           # delete identity, contacts and 
 
 1. **Protocol v0, reference implementation, test vectors** (done)
 2. **Local network link, message store, desktop app, command line, USB export and import** (done)
-3. **LoRa link through a Meshtastic radio** (written: the command line and the macOS app use a device over USB or TCP, the Android app over Bluetooth; it shows the region and the Meshtastic devices heard. Field tests come next)
+3. **LoRa link through a Meshtastic or MeshCore radio** (written: the command line and the macOS app use a device over USB or TCP, the Android app over Bluetooth; it shows the region or radio settings and the devices heard. Field tests come next)
 4. **Internet link over Nostr** (done). Computers with internet also pass on what they carry for computers without it. Fetching for those computers is still open.
 5. **Android app, Bluetooth and Wi-Fi Aware links, people nearby** (done; Wi-Fi Aware waits for a test between two phones). iOS app, HF radio
 
