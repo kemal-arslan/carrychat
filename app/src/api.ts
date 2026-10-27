@@ -154,7 +154,34 @@ export type Journey = {
   steps: { via: Via; count: number; at: number }[];
 };
 
-export type Settings = { readReceipts: boolean; tor: boolean; bluetooth: boolean; nearby: boolean };
+export type Settings = {
+  readReceipts: boolean;
+  tor: boolean;
+  bluetooth: boolean;
+  nearby: boolean;
+  /** The Meshtastic device chosen for LoRa: `tcp:host:port`, a serial port or `bluetooth:address`. */
+  loraDevice: string | null;
+};
+
+/** A Meshtastic device the LoRa device heard. `at` is in seconds since the epoch. */
+export type LoraNode = { name: string; at: number; snr: number | null; hops: number | null };
+
+/** How the LoRa link stands. `region` "UNSET" means the device does not transmit. */
+export type LoraStatus = {
+  device: string | null;
+  connected: boolean;
+  name: string | null;
+  region: string | null;
+  waiting: number;
+  heard: LoraNode[];
+  carrychatAt: number | null;
+};
+
+/** A USB serial port a Meshtastic device may be on. */
+export type LoraPort = { path: string; label: string | null };
+
+/** A Meshtastic device found over Bluetooth. */
+export type FoundDevice = { address: string; name: string | null };
 
 /** How the internet link stands with Tor, when it goes over Tor. */
 export type TorState = { state: "starting" } | { state: "ready" } | { state: "failed"; detail: string };
@@ -171,6 +198,10 @@ export type Status = {
   /** Whether this device's Bluetooth is on; null until the app knows. */
   bluetoothRadio: boolean | null;
   wifiAwarePeers: number;
+  /** Whether a Meshtastic device is connected for LoRa. */
+  loraConnected: boolean;
+  /** Frames waiting for airtime on LoRa. */
+  loraWaiting: number;
   internetOn: boolean;
   internetRelays: number;
   /** The last reason a relay gave for refusing an event. */
@@ -195,6 +226,7 @@ export type NodeEvent =
   | { type: "messagesRead"; contactId: number; messageIds: number[] }
   | { type: "contactChanged"; contact: Contact }
   | { type: "peersChanged"; lan: number; bluetooth: number; wifiAware: number }
+  | { type: "loraChanged"; connected: boolean }
   | { type: "nearbyChanged"; people: number }
   | { type: "contactRequest"; contact: Contact }
   | { type: "localNetworkChanged"; problem: LanProblem | null }
@@ -255,6 +287,12 @@ export interface Api {
   /** The people nearby who are visible, while we are. */
   nearby(): Promise<NearbyPerson[]>;
   wifiAware(): Promise<WifiAware>;
+  lora(): Promise<LoraStatus>;
+  setLora(device: string | null): Promise<void>;
+  loraPorts(): Promise<LoraPort[]>;
+  /** Starts looking for Meshtastic devices over Bluetooth, on a phone. */
+  loraScan(): Promise<void>;
+  loraFound(): Promise<FoundDevice[]>;
   restart(): Promise<void>;
   status(): Promise<Status>;
   /** Asks where to save, then exports. Returns null if cancelled. */
@@ -379,6 +417,11 @@ function desktopApi(): Api {
     setNearby: (on) => call("set_nearby", { on }),
     nearby: () => call("nearby"),
     wifiAware: () => call("wifi_aware"),
+    lora: () => call("lora"),
+    setLora: (device) => call("set_lora", { device }),
+    loraPorts: () => call("lora_ports"),
+    loraScan: () => call("lora_scan"),
+    loraFound: () => call("lora_found"),
     restart: () => call("restart"),
     status: () => call("status"),
     async exportFile() {
@@ -409,7 +452,8 @@ function previewApi(): Api {
   const listeners: ((event: NodeEvent) => void)[] = [];
   const emit = (event: NodeEvent) => listeners.forEach((listener) => listener(event));
   let profile: Profile | null = null;
-  let settings: Settings = { readReceipts: true, tor: false, bluetooth: true, nearby: false };
+  let settings: Settings = { readReceipts: true, tor: false, bluetooth: true, nearby: false, loraDevice: null };
+  const minutesAgo = (minutes: number) => Math.floor(Date.now() / 1000) - minutes * 60;
   // Who the preview shows nearby once it is visible.
   const nearbyPeople: NearbyPerson[] = [
     { session: "a1", name: "Elif", fingerprint: "q3rd 7kpa mx2c vuhe 4tzn 6wyb fo", card: "carrychat:elif", link: "bluetooth", contactId: null },
@@ -820,6 +864,35 @@ function previewApi(): Api {
     async wifiAware() {
       return "on";
     },
+    async lora() {
+      const device = settings.loraDevice;
+      return {
+        device,
+        connected: device !== null,
+        name: device === null ? null : "Meshtastic 3f2a",
+        region: device === null ? null : "EU_868",
+        waiting: 0,
+        heard:
+          device === null
+            ? []
+            : [
+                { name: "Tepe röle", at: minutesAgo(4), snr: 6.25, hops: 0 },
+                { name: "Liman", at: minutesAgo(38), snr: -7.5, hops: 2 },
+              ],
+        carrychatAt: device === null ? null : minutesAgo(12),
+      };
+    },
+    async setLora(device) {
+      settings = { ...settings, loraDevice: device };
+      emit({ type: "loraChanged", connected: device !== null });
+    },
+    async loraPorts() {
+      return [{ path: "/dev/cu.usbserial-0001", label: "CP2102 USB to UART Bridge Controller" }];
+    },
+    async loraScan() {},
+    async loraFound() {
+      return [{ address: "D4:8A:FC:3F:2A:01", name: "Meshtastic_3f2a" }];
+    },
     async restart() {
       location.reload();
     },
@@ -840,6 +913,8 @@ function previewApi(): Api {
         bluetoothPeers: settings.bluetooth ? 1 : 0,
         bluetoothRadio: true,
         wifiAwarePeers: 1,
+        loraConnected: settings.loraDevice !== null,
+        loraWaiting: 0,
         internetOn: true,
         internetRelays: 3,
         internetRefusal: null,

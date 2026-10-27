@@ -541,7 +541,19 @@ impl Engine {
             tor: self.store.meta("tor")?.as_deref() == Some(b"1".as_slice()),
             bluetooth: self.store.meta("bluetooth")?.as_deref() != Some(b"0".as_slice()),
             nearby: self.store.meta("nearby")?.as_deref() == Some(b"1".as_slice()),
+            lora_device: self
+                .store
+                .meta("lora_device")?
+                .and_then(|device| String::from_utf8(device).ok())
+                .filter(|device| !device.is_empty()),
         })
+    }
+
+    /// The Meshtastic device to use for LoRa, as `LoraDevice` writes it, or
+    /// none.
+    pub fn set_lora_device(&self, device: Option<&str>) -> Result<()> {
+        self.store
+            .set_meta("lora_device", device.unwrap_or_default().as_bytes())
     }
 
     /// Whether people nearby who are visible too can see us.

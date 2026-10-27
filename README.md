@@ -57,6 +57,8 @@ Create your identity and give your card (**My card**, also as a QR code, under *
 
 **Be visible nearby**, on **People**, shows the people around you who turned it on too, over the local network, Bluetooth or Wi-Fi Aware, and lets you write to them without exchanging cards first. While it is off, no one nearby sees you and you see no one.
 
+**LoRa radio**, on **Network**, uses a [Meshtastic](https://meshtastic.org) device: a phone pairs with it over Bluetooth, a computer uses it over USB or the network. Once chosen, it shows the device's region and the Meshtastic devices it has heard in the last three hours, so you can tell whether a mesh is in range.
+
 `npm run dev` opens the interface in a browser with sample data, without building the app.
 
 ### Command line
@@ -92,7 +94,7 @@ carrychat erase --yes                           # delete identity, contacts and 
 
 1. **Protocol v0, reference implementation, test vectors** (done)
 2. **Local network link, message store, desktop app, command line, USB export and import** (done)
-3. **LoRa link through a Meshtastic radio** (written: the command line uses a device over USB or TCP; field tests and the apps come next)
+3. **LoRa link through a Meshtastic radio** (written: the command line and the macOS app use a device over USB or TCP, the Android app over Bluetooth; it shows the region and the Meshtastic devices heard. Field tests come next)
 4. **Internet link over Nostr** (done). Computers with internet also pass on what they carry for computers without it. Fetching for those computers is still open.
 5. **Android app, Bluetooth and Wi-Fi Aware links, people nearby** (done; Wi-Fi Aware waits for a test between two phones). iOS app, HF radio
 

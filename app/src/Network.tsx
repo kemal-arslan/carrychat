@@ -1,6 +1,7 @@
 import {
   BluetoothIcon,
   CaretRightIcon,
+  CellTowerIcon,
   DevicesIcon,
   DownloadSimpleIcon,
   ExportIcon,
@@ -10,9 +11,10 @@ import {
   WifiHighIcon,
 } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
-import { api, type Status, type WifiAware } from "./api";
+import { api, type LoraStatus, type Status, type WifiAware } from "./api";
 import { useI18n } from "./i18n";
-import { bluetoothLabel, internetLabel, lanLabel, linkStates, wifiAwareLabel } from "./links";
+import { bluetoothLabel, internetLabel, lanLabel, linkStates, loraLabel, wifiAwareLabel } from "./links";
+import { LoraSheet } from "./LoraSheet";
 
 type Props = {
   status: Status | null;
@@ -34,10 +36,13 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
   const [error, setError] = useState<string | null>(null);
   // Only phones have Wi-Fi Aware; it can come and go with Wi-Fi.
   const [wifiAware, setWifiAware] = useState<WifiAware>(null);
+  const [lora, setLora] = useState<LoraStatus | null>(null);
+  const [loraOpen, setLoraOpen] = useState(false);
 
   useEffect(() => {
     api.wifiAware().then(setWifiAware);
-  }, [status]);
+    api.lora().then(setLora);
+  }, [status, loraOpen]);
 
   useEffect(() => {
     api.settings().then((settings) => {
@@ -130,6 +135,18 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
             </span>
           </div>
         )}
+        <button className="row-item" title={t.loraHint} onClick={() => setLoraOpen(true)}>
+          <span className="tile">
+            <CellTowerIcon size={20} />
+          </span>
+          <span className="row-text">
+            <b>{t.loraName}</b>
+            <span className={lora?.region === "UNSET" ? "trouble" : lora?.connected ? "live" : undefined}>
+              {loraLabel(lora, t)}
+            </span>
+          </span>
+          <CaretRightIcon className="go" size={16} weight="bold" />
+        </button>
         <div
           className="row-item"
           title={status?.internetTor?.state === "failed" ? status.internetTor.detail : (status?.internetRefusal ?? undefined)}
@@ -216,6 +233,7 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
         </>
       )}
       {preview && <p className="page-note preview-tag">{t.preview}</p>}
+      {loraOpen && <LoraSheet onClose={() => setLoraOpen(false)} />}
     </div>
   );
 }

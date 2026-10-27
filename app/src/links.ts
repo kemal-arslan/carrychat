@@ -1,4 +1,4 @@
-import type { Status, WifiAware } from "./api";
+import type { LoraStatus, Status, WifiAware } from "./api";
 import type { useI18n } from "./i18n";
 
 type Strings = ReturnType<typeof useI18n>["t"];
@@ -39,12 +39,14 @@ export function linkStates(status: Status | null) {
 /** One line for the top of the chat list: whether messages can leave right now. */
 export function summary(status: Status | null, t: Strings): { text: string; live: boolean; problem: boolean } {
   const { lan, internet, nearby } = linkStates(status);
+  const lora = status?.loraConnected ?? false;
   const parts: string[] = [];
   if (internet === "up") parts.push(t.summaryInternet);
-  else if (nearby > 0) parts.push(t.summaryNoInternet);
+  else if (nearby > 0 || lora) parts.push(t.summaryNoInternet);
   if (nearby > 0) parts.push(t.summaryNearby(nearby));
+  if (lora) parts.push(t.summaryLora);
   if (lan === "blocked" || lan === "failed") parts.push(t.summaryLanProblem);
-  const live = nearby > 0 || internet === "up";
+  const live = nearby > 0 || internet === "up" || lora;
   if (parts.length === 0) parts.push(t.summaryNothing);
   return { text: parts.join(" · "), live, problem: lan === "blocked" || lan === "failed" };
 }
@@ -73,6 +75,14 @@ export function wifiAwareLabel(state: WifiAware, status: Status | null, t: Strin
   if (state === "off") return t.wifiAwareOff;
   const peers = status?.wifiAwarePeers ?? 0;
   return peers > 0 ? t.nearbyCount(peers) : t.stateLooking;
+}
+
+export function loraLabel(lora: LoraStatus | null, t: Strings): string {
+  if (!lora?.device) return t.loraNoDevice;
+  if (!lora.connected) return t.stateConnecting;
+  if (lora.region === "UNSET") return t.loraNoRegion;
+  const heard = t.loraHeard(lora.heard.length);
+  return lora.name ? `${lora.name} · ${heard}` : heard;
 }
 
 export function internetLabel(state: InternetState, status: Status | null, t: Strings): string {

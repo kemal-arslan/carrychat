@@ -8,7 +8,8 @@ use std::sync::Mutex;
 
 use carrychat_node::{
     ChannelView, ContactView, GroupMessageView, GroupView, ImportReport, InternetConfig, Journey,
-    LanConfig, MessageView, MutedView, NearbyPerson, Node, PostView, Profile, Settings, Status,
+    LanConfig, LoraDevice, LoraPort, LoraStatus, MessageView, MutedView, NearbyPerson, Node,
+    PostView, Profile, Settings, Status,
 };
 use data_encoding::BASE64;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -50,7 +51,10 @@ pub(crate) fn start_links(node: &Node, dir: &Path, report: impl Fn(String) + Sen
             .then(|| dir.join("tor")),
         ..InternetConfig::default()
     };
-    let bluetooth = settings.is_none_or(|settings| settings.bluetooth);
+    let bluetooth = settings.as_ref().is_none_or(|settings| settings.bluetooth);
+    let lora = settings
+        .and_then(|settings| settings.lora_device)
+        .and_then(|device| device.parse::<LoraDevice>().ok());
     let node = node.clone();
     tauri::async_runtime::spawn(async move {
         if let Err(error) = node.start(LanConfig::default()).await {
@@ -68,6 +72,12 @@ pub(crate) fn start_links(node: &Node, dir: &Path, report: impl Fn(String) + Sen
         }
         #[cfg(target_os = "android")]
         android::set_bluetooth(&node, bluetooth);
+        // On Android the service connects a Bluetooth device, once chosen.
+        if let Some(device) = lora {
+            if let Err(error) = node.start_lora(device) {
+                report(format!("LoRa is off: {error}"));
+            }
+        }
     });
 }
 
@@ -161,6 +171,55 @@ fn wifi_aware() -> Option<&'static str> {
     return Some(android::wifi_aware());
     #[cfg(not(target_os = "android"))]
     None
+}
+
+#[tauri::command]
+fn lora(state: State<'_, AppState>) -> CommandResult<LoraStatus> {
+    Ok(state.node()?.lora())
+}
+
+/// Uses a Meshtastic device for LoRa, given as `tcp:host:port`, a serial
+/// port or `bluetooth:address`, or none.
+#[tauri::command]
+fn set_lora(state: State<'_, AppState>, device: Option<String>) -> CommandResult<()> {
+    let device = device
+        .map(|device| device.trim().parse::<LoraDevice>())
+        .transpose()
+        .map_err(text)?;
+    state.node()?.set_lora(device).map_err(text)
+}
+
+/// USB serial ports a Meshtastic device may be on. Phones connect over
+/// Bluetooth instead.
+#[tauri::command]
+fn lora_ports() -> Vec<LoraPort> {
+    #[cfg(not(target_os = "android"))]
+    return carrychat_node::lora::ports();
+    #[cfg(target_os = "android")]
+    Vec::new()
+}
+
+/// A Meshtastic device found over Bluetooth.
+#[derive(Clone, serde::Serialize)]
+pub(crate) struct FoundDevice {
+    pub address: String,
+    pub name: Option<String>,
+}
+
+/// Starts looking for Meshtastic devices over Bluetooth, on a phone.
+#[tauri::command]
+fn lora_scan() {
+    #[cfg(target_os = "android")]
+    android::lora_scan();
+}
+
+/// The Meshtastic devices found since the last `lora_scan`.
+#[tauri::command]
+fn lora_found() -> Vec<FoundDevice> {
+    #[cfg(target_os = "android")]
+    return android::lora_found();
+    #[cfg(not(target_os = "android"))]
+    Vec::new()
 }
 
 #[tauri::command]
@@ -553,6 +612,11 @@ pub fn run() {
             set_nearby,
             nearby,
             wifi_aware,
+            lora,
+            set_lora,
+            lora_ports,
+            lora_scan,
+            lora_found,
             erase_everything,
             messages,
             journey,

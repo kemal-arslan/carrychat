@@ -28,7 +28,7 @@ pub use crate::error::{Error, Result};
 pub use crate::internet::{InternetConfig, TorState};
 pub use crate::journey::{Journey, Step, Via};
 pub use crate::lan::{LanConfig, LanProblem};
-pub use crate::lora::LoraDevice;
+pub use crate::lora::{LoraDevice, LoraNode, LoraPort, LoraStatus};
 pub use crate::nearby::NearbyPerson;
 use crate::store::Store;
 pub use crate::sync::Link;
@@ -207,6 +207,9 @@ pub struct Settings {
     pub bluetooth: bool,
     /// Whether people nearby who turned it on too can see us, and we them.
     pub nearby: bool,
+    /// The Meshtastic device chosen for LoRa: `tcp:host:port`, a serial port
+    /// or `bluetooth:address`.
+    pub lora_device: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -762,10 +765,45 @@ impl Node {
         lan::dial(&self.shared, addr, None).await
     }
 
-    /// Starts the LoRa link (§9.2) through a Meshtastic device, connecting
-    /// again whenever the connection ends.
+    /// Starts the LoRa link (§9.2) through a Meshtastic device, in place of
+    /// any other, connecting again whenever the connection ends.
     pub fn start_lora(&self, device: LoraDevice) -> Result<()> {
         lora::start(&self.shared, device)
+    }
+
+    /// Uses `device` for LoRa from now on, or none, and keeps the choice
+    /// for the next start, which reads it from the settings.
+    pub fn set_lora(&self, device: Option<LoraDevice>) -> Result<()> {
+        let text = device.as_ref().map(ToString::to_string);
+        self.shared.engine().set_lora_device(text.as_deref())?;
+        match device {
+            Some(device) => lora::start(&self.shared, device),
+            None => {
+                lora::stop(&self.shared);
+                Ok(())
+            }
+        }
+    }
+
+    /// The device in use for LoRa, if any.
+    pub fn lora_device(&self) -> Option<LoraDevice> {
+        self.shared.lora.device()
+    }
+
+    /// How the LoRa link stands: the device, its region and what it hears.
+    pub fn lora(&self) -> LoraStatus {
+        self.shared.lora.status(now())
+    }
+
+    /// Runs the LoRa link over a connection platform code made to the
+    /// chosen device, such as Bluetooth LE on Android, carrying the stream
+    /// framing a serial port does. Returns when the connection ends.
+    pub async fn lora_over<R, W>(&self, reader: R, writer: W) -> Result<()>
+    where
+        R: tokio::io::AsyncRead + Unpin + Send + 'static,
+        W: tokio::io::AsyncWrite + Unpin + Send + 'static,
+    {
+        lora::over(&self.shared, reader, writer).await
     }
 
     /// Starts looking for nearby nodes over Bluetooth LE and connecting to

@@ -11,6 +11,8 @@ pub const START2: u8 = 0xC3;
 pub const MAX_PACKET_LEN: usize = 512;
 /// `PortNum.PRIVATE_APP`, which CarryChat uses until it has a number of its own.
 pub const PRIVATE_APP: i32 = 256;
+/// `PortNum.NODEINFO_APP`: a device announcing its `User`.
+pub const NODEINFO_APP: i32 = 4;
 pub const BROADCAST: u32 = 0xffff_ffff;
 /// Payload bytes of one Meshtastic packet (`DATA_PAYLOAD_LEN`).
 pub const MTU: usize = 233;
@@ -39,7 +41,7 @@ pub mod to_radio {
 pub struct FromRadio {
     #[prost(uint32, tag = "1")]
     pub id: u32,
-    #[prost(oneof = "from_radio::Payload", tags = "2, 3, 5, 7")]
+    #[prost(oneof = "from_radio::Payload", tags = "2, 3, 4, 5, 7")]
     pub payload: Option<from_radio::Payload>,
 }
 
@@ -50,6 +52,9 @@ pub mod from_radio {
         Packet(super::MeshPacket),
         #[prost(message, tag = "3")]
         MyInfo(super::MyNodeInfo),
+        /// A device the device knows of, itself included.
+        #[prost(message, tag = "4")]
+        NodeInfo(super::NodeInfo),
         #[prost(message, tag = "5")]
         Config(super::Config),
         #[prost(uint32, tag = "7")]
@@ -69,8 +74,18 @@ pub struct MeshPacket {
     pub payload: Option<mesh_packet::Payload>,
     #[prost(fixed32, tag = "6")]
     pub id: u32,
+    /// When the device received it, in seconds since the epoch by its clock.
+    #[prost(fixed32, tag = "7")]
+    pub rx_time: u32,
+    #[prost(float, tag = "8")]
+    pub rx_snr: f32,
     #[prost(uint32, tag = "9")]
     pub hop_limit: u32,
+    #[prost(int32, tag = "12")]
+    pub rx_rssi: i32,
+    /// The hop limit it was sent with, so it took `hop_start - hop_limit` hops.
+    #[prost(uint32, tag = "15")]
+    pub hop_start: u32,
 }
 
 pub mod mesh_packet {
@@ -102,6 +117,31 @@ pub struct MyNodeInfo {
 }
 
 #[derive(Clone, PartialEq, Message)]
+pub struct NodeInfo {
+    #[prost(uint32, tag = "1")]
+    pub num: u32,
+    #[prost(message, optional, tag = "2")]
+    pub user: Option<User>,
+    #[prost(float, tag = "4")]
+    pub snr: f32,
+    /// When it was last heard, in seconds since the epoch by the device's clock.
+    #[prost(fixed32, tag = "5")]
+    pub last_heard: u32,
+    #[prost(uint32, optional, tag = "9")]
+    pub hops_away: Option<u32>,
+}
+
+#[derive(Clone, PartialEq, Message)]
+pub struct User {
+    #[prost(string, tag = "1")]
+    pub id: String,
+    #[prost(string, tag = "2")]
+    pub long_name: String,
+    #[prost(string, tag = "3")]
+    pub short_name: String,
+}
+
+#[derive(Clone, PartialEq, Message)]
 pub struct Config {
     #[prost(oneof = "config::Payload", tags = "6")]
     pub payload: Option<config::Payload>,
@@ -129,17 +169,37 @@ pub struct LoRaConfig {
     /// The denominator of the coding rate: 5 to 8 for 4/5 to 4/8.
     #[prost(uint32, tag = "5")]
     pub coding_rate: u32,
+    /// `RegionCode`: where the device may transmit; 0 is unset, and then it does not.
+    #[prost(int32, tag = "7")]
+    pub region: i32,
     #[prost(uint32, tag = "8")]
     pub hop_limit: u32,
 }
 
+/// The name of a `RegionCode`, as Meshtastic's apps show it.
+pub fn region_name(region: i32) -> String {
+    const NAMES: [&str; 16] = [
+        "UNSET", "US", "EU_433", "EU_868", "CN", "JP", "ANZ", "KR", "TW", "RU", "IN", "NZ_865",
+        "TH", "LORA_24", "UA_433", "UA_868",
+    ];
+    usize::try_from(region)
+        .ok()
+        .and_then(|index| NAMES.get(index))
+        .map_or_else(|| format!("region {region}"), |name| (*name).to_owned())
+}
+
 /// Wraps a message in the stream framing.
 pub fn frame<M: Message>(message: &M) -> Vec<u8> {
-    let body = message.encode_to_vec();
+    frame_body(&message.encode_to_vec())
+}
+
+/// Wraps an encoded message in the stream framing, for a link such as
+/// Bluetooth that carries messages one by one, unframed.
+pub fn frame_body(body: &[u8]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(4 + body.len());
     bytes.extend_from_slice(&[START1, START2]);
     bytes.extend_from_slice(&(body.len() as u16).to_be_bytes());
-    bytes.extend_from_slice(&body);
+    bytes.extend_from_slice(body);
     bytes
 }
 

@@ -1,6 +1,6 @@
 import {
   BluetoothIcon,
-  BroadcastIcon,
+  CellTowerIcon,
   DevicesIcon,
   GlobeSimpleIcon,
   UsbIcon,
@@ -14,7 +14,7 @@ const ICONS: Record<Via, Icon> = {
   bluetooth: BluetoothIcon,
   wifiAware: DevicesIcon,
   internet: GlobeSimpleIcon,
-  lora: BroadcastIcon,
+  lora: CellTowerIcon,
   file: UsbIcon,
 };
 

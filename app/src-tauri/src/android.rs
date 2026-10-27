@@ -12,13 +12,16 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
-use carrychat_node::{Event, FileView, Link, Node};
+use carrychat_node::lora::meshtastic::{frame_body, Deframer};
+use carrychat_node::{Event, FileView, Link, LoraDevice, Node};
 use jni::objects::{GlobalRef, JByteArray, JClass, JObject, JString, JValue};
-use jni::sys::{jboolean, jbyteArray, jint, JNI_FALSE, JNI_TRUE};
+use jni::sys::{jboolean, jbyteArray, jint, jstring, JNI_FALSE, JNI_TRUE};
 use jni::{JNIEnv, JavaVM};
 use tauri::{AppHandle, Manager, RunEvent, WebviewWindowBuilder};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
+
+use crate::FoundDevice;
 
 static APP: OnceLock<AppHandle> = OnceLock::new();
 
@@ -595,3 +598,167 @@ bridge_entry_points!(
     Java_dev_kemalarslan_carrychat_Aware_received,
     Java_dev_kemalarslan_carrychat_Aware_closed
 );
+
+/// The Kotlin side of LoRa over Bluetooth LE: `Lora`, which connects to the
+/// Meshtastic device chosen and moves its messages one by one, unframed.
+static LORA: OnceLock<(JavaVM, GlobalRef)> = OnceLock::new();
+/// The device's messages, framed, to the LoRa link while it runs.
+static LORA_INCOMING: Mutex<Option<mpsc::UnboundedSender<Vec<u8>>>> = Mutex::new(None);
+/// Meshtastic devices the last scan found.
+static LORA_FOUND: Mutex<Vec<FoundDevice>> = Mutex::new(Vec::new());
+
+/// `Lora.device()`: the Bluetooth address of the device chosen, or null.
+#[no_mangle]
+pub extern "system" fn Java_dev_kemalarslan_carrychat_Lora_device(
+    env: JNIEnv,
+    class: JClass,
+) -> jstring {
+    if LORA.get().is_none() {
+        if let (Ok(vm), Ok(class)) = (env.get_java_vm(), env.new_global_ref(&class)) {
+            let _ = LORA.set((vm, class));
+        }
+    }
+    let address =
+        lock(&NODE)
+            .as_ref()
+            .and_then(Node::lora_device)
+            .and_then(|device| match device {
+                LoraDevice::Bluetooth(address) => Some(address),
+                _ => None,
+            });
+    address
+        .and_then(|address| env.new_string(address).ok())
+        .map_or(std::ptr::null_mut(), JString::into_raw)
+}
+
+/// `Lora.opened()`: connected to the device. The link runs over the
+/// connection until either side ends it.
+#[no_mangle]
+pub extern "system" fn Java_dev_kemalarslan_carrychat_Lora_opened(_env: JNIEnv, _class: JClass) {
+    let Some(node) = lock(&NODE).clone() else {
+        lora_call("close");
+        return;
+    };
+    let (incoming, mut received) = mpsc::unbounded_channel::<Vec<u8>>();
+    *lock(&LORA_INCOMING) = Some(incoming);
+    let (lora_end, link_end) = tokio::io::duplex(BUFFER_LEN);
+    let (lora_reader, lora_writer) = tokio::io::split(lora_end);
+    let (mut link_reader, mut link_writer) = tokio::io::split(link_end);
+    tauri::async_runtime::spawn(async move {
+        let incoming = tauri::async_runtime::spawn(async move {
+            while let Some(bytes) = received.recv().await {
+                if link_writer.write_all(&bytes).await.is_err() {
+                    break;
+                }
+            }
+            let _ = link_writer.shutdown().await;
+        });
+        // The link writes framed messages; the device takes them one by one.
+        let outgoing = tauri::async_runtime::spawn(async move {
+            let mut deframer = Deframer::default();
+            let mut buffer = vec![0; SEND_LEN];
+            while let Ok(len @ 1..) = link_reader.read(&mut buffer).await {
+                deframer.push(&buffer[..len]);
+                while let Some(body) = deframer.next_frame() {
+                    lora_send(&body);
+                }
+            }
+        });
+        if let Err(error) = node.lora_over(lora_reader, lora_writer).await {
+            eprintln!("LoRa over Bluetooth: {error}");
+        }
+        incoming.abort();
+        outgoing.abort();
+        lock(&LORA_INCOMING).take();
+        lora_call("close");
+    });
+}
+
+/// `Lora.received(data)`: one message from the device.
+#[no_mangle]
+pub extern "system" fn Java_dev_kemalarslan_carrychat_Lora_received(
+    env: JNIEnv,
+    _class: JClass,
+    data: JByteArray,
+) {
+    let Ok(body) = env.convert_byte_array(&data) else {
+        return;
+    };
+    if let Some(incoming) = lock(&LORA_INCOMING).as_ref() {
+        let _ = incoming.send(frame_body(&body));
+    }
+}
+
+/// `Lora.closed()`: the connection to the device ended, so the link reads
+/// the end of its stream.
+#[no_mangle]
+pub extern "system" fn Java_dev_kemalarslan_carrychat_Lora_closed(_env: JNIEnv, _class: JClass) {
+    lock(&LORA_INCOMING).take();
+}
+
+/// `Lora.found(address, name)`: a Meshtastic device the scan found.
+#[no_mangle]
+pub extern "system" fn Java_dev_kemalarslan_carrychat_Lora_found(
+    mut env: JNIEnv,
+    _class: JClass,
+    address: JString,
+    name: JString,
+) {
+    let Ok(address) = env.get_string(&address).map(String::from) else {
+        return;
+    };
+    let name = if name.is_null() {
+        None
+    } else {
+        env.get_string(&name).ok().map(String::from)
+    };
+    let mut found = lock(&LORA_FOUND);
+    match found.iter_mut().find(|device| device.address == address) {
+        Some(device) => device.name = name.or(device.name.take()),
+        None => found.push(FoundDevice { address, name }),
+    }
+}
+
+/// Looks for Meshtastic devices over Bluetooth for a few seconds.
+pub fn lora_scan() {
+    lock(&LORA_FOUND).clear();
+    lora_call("scan");
+}
+
+pub fn lora_found() -> Vec<FoundDevice> {
+    lock(&LORA_FOUND).clone()
+}
+
+/// `Lora.send(data)`: one message for the device.
+fn lora_send(body: &[u8]) {
+    let Some((vm, class)) = LORA.get() else {
+        return;
+    };
+    let Ok(mut env) = vm.attach_current_thread_as_daemon() else {
+        return;
+    };
+    let Ok(data) = env.byte_array_from_slice(body) else {
+        return;
+    };
+    let class: &JClass = class.as_obj().into();
+    if env
+        .call_static_method(class, "send", "([B)V", &[JValue::Object(&data)])
+        .is_err()
+    {
+        let _ = env.exception_clear();
+    }
+}
+
+/// Calls a static `Lora` method that takes nothing.
+fn lora_call(method: &str) {
+    let Some((vm, class)) = LORA.get() else {
+        return;
+    };
+    let Ok(mut env) = vm.attach_current_thread_as_daemon() else {
+        return;
+    };
+    let class: &JClass = class.as_obj().into();
+    if env.call_static_method(class, method, "()V", &[]).is_err() {
+        let _ = env.exception_clear();
+    }
+}
