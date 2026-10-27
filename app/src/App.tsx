@@ -104,6 +104,24 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
   groupsRef.current = groups;
   const selectedChannelRef = useRef(selectedChannel);
   selectedChannelRef.current = selectedChannel;
+
+  // A conversation's history, shown only if that conversation is still open when it arrives: an answer for
+  // one left quickly can come after the next one's.
+  const loadMessages = useCallback((contactId: number) => {
+    api.messages(contactId).then((messages) => {
+      if (selectedRef.current === contactId) setMessages(messages);
+    });
+  }, []);
+  const loadGroupMessages = useCallback((groupId: number) => {
+    api.groupMessages(groupId).then((messages) => {
+      if (selectedGroupRef.current === groupId) setGroupMessages(messages);
+    });
+  }, []);
+  const loadPosts = useCallback((channelId: number) => {
+    api.posts(channelId).then((posts) => {
+      if (selectedChannelRef.current === channelId) setPosts(posts);
+    });
+  }, []);
   const channelsRef = useRef(channels);
   channelsRef.current = channels;
   const tRef = useRef(t);
@@ -218,21 +236,21 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
 
   useEffect(() => {
     if (selectedChannel === null) return;
-    api.posts(selectedChannel).then(setPosts);
+    loadPosts(selectedChannel);
     markSelectedRead();
-  }, [selectedChannel, markSelectedRead]);
+  }, [selectedChannel, markSelectedRead, loadPosts]);
 
   useEffect(() => {
     if (selectedGroup === null) return;
-    api.groupMessages(selectedGroup).then(setGroupMessages);
+    loadGroupMessages(selectedGroup);
     markSelectedRead();
-  }, [selectedGroup, markSelectedRead]);
+  }, [selectedGroup, markSelectedRead, loadGroupMessages]);
 
   useEffect(() => {
     if (selected === null) return;
-    api.messages(selected).then(setMessages);
+    loadMessages(selected);
     markSelectedRead();
-  }, [selected, markSelectedRead]);
+  }, [selected, markSelectedRead, loadMessages]);
 
   useEffect(() => {
     const stops = [
@@ -265,7 +283,7 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
           refreshNearby();
         } else if (event.type === "messageMoved") {
           // A message left by a new link: its bubble shows the link.
-          if (event.contactId === selectedRef.current) api.messages(event.contactId).then(setMessages);
+          if (event.contactId === selectedRef.current) loadMessages(event.contactId);
         } else if (event.type === "messagesRead") {
           const read = new Set(event.messageIds);
           setMessages((current) =>
@@ -359,7 +377,7 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
   async function unmute(channelId: number, author: string, nick: string) {
     try {
       await api.unmuteAuthor(channelId, author);
-      if (selectedChannelRef.current === channelId) api.posts(channelId).then(setPosts);
+      if (selectedChannelRef.current === channelId) loadPosts(channelId);
       refreshChannels();
       show(t.unmuted(nick));
     } catch (error) {
@@ -477,9 +495,9 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
       refreshGroups();
       refreshChannels();
       refreshStatus();
-      if (selected !== null) api.messages(selected).then(setMessages);
-      if (selectedChannel !== null) api.posts(selectedChannel).then(setPosts);
-      if (selectedGroup !== null) api.groupMessages(selectedGroup).then(setGroupMessages);
+      if (selected !== null) loadMessages(selected);
+      if (selectedChannel !== null) loadPosts(selectedChannel);
+      if (selectedGroup !== null) loadGroupMessages(selectedGroup);
     } catch (error) {
       show(String(error));
     }
@@ -685,14 +703,14 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
           onClose={() => setDialog(null)}
           onChanged={refreshChannels}
           onUnmuted={(nick) => {
-            api.posts(channel.id).then(setPosts);
+            loadPosts(channel.id);
             refreshChannels();
             show(t.unmuted(nick));
           }}
           onShared={() => {
             setDialog(null);
             show(t.cardShared);
-            api.posts(channel.id).then(setPosts);
+            loadPosts(channel.id);
             refreshStatus();
           }}
           onLeft={() => {

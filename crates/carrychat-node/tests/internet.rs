@@ -426,3 +426,43 @@ async fn a_carried_bundle_a_relay_refused_goes_up_again() {
     };
     assert_eq!(post.body, "Su okulda");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_member_online_passes_on_a_post_it_took_from_another_link() {
+    let (url, relay, _) = start_relay().await;
+    let alice = node("alice");
+    let bob = node("bob");
+    let carol = node("carol");
+    let alice_channel = alice.node.join_channel("mahalle", "", "Ayşe").unwrap();
+    bob.node.join_channel("mahalle", "", "Bora").unwrap();
+    carol.node.join_channel("mahalle", "", "Ceren").unwrap();
+    let mut bob_events = bob.node.subscribe();
+    let mut carol_events = carol.node.subscribe();
+    bob.node.start_internet(config(&url)).unwrap();
+    carol.node.start_internet(config(&url)).unwrap();
+    next_event(&mut carol_events, |event| {
+        matches!(event, Event::InternetChanged { relays: 1.. })
+    })
+    .await;
+
+    // Alice has no internet. Her post reaches Carol, who is in the channel
+    // too and online, on a USB stick; Carol passes it on at once.
+    alice
+        .node
+        .send_post(alice_channel.id, "Köprü kapandı")
+        .unwrap();
+    let file = alice._dir.path().join("post.carrychat");
+    alice.node.export_file(&file).unwrap();
+    carol.node.import_file(&file).unwrap();
+    let Event::PostReceived { post } = next_event(&mut bob_events, |event| {
+        matches!(event, Event::PostReceived { .. })
+    })
+    .await
+    else {
+        unreachable!()
+    };
+    assert_eq!(post.body, "Köprü kapandı");
+    // Bob, in the channel too, does not post back what came from the relay.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(relay.lock().unwrap().len(), 1);
+}

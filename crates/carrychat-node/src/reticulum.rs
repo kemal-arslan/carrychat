@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
+use carrychat_proto::bundle::BundleId;
 use carrychat_proto::frame::{frames_for, Frame};
 use serde::Serialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -110,6 +111,10 @@ pub(crate) struct Reticulum {
     queue: Mutex<Queue>,
     wake: Arc<Notify>,
     seen: Mutex<Seen>,
+    /// When each of our own bundles and tombstones last went out to the
+    /// destinations heard. One that announces itself again may have been
+    /// away, and missed those sent since it last did.
+    sent: Mutex<HashMap<BundleId, u32>>,
 }
 
 impl Reticulum {
@@ -122,6 +127,7 @@ impl Reticulum {
             queue: Mutex::default(),
             wake: Arc::new(Notify::new()),
             seen: Mutex::default(),
+            sent: Mutex::default(),
         }
     }
 
@@ -181,6 +187,18 @@ impl Reticulum {
         }
         self.wake.notify_one();
         self.connected() && !self.peers(now()).is_empty()
+    }
+
+    /// Notes that `packet`, one of our own, went out at `at`. Only what went
+    /// out lately is kept: a destination not heard for longer gets all that
+    /// waits anyway.
+    fn note_sent(&self, packet: &[u8], at: u32) {
+        let Some(id) = crate::packet_id(packet) else {
+            return;
+        };
+        let mut sent = lock(&self.sent);
+        sent.insert(id, at);
+        sent.retain(|_, when| at.saturating_sub(*when) <= PEER_WITHIN_SECS);
     }
 
     /// The CarryChat destinations announced lately.
@@ -379,7 +397,12 @@ async fn session(
         if !peers.is_empty() {
             let frame = shared.upgrade().and_then(|node| {
                 let mut queue = lock(&node.reticulum.queue);
-                queue.own.pop_front().or_else(|| queue.carried.pop_front())
+                let Some(own) = queue.own.pop_front() else {
+                    return queue.carried.pop_front();
+                };
+                drop(queue);
+                node.reticulum.note_sent(&own, now());
+                Some(own)
             });
             if let Some(frame) = frame {
                 for peer in &peers {
@@ -473,24 +496,34 @@ fn take(
             let at = now();
             let new = !seen.peers.contains_key(&announce.destination);
             // Not heard in this run yet, or not lately: it may have missed
-            // what we sent meanwhile, or before the link started.
-            let fresh = seen
+            // all that waits, sent meanwhile or before the link started.
+            // Heard lately, it may still have been away since it last
+            // announced itself, and missed what was sent since.
+            let missed_since = seen
                 .peers
                 .get(&announce.destination)
-                .is_none_or(|peer| at.saturating_sub(peer.at) > PEER_WITHIN_SECS);
+                .map(|peer| peer.at)
+                .filter(|last| at.saturating_sub(*last) <= PEER_WITHIN_SECS);
             let destination = announce.destination;
             seen.peers.insert(destination, Peer { announce, at });
             let packed = new.then(|| pack_peers(&seen.peers));
             drop(seen);
-            if fresh {
-                let pending = node.engine().pending_own(at, PENDING_RECEIPTS);
-                let mut queue = lock(&node.reticulum.queue);
-                for frame in pending.unwrap_or_default() {
+            let pending = node.engine().pending_own(at, PENDING_RECEIPTS);
+            let sent = lock(&node.reticulum.sent).clone();
+            let mut queue = lock(&node.reticulum.queue);
+            for frame in pending.unwrap_or_default() {
+                let missed = missed_since.is_none_or(|last| {
+                    crate::frame_id(&frame)
+                        .and_then(|id| sent.get(&id))
+                        .is_some_and(|when| *when >= last)
+                });
+                if missed {
                     for packet in packets(&frame) {
                         queue.backlog.push_back((destination, packet));
                     }
                 }
             }
+            drop(queue);
             node.reticulum.wake.notify_one();
             match packed {
                 Some(packed) => {

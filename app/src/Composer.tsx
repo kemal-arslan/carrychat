@@ -41,6 +41,8 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
   // Counts the conversations this composer has left, so a microphone that
   // finishes opening after the move knows it is too late.
   const left = useRef(0);
+  // The microphone is opening for a recording.
+  const opening = useRef(false);
 
   // A recording belongs to the conversation it started in: moving to another
   // one, or leaving, throws it away and turns the microphone off, so it can
@@ -98,6 +100,9 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
   }
 
   async function record() {
+    // A second press while the microphone opens would start a recording that nothing shows or stops.
+    if (opening.current || recordingRef.current) return;
+    opening.current = true;
     setError(null);
     const here = left.current;
     try {
@@ -111,6 +116,8 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
       setRecording({ ...started, started: Date.now() });
     } catch {
       setError(t.micDenied);
+    } finally {
+      opening.current = false;
     }
   }
 

@@ -21,6 +21,14 @@ type Air = Arc<Mutex<Vec<(u32, Vec<u8>)>>>;
 
 /// Starts the radio. Devices are numbered 1, 2, 3… in the order they connect.
 async fn start_radio() -> (LoraDevice, Air) {
+    start_flaky_radio(0).await
+}
+
+/// Starts a radio that loses the first `drops` packets devices send, and
+/// the connection to each device that sent one, as when a Bluetooth link
+/// fails while a packet is on its way.
+async fn start_flaky_radio(drops: usize) -> (LoraDevice, Air) {
+    let drops = Arc::new(Mutex::new(drops));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let device = LoraDevice::Tcp(listener.local_addr().unwrap().to_string());
     let air: Air = Arc::default();
@@ -33,6 +41,7 @@ async fn start_radio() -> (LoraDevice, Air) {
             let me = number;
             let waves = waves.clone();
             let log = log.clone();
+            let drops = drops.clone();
             tokio::spawn(async move {
                 let (mut reader, mut writer) = stream.into_split();
                 let mut heard = waves.subscribe();
@@ -52,6 +61,15 @@ async fn start_radio() -> (LoraDevice, Air) {
                                         }
                                     }
                                     Some(to_radio::Payload::Packet(packet)) => {
+                                        let lost = {
+                                            let mut left = drops.lock().unwrap();
+                                            let lost = *left > 0;
+                                            *left = left.saturating_sub(1);
+                                            lost
+                                        };
+                                        if lost {
+                                            return;
+                                        }
                                         if let Some(mesh_packet::Payload::Decoded(data)) = &packet.payload {
                                             log.lock().unwrap().push((me, data.payload.clone()));
                                         }
@@ -326,4 +344,31 @@ async fn a_message_written_before_the_device_connected_goes_out() {
         unreachable!()
     };
     assert_eq!(message.body, "Telsiz bağlanmadan yazıldı");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_lost_as_the_connection_drops_goes_out_once_it_is_back() {
+    let (device, _air) = start_flaky_radio(1).await;
+    let alice = node("alice");
+    let bob = node("bob");
+    let bob_id = alice.node.add_contact(&bob.node.profile().card).unwrap().id;
+    bob.node.add_contact(&alice.node.profile().card).unwrap();
+    tune_in(&bob.node, &device).await;
+    tune_in(&alice.node, &device).await;
+    let mut bob_events = bob.node.subscribe();
+
+    // The radio loses the message and the connection with it. Alice's node
+    // connects again, and sends it then.
+    alice
+        .node
+        .send_text(bob_id, "Bağlantı koparken yazıldı")
+        .unwrap();
+    let Event::MessageReceived { message } = next_event(&mut bob_events, |event| {
+        matches!(event, Event::MessageReceived { .. })
+    })
+    .await
+    else {
+        unreachable!()
+    };
+    assert_eq!(message.body, "Bağlantı koparken yazıldı");
 }

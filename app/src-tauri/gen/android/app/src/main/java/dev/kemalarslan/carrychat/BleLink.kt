@@ -386,8 +386,7 @@ class BleLink(private val context: Context) {
     override fun onNotificationSent(device: BluetoothDevice, status: Int) {
       handler.post {
         val connection = serverConnection(device) ?: return@post
-        connection.busy = false
-        pump(connection)
+        sent(connection, status)
       }
     }
   }
@@ -524,8 +523,7 @@ class BleLink(private val context: Context) {
     override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
       handler.post {
         val connection = connections.values.firstOrNull { it.gatt === gatt } ?: return@post
-        connection.busy = false
-        pump(connection)
+        sent(connection, status)
       }
     }
   }
@@ -538,6 +536,26 @@ class BleLink(private val context: Context) {
   }
 
   // Sending: one write or indication at a time, the next when it is confirmed.
+
+  /**
+   * A write or indication was confirmed, or failed. One that failed leaves a gap in the stream, which the other side
+   * cannot read past: the connection ends, and the next one syncs again.
+   */
+  private fun sent(connection: Connection, status: Int) {
+    if (status != BluetoothGatt.GATT_SUCCESS) {
+      Log.w(TAG, "A Bluetooth send failed with status $status")
+      end(connection)
+      return
+    }
+    connection.busy = false
+    pump(connection)
+  }
+
+  private fun end(connection: Connection) {
+    connections.remove(connection.id)
+    Ble.closed(connection.id)
+    disconnect(connection)
+  }
 
   private fun pump(connection: Connection) {
     if (connection.busy || !connections.containsKey(connection.id)) return
@@ -553,9 +571,7 @@ class BleLink(private val context: Context) {
     } catch (error: RuntimeException) {
       // A send the stack refuses outright ends this connection, not the app.
       Log.w(TAG, "Could not send over Bluetooth", error)
-      connections.remove(connection.id)
-      Ble.closed(connection.id)
-      disconnect(connection)
+      end(connection)
       return
     }
     if (started) {

@@ -12,6 +12,7 @@ use btleplug::api::{
 use btleplug::platform::{Adapter, Manager, Peripheral};
 use futures_util::StreamExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::Notify;
 use uuid::{uuid, Uuid};
 
 use crate::sync::{self, Link};
@@ -143,16 +144,30 @@ async fn connect(shared: Arc<Shared>, peripheral: Peripheral, peer: u64) -> Resu
     let (sync_end, link_end) = tokio::io::duplex(BUFFER_LEN);
     let (sync_reader, sync_writer) = tokio::io::split(sync_end);
     let (mut link_reader, mut link_writer) = tokio::io::split(link_end);
-    let incoming = tokio::spawn(async move {
-        while let Some(notification) = notifications.next().await {
-            if notification.uuid == DATA
-                && link_writer.write_all(&notification.value).await.is_err()
-            {
-                break;
+    // A write that did not get across leaves a gap in the stream, which the
+    // other side cannot read past: the connection ends then, and the next
+    // one syncs again.
+    let write_failed = Arc::new(Notify::new());
+    let incoming = tokio::spawn({
+        let write_failed = Arc::clone(&write_failed);
+        async move {
+            loop {
+                tokio::select! {
+                    notification = notifications.next() => {
+                        let Some(notification) = notification else { break };
+                        if notification.uuid == DATA
+                            && link_writer.write_all(&notification.value).await.is_err()
+                        {
+                            break;
+                        }
+                    }
+                    () = write_failed.notified() => break,
+                }
             }
+            // The device is gone, or a write failed: the sync reads the end
+            // of the stream.
+            let _ = link_writer.shutdown().await;
         }
-        // The device is gone: the sync reads the end of the stream.
-        let _ = link_writer.shutdown().await;
     });
     let writer = peripheral.clone();
     let outgoing = tokio::spawn(async move {
@@ -163,6 +178,7 @@ async fn connect(shared: Arc<Shared>, peripheral: Peripheral, peer: u64) -> Resu
                 .await
                 .is_err()
             {
+                write_failed.notify_one();
                 break;
             }
         }

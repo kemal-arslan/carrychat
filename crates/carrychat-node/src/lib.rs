@@ -947,6 +947,12 @@ impl Shared {
         self.relay(handled, None, Some((Via::Reticulum, heard)));
     }
 
+    /// Like `dispatch`, for a frame that came from an internet relay: it is
+    /// not posted back there.
+    pub(crate) fn dispatch_from_internet(&self, handled: Handled, heard: &Frame) {
+        self.relay(handled, None, Some((Via::Internet, heard)));
+    }
+
     /// Passes on what a frame made the node send. What was heard on LoRa or
     /// Reticulum does not go back there: the LoRa mesh floods it already,
     /// and on Reticulum its sender sent it to every CarryChat node it knows.
@@ -968,7 +974,8 @@ impl Shared {
             }
         }
         // A carried bundle counts as uploaded once a relay accepts it.
-        self.internet.post_handled(&handled);
+        self.internet
+            .post_handled(&handled, |frame| echoes(Via::Internet, frame));
         self.flush_own();
         if handled
             .events
@@ -1072,4 +1079,21 @@ pub(crate) fn now() -> u32 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs() as u32)
+}
+
+/// The bundle or tombstone a whole frame carries.
+pub(crate) fn frame_id(frame: &Frame) -> Option<carrychat_proto::bundle::BundleId> {
+    match frame {
+        Frame::Bundle(bundle) => Some(bundle.id),
+        Frame::Tombstone { tombstone, .. } => Some(tombstone.id),
+        Frame::Fragment(_) | Frame::Chunk(_) => None,
+    }
+}
+
+/// The bundle or tombstone a frame's bytes carry, whole or as a fragment.
+pub(crate) fn packet_id(bytes: &[u8]) -> Option<carrychat_proto::bundle::BundleId> {
+    match Frame::from_bytes(bytes).ok()? {
+        Frame::Fragment(fragment) => Some(fragment.id),
+        frame => frame_id(&frame),
+    }
 }

@@ -215,15 +215,18 @@ impl Internet {
     }
 
     /// Posts what a handled frame should put on the internet: the tombstone
-    /// of a bundle delivered to us, and, as a gateway, a bundle we started
-    /// carrying from another link.
-    pub(crate) fn post_handled(&self, handled: &Handled) {
+    /// of a bundle delivered to us, and, as a gateway, the bundles we pass on
+    /// from another link: those we started carrying for others, and, as a
+    /// member, those of a group or channel. `heard` tells the frame that
+    /// came from the internet itself, which is already there.
+    pub(crate) fn post_handled(&self, handled: &Handled, heard: impl Fn(&Frame) -> bool) {
         for frame in &handled.relay {
             match (handled.outcome, frame) {
                 (Outcome::Received, Frame::Tombstone { .. }) => self.post_tombstone(frame),
-                (Outcome::Carried, Frame::Bundle(bundle) | Frame::Chunk(bundle)) => {
-                    self.post_bundle(frame, &bundle.tag)
-                }
+                (
+                    Outcome::Carried | Outcome::Received,
+                    Frame::Bundle(bundle) | Frame::Chunk(bundle),
+                ) if !heard(frame) => self.post_bundle(frame, &bundle.tag),
                 _ => {}
             }
         }
@@ -648,9 +651,9 @@ fn receive(shared: &Shared, relay: u64, text: &str) {
             // Anyone can post to a relay: take only what is for us (§9.3).
             let handled = shared
                 .engine()
-                .atomically(|engine| engine.handle_with(frame, now(), false));
+                .atomically(|engine| engine.handle_with(frame.clone(), now(), false));
             if let Ok(handled) = handled {
-                shared.dispatch(handled, None);
+                shared.dispatch_from_internet(handled, &frame);
             }
         }
         Some("OK") => {

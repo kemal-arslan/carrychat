@@ -69,6 +69,8 @@ export type MessageListening = "off" | "on" | "failed";
 
 let wantMessages = false;
 let stopMessages: (() => void) | null = null;
+/** Message listening is starting: the microphone is opening. */
+let startingMessages = false;
 let cardListenings = 0;
 let messageListening: MessageListening = "off";
 const watchers = new Set<(state: MessageListening) => void>();
@@ -79,11 +81,12 @@ function setMessageListening(state: MessageListening) {
 }
 
 async function startMessages() {
-  if (stopMessages || cardListenings > 0 || !wantMessages) return;
+  if (startingMessages || stopMessages || cardListenings > 0 || !wantMessages) return;
+  startingMessages = true;
   try {
     const stop = await listen(null);
     // Turned off, or a card listening began, while the microphone opened.
-    if (!wantMessages || cardListenings > 0 || stopMessages) {
+    if (!wantMessages || cardListenings > 0) {
       stop();
       return;
     }
@@ -92,6 +95,8 @@ async function startMessages() {
     // Not asked again until it is turned on again.
     wantMessages = false;
     setMessageListening("failed");
+  } finally {
+    startingMessages = false;
   }
 }
 

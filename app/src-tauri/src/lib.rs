@@ -1,10 +1,10 @@
 //! The app: a thin layer of commands over a [`Node`]. Node events are
 //! forwarded to the window as `carrychat-event`.
 
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
 use carrychat_node::{
@@ -22,10 +22,41 @@ mod android;
 struct AppState {
     dir: PathBuf,
     node: Mutex<Option<Node>>,
-    /// Listens for a card played as sound, while the add-contact sheet does,
-    /// with the number the page knows that listening by.
-    listener: Mutex<Option<(u32, SoundListener)>>,
-    listenings: AtomicU32,
+    /// What the page listens to the microphone for: a card played as sound,
+    /// or messages.
+    listenings: Mutex<Listenings>,
+}
+
+/// Listenings kept at most. A page that went away without ending its
+/// listenings leaves them behind; the oldest go first.
+const MAX_LISTENINGS: usize = 4;
+
+/// The page's listenings to the microphone, by the number it knows each
+/// by. A card listening and a message listening may overlap, and one that
+/// the page started or ended late must not end another.
+#[derive(Default)]
+struct Listenings {
+    last: u32,
+    listeners: BTreeMap<u32, SoundListener>,
+}
+
+impl Listenings {
+    fn start(&mut self, rate: u32) -> u32 {
+        self.last += 1;
+        self.listeners.insert(self.last, SoundListener::new(rate));
+        while self.listeners.len() > MAX_LISTENINGS {
+            self.listeners.pop_first();
+        }
+        self.last
+    }
+
+    fn get(&mut self, listening: u32) -> Option<&mut SoundListener> {
+        self.listeners.get_mut(&listening)
+    }
+
+    fn stop(&mut self, listening: u32) {
+        self.listeners.remove(&listening);
+    }
 }
 
 type CommandResult<T> = Result<T, String>;
@@ -188,19 +219,16 @@ async fn card_sound(
     Ok(tauri::ipc::Response::new(wav))
 }
 
-/// Starts listening for a card played as sound, from a microphone giving
-/// `rate` samples a second, in place of any listening before. Returns the
-/// listening's number, which the other calls name, so that a listening the
-/// page ended late cannot end the next.
+/// Starts listening to a microphone giving `rate` samples a second, for a
+/// card played as sound or for messages. Returns the listening's number,
+/// which the other calls name.
 #[tauri::command]
 fn listen_start(state: State<'_, AppState>, rate: u32) -> u32 {
-    let listening = state.listenings.fetch_add(1, Ordering::Relaxed) + 1;
-    *state
-        .listener
+    state
+        .listenings
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
-        Some((listening, SoundListener::new(rate)));
-    listening
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .start(rate)
 }
 
 /// The microphone's next samples in the request's body: the listening's
@@ -229,16 +257,13 @@ async fn listen_heard(
         .map(|pair| f32::from(i16::from_le_bytes([pair[0], pair[1]])) / 32768.0)
         .collect();
     let node = state.node()?;
-    let mut listener = state
-        .listener
+    let mut listenings = state
+        .listenings
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    Ok(match listener.as_mut() {
-        Some((listening, listener)) if *listening == u32::from_le_bytes(*number) => {
-            listener.push(&node, &samples)
-        }
-        _ => None,
-    })
+    Ok(listenings
+        .get(u32::from_le_bytes(*number))
+        .and_then(|listener| listener.push(&node, &samples)))
 }
 
 /// A card read over NFC (§3.3), in its text form, once its signature
@@ -251,16 +276,11 @@ fn read_card(card: String) -> CommandResult<HeardCard> {
 /// Ends listening `listening`, unless another started since.
 #[tauri::command]
 fn listen_stop(state: State<'_, AppState>, listening: u32) {
-    let mut listener = state
-        .listener
+    state
+        .listenings
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if listener
-        .as_ref()
-        .is_some_and(|(current, _)| *current == listening)
-    {
-        *listener = None;
-    }
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .stop(listening);
 }
 
 #[tauri::command]
@@ -745,8 +765,7 @@ pub fn run() {
             app.manage(AppState {
                 dir,
                 node: Mutex::new(node),
-                listener: Mutex::new(None),
-                listenings: AtomicU32::new(0),
+                listenings: Mutex::default(),
             });
             Ok(())
         })
@@ -820,4 +839,25 @@ pub fn run() {
             #[cfg(target_os = "android")]
             android::on_run_event(_event);
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_listening_ended_late_leaves_the_others_alone() {
+        let mut listenings = Listenings::default();
+        let first = listenings.start(48_000);
+        let second = listenings.start(48_000);
+        listenings.stop(first);
+        assert!(listenings.get(first).is_none());
+        assert!(listenings.get(second).is_some());
+        // Listenings never ended leave only the latest few.
+        for _ in 0..10 {
+            listenings.start(48_000);
+        }
+        assert_eq!(listenings.listeners.len(), MAX_LISTENINGS);
+        assert!(listenings.get(second).is_none());
+    }
 }

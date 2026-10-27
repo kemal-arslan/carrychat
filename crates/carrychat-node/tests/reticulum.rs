@@ -271,3 +271,41 @@ async fn a_third_node_learns_of_the_two_before_it() {
         hears(&test.node, 2).await;
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_node_back_after_a_short_absence_gets_what_it_missed() {
+    let (address, network) = start_network().await;
+    let alice = node("alice");
+    let bob = node("bob");
+    let bob_id = alice.node.add_contact(&bob.node.profile().card).unwrap().id;
+    bob.node.add_contact(&alice.node.profile().card).unwrap();
+    bob.node.set_reticulum(Some(&address)).unwrap();
+    alice.node.set_reticulum(Some(&address)).unwrap();
+    hears(&alice.node, 1).await;
+    hears(&bob.node, 1).await;
+
+    // Bob leaves for a moment; what Alice writes meanwhile finds no path.
+    bob.node.set_reticulum(None).unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    alice.node.send_text(bob_id, "Sen yokken yazıldı").unwrap();
+    tokio::time::timeout(Duration::from_secs(20), async {
+        while network.lock().unwrap().dropped == 0 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("the message did not go out");
+
+    // He is back long before Alice would count him as gone, and still gets
+    // it.
+    let mut bob_events = bob.node.subscribe();
+    bob.node.set_reticulum(Some(&address)).unwrap();
+    let Event::MessageReceived { message } = next_event(&mut bob_events, |event| {
+        matches!(event, Event::MessageReceived { .. })
+    })
+    .await
+    else {
+        unreachable!()
+    };
+    assert_eq!(message.body, "Sen yokken yazıldı");
+}

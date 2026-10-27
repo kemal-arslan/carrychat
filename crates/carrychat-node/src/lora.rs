@@ -188,6 +188,10 @@ pub(crate) struct Lora {
     /// The bundles and tombstones queued since the link started, so that
     /// connecting again does not send them twice.
     queued: Mutex<HashSet<BundleId>>,
+    /// The bundles and tombstones with a packet handed to the device since
+    /// it last answered. If the connection ends first, the packet may never
+    /// have reached it, and they go again on the next connection.
+    handed: Mutex<HashSet<BundleId>>,
 }
 
 /// What the device told about itself and the devices it hears, by their
@@ -320,6 +324,7 @@ impl Lora {
             task: Mutex::new(None),
             seen: Mutex::default(),
             queued: Mutex::default(),
+            handed: Mutex::default(),
         }
     }
 
@@ -367,8 +372,20 @@ impl Lora {
     /// Queues one of our own frames that waited for the link, unless it was
     /// queued since the link started. Returns whether it was queued.
     fn send_pending(&self, frame: &Frame) -> bool {
-        let queued = queued_id(frame).is_some_and(|id| lock(&self.queued).contains(&id));
+        let queued = crate::frame_id(frame).is_some_and(|id| lock(&self.queued).contains(&id));
         !queued && self.send(frame, true)
+    }
+
+    /// Notes that `packet` was handed to the device.
+    fn hand(&self, packet: &[u8]) {
+        if let Some(id) = crate::packet_id(packet) {
+            lock(&self.handed).insert(id);
+        }
+    }
+
+    /// Notes that the device answered, so what it was handed reached it.
+    fn answered(&self) {
+        lock(&self.handed).clear();
     }
 
     /// The device in use, if any.
@@ -400,11 +417,18 @@ impl Lora {
             Frame::Tombstone { .. } => vec![frame.to_bytes()],
             Frame::Fragment(_) | Frame::Chunk(_) => return false,
         };
-        if let Some(id) = queued_id(frame) {
+        let id = crate::frame_id(frame);
+        if let Some(id) = id {
             lock(&self.queued).insert(id);
         }
         {
             let mut queue = lock(&self.queue);
+            // A frame queued again takes the place of its packets still waiting.
+            if id.is_some() {
+                let other = |packet: &Vec<u8>| crate::packet_id(packet) != id;
+                queue.own.retain(other);
+                queue.carried.retain(other);
+            }
             let own = own || matches!(frame, Frame::Tombstone { .. });
             let (lane, max) = if own {
                 (&mut queue.own, MAX_OWN)
@@ -447,6 +471,7 @@ pub(crate) fn stop(shared: &Shared) {
     *lock(&lora.queue) = Queue::default();
     *lock(&lora.seen) = Seen::default();
     lock(&lora.queued).clear();
+    lock(&lora.handed).clear();
     lora.mtu.store(meshcore::MTU, Ordering::Relaxed);
     if lora.connected.swap(false, Ordering::Relaxed) {
         shared.emit(Event::LoraChanged { connected: false });
@@ -498,6 +523,13 @@ fn ended(shared: &Weak<Shared>, result: &io::Result<()>) -> bool {
     if node.lora.connected.swap(false, Ordering::Relaxed) {
         node.emit(Event::LoraChanged { connected: false });
     }
+    // What the device never answered after taking may not have reached it.
+    let lost: Vec<BundleId> = lock(&node.lora.handed).drain().collect();
+    let mut queued = lock(&node.lora.queued);
+    for id in lost {
+        queued.remove(&id);
+    }
+    drop(queued);
     if let Err(error) = result {
         eprintln!("LoRa: {error}");
     }
@@ -799,6 +831,9 @@ async fn meshtastic_session(shared: &Weak<Shared>, mut stream: Stream) -> io::Re
         } else {
             None
         };
+        if let Some(frame) = &frame {
+            node.lora.hand(frame);
+        }
         drop(node);
         if let Some(frame) = frame {
             budget.spend(airtime(frame.len()));
@@ -819,6 +854,9 @@ async fn meshtastic_session(shared: &Weak<Shared>, mut stream: Stream) -> io::Re
         tokio::select! {
             bytes = stream.incoming.recv() => {
                 let bytes = bytes.ok_or_else(|| io::Error::from(io::ErrorKind::UnexpectedEof))?;
+                if let Some(node) = shared.upgrade() {
+                    node.lora.answered();
+                }
                 deframer.push(&bytes);
                 while let Some(body) = deframer.next_frame() {
                     if let Ok(FromRadio { payload: Some(payload), .. }) = FromRadio::decode(body.as_slice()) {
@@ -1118,12 +1156,18 @@ async fn meshcore_session(shared: &Weak<Shared>, stream: Stream) -> io::Result<(
             if packet.len() > meshcore::MTU {
                 continue;
             }
+            if let Some(node) = shared.upgrade() {
+                node.lora.hand(&packet);
+            }
             let reply = device
                 .ask(
                     &meshcore::send_channel_data(channel, &packet),
                     &[meshcore::RESP_OK],
                 )
                 .await?;
+            if let Some(node) = shared.upgrade() {
+                node.lora.answered();
+            }
             if reply[..] == [meshcore::RESP_ERR, meshcore::ERR_TABLE_FULL] {
                 if let Some(node) = shared.upgrade() {
                     lock(&node.lora.queue).put_back(packet);
@@ -1149,15 +1193,6 @@ async fn meshcore_session(shared: &Weak<Shared>, stream: Stream) -> io::Result<(
     }
 }
 
-/// The bundle or tombstone a frame carries.
-fn queued_id(frame: &Frame) -> Option<BundleId> {
-    match frame {
-        Frame::Bundle(bundle) => Some(bundle.id),
-        Frame::Tombstone { tombstone, .. } => Some(tombstone.id),
-        Frame::Fragment(_) | Frame::Chunk(_) => None,
-    }
-}
-
 /// Whether `frame`, to be passed on, is the one `heard` over LoRa: the same
 /// bundle, whole or as its fragment, or the same tombstone. A receipt for a
 /// bundle heard is a new frame, not an echo.
@@ -1176,7 +1211,9 @@ pub(crate) fn echoes(frame: &Frame, heard: &Frame) -> bool {
 }
 
 /// Airtime this node may still spend: it refills at `AIRTIME_SHARE` of the
-/// time and holds at most `AIRTIME_BURST_SECS`.
+/// time and holds at most `AIRTIME_BURST_SECS`, or the airtime of the packet
+/// waiting when that is longer: on the slowest settings one packet takes
+/// more than the burst, and would otherwise never go out.
 struct Budget {
     seconds: f64,
     at: Instant,
@@ -1190,22 +1227,24 @@ impl Budget {
         }
     }
 
-    fn refill(&mut self) {
+    /// Refills the budget for a packet of `airtime` seconds.
+    fn refill(&mut self, airtime: f64) {
         let now = Instant::now();
         let elapsed = now.duration_since(self.at).as_secs_f64();
-        self.seconds = (self.seconds + elapsed * AIRTIME_SHARE).min(AIRTIME_BURST_SECS);
+        let most = AIRTIME_BURST_SECS.max(airtime);
+        self.seconds = (self.seconds + elapsed * AIRTIME_SHARE).min(most);
         self.at = now;
     }
 
     /// How long until `airtime` seconds may be spent, or `None` if now.
     fn wait_for(&mut self, airtime: f64) -> Option<Duration> {
-        self.refill();
+        self.refill(airtime);
         (self.seconds < airtime)
             .then(|| Duration::from_secs_f64((airtime - self.seconds) / AIRTIME_SHARE))
     }
 
     fn spend(&mut self, airtime: f64) {
-        self.refill();
+        self.refill(airtime);
         self.seconds -= airtime;
     }
 }
@@ -1260,5 +1299,28 @@ mod tests {
             wait > Duration::from_secs(30) && wait < Duration::from_secs(120),
             "{wait:?}"
         );
+    }
+
+    #[test]
+    fn a_packet_longer_than_the_burst_still_goes_out() {
+        let very_long_slow = Modulation::of(&meshtastic::LoRaConfig {
+            use_preset: true,
+            modem_preset: 2,
+            ..meshtastic::LoRaConfig::default()
+        });
+        let packet = very_long_slow.airtime(meshtastic::MTU + meshtastic::OVERHEAD);
+        assert!(packet > AIRTIME_BURST_SECS, "{packet}");
+        // From a full burst, it waits for the rest of its airtime to build up…
+        let wait = Budget::new().wait_for(packet).unwrap();
+        let rest = (packet - AIRTIME_BURST_SECS) / AIRTIME_SHARE;
+        assert!((wait.as_secs_f64() - rest).abs() < 1.0, "{wait:?}");
+        // …and the budget holds that much once it has.
+        let mut saved = Budget {
+            seconds: packet,
+            at: Instant::now(),
+        };
+        assert_eq!(saved.wait_for(packet), None);
+        saved.spend(packet);
+        assert!(saved.seconds.abs() < 0.01);
     }
 }
