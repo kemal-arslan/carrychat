@@ -209,7 +209,7 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
           </span>
           <span className="row-text">
             <b>{t.soundInaudibleName}</b>
-            <span>{inaudible ? t.soundInaudibleRow : t.stateOff}</span>
+            <span>{inaudible ? t.soundInaudibleRow : t.soundAudibleRow}</span>
           </span>
           <input
             type="checkbox"

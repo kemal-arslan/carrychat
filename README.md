@@ -66,7 +66,7 @@ Create your identity and give your card (**My card**, also as a QR code, under *
 
 **Reticulum**, on **Network**, connects to a [Reticulum](https://reticulum.network) node, such as `rnsd` on the same computer with a TCP server interface, and reaches the other CarryChat nodes on that network however many hops away. It shows the CarryChat nodes that announced themselves in the last six hours.
 
-**Sound**, on **Network**, listens for messages that a device right next to this one plays as sound, while the app is open. In a chat, the speaker button next to the message field sends what you write as sound too, played three times. It is slow, about 30 bytes a second, but needs nothing else: the message is sealed end to end, so those who hear the tones cannot read it. The row below it, **Above hearing**, plays cards and messages at 18 to 20 kHz, which most adults do not hear, at about 23 bytes a second; not every speaker plays it, and listening hears both.
+**Sound**, on **Network**, listens for messages that a device right next to this one plays as sound, while the app is open. In a chat, the speaker button next to the message field sends what you write as sound too, played three times. It is slow, about 30 bytes a second, but needs nothing else: the message is sealed end to end, so those who hear the tones cannot read it. Cards and messages play at 18 to 20 kHz, which most adults do not hear, at about 23 bytes a second. Not every speaker plays that high: if the other device does not hear them, turn off **Above hearing**, the row below **Sound**, to play tones you can hear. Listening hears both.
 
 `npm run dev` opens the interface in a browser with sample data, without building the app.
 

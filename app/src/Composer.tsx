@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type Ke
 import { maxMessageBytes, onePacketBytes, radioPackets, utf8Length } from "./format";
 import { useI18n } from "./i18n";
 import { MAX_RECORDING_SECS, canRecord, shrinkPhoto, startRecording, type Recorder } from "./media";
+import { soundInaudible } from "./prefs";
 import { playMessage } from "./sound";
 
 type Props = {
@@ -166,7 +167,9 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
     (recording
       ? t.recording(seconds)
       : playing > 0
-        ? t.soundSending
+        ? soundInaudible()
+          ? t.soundSendingInaudible
+          : t.soundSending
         : tooLong
           ? t.tooLong(bytes, max)
           : bytes > onePacketBytes(overhead)
@@ -174,7 +177,9 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
               ? t.onePacket(bytes)
               : t.packets(bytes, packets)
             : bySound
-              ? t.soundModeNote
+              ? soundInaudible()
+                ? t.soundModeNoteInaudible
+                : t.soundModeNote
               : null);
   const empty = bytes === 0;
 

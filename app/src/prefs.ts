@@ -20,19 +20,22 @@ export function setNotificationsEnabled(on: boolean): void {
   }
 }
 
-/** Whether cards and messages play as sound above hearing, at 18 to 20 kHz. */
+/**
+ * Whether cards and messages play as sound above hearing, at 18 to 20 kHz: so they do, unless turned off for a
+ * speaker that cannot play that high.
+ */
 export function soundInaudible(): boolean {
   try {
-    return localStorage.getItem(INAUDIBLE_KEY) === "on";
+    return localStorage.getItem(INAUDIBLE_KEY) !== "off";
   } catch {
-    return false;
+    return true;
   }
 }
 
 export function setSoundInaudible(on: boolean): void {
   try {
-    if (on) localStorage.setItem(INAUDIBLE_KEY, "on");
-    else localStorage.removeItem(INAUDIBLE_KEY);
+    if (on) localStorage.removeItem(INAUDIBLE_KEY);
+    else localStorage.setItem(INAUDIBLE_KEY, "off");
   } catch {
     // Without storage the setting lasts until the window closes.
   }
