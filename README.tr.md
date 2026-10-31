@@ -108,7 +108,8 @@ Ekranı olmayan bir bilgisayarda `carrychat run` onu bir aktarıcıya çevirir: 
 2. **Yerel ağ bağlantısı, mesaj deposu, masaüstü uygulaması, komut satırı, USB'ye aktarma ve içe aktarma** (bitti)
 3. **Meshtastic ya da MeshCore telsiziyle LoRa bağlantısı ve Reticulum bağlantısı** (yazıldı: komut satırı ve macOS uygulaması cihazı USB ya da TCP üzerinden, Android uygulaması Bluetooth üzerinden kullanır; bölgeyi ya da telsiz ayarlarını ve duyulan cihazları gösterir. Sırada saha denemeleri var)
 4. **Nostr üzerinden internet bağlantısı** (bitti). İnterneti olan bilgisayarlar, taşıdıklarını interneti olmayan bilgisayarlar için de aktarır. O bilgisayarlar adına mesaj çekme henüz açık.
-5. **Android uygulaması; Bluetooth, Wi-Fi Aware ve Wi-Fi Direct bağlantıları; yakınımdakiler; sesle ve NFC ile kart** (bitti; Wi-Fi Aware, Wi-Fi Direct ve NFC iki telefon arasında denenmeyi bekliyor). iOS uygulaması, HF telsiz
+5. **Android uygulaması; Bluetooth, Wi-Fi Aware ve Wi-Fi Direct bağlantıları; yakınımdakiler; sesle ve NFC ile kart** (bitti; Wi-Fi Aware, Wi-Fi Direct ve NFC iki telefon arasında denenmeyi bekliyor)
+6. **iOS uygulaması** (yazıldı: CI'da simülatör için derleniyor, bir iPhone'da denenmeyi bekliyor). HF telsiz
 
 ## Derleme
 
@@ -126,6 +127,16 @@ export RANLIB_aarch64_linux_android=$NDK_HOME/toolchains/llvm/prebuilt/darwin-x8
 cd app && npx tauri android build --target aarch64 --apk
 ```
 
+iOS uygulaması, [Tauri iOS ön koşullarında](https://tauri.app/start/prerequisites/#ios) anlatıldığı gibi Xcode, XcodeGen, CocoaPods ve Rust'ın iOS hedefleri kurulu bir Mac'te derlenir. Bir iPhone'a yüklemek için Xcode'da seçilen ya da `app/src-tauri/tauri.conf.json` içinde `bundle.iOS.developmentTeam` olarak yazılan bir Apple geliştirici ekibi gerekir:
+
+```bash
+rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+cd app && npx tauri ios dev       # bir simülatörde ya da bağlı bir iPhone'da
+cd app && npx tauri ios build     # yüklenecek bir uygulama
+```
+
+iOS, CarryChat'e Android'den daha az izin verir. Uygulama yalnızca açıkken çalışır: iOS görünmeyen uygulamaları askıya alır, bu yüzden bu arada gelenler, uygulama yeniden açılana kadar internet aktarıcılarında ve diğer cihazlarda bekler. Diğer cihazlara internet üzerinden, yerel ağda adresle (**Adrese bağlan**) ulaşır, çünkü iOS bir uygulamanın çok noktaya yayınla (multicast) cihaz bulmasına yalnızca Apple'ın verdiği bir izinle olanak tanır; Bluetooth ile de Android telefonlara ulaşır: iPhone onlara bağlanabilir ama onlar iPhone'u bulamaz. Wi-Fi Aware, Wi-Fi Direct, NFC ile kart ve Bluetooth üzerinden LoRa cihazları yalnızca Android'dedir; ses, Face ID ya da Touch ID ile uygulama kilidi ve iOS Anahtar Zinciri'ndeki veri anahtarı diğer sistemlerdeki gibi çalışır.
+
 Telefonda CarryChat ekranı kapatıldıktan sonra da, kalıcı bir bildirimle çalışmayı sürdürür; böylece uygulama görünmezken de mesajlar gelir ve başkaları için aktarılır. Telefon açıldığında ya da uygulama güncellendiğinde, açılmadan da kendiliğinden başlar. O sırada gelen mesajlar bildirim olarak duyurulur. O bildirimdeki **Turn off**, CarryChat'i yeniden açılana kadar, telefon yeniden başlasa da durdurur.
 
 | Paket | Ne olduğu |
@@ -133,7 +144,7 @@ Telefonda CarryChat ekranı kapatıldıktan sonra da, kalıcı bir bildirimle ç
 | [`carrychat-proto`](crates/carrychat-proto) | Kablo biçimi ve kriptografi, giriş/çıkış yok |
 | [`carrychat-node`](crates/carrychat-node) | Mesaj deposu, aktarma, bağlantılar |
 | [`carrychat-cli`](crates/carrychat-cli) | `carrychat` komutu |
-| [`app`](app) | Masaüstü ve Android uygulaması (Tauri ve React); görünüşü [DESIGN.tr.md](DESIGN.tr.md)'ye ([English](DESIGN.md)) uyar |
+| [`app`](app) | Masaüstü, Android ve iOS uygulaması (Tauri ve React); görünüşü [DESIGN.tr.md](DESIGN.tr.md)'ye ([English](DESIGN.md)) uyar |
 
 ## Güvenlik
 

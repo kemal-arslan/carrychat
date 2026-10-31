@@ -1,0 +1,7 @@
+"CFBundleDisplayName" = "CarryChat";
+"NSBluetoothAlwaysUsageDescription" = "CarryChat, mesajları hiçbir ağ olmadan Bluetooth ile yakındaki telefonlara aktarır.";
+"NSLocalNetworkUsageDescription" = "CarryChat, mesajları ağındaki diğer CarryChat cihazlarına aktarır.";
+"NSMicrophoneUsageDescription" = "CarryChat sesli mesaj kaydeder; sesle çalınan kartları ve mesajları dinler.";
+"NSFaceIDUsageDescription" = "Uygulama kilidi açıkken CarryChat açılmadan önce yüzünü ister.";
+"NSCameraUsageDescription" = "CarryChat göndermeyi seçtiğin fotoğrafları çeker.";
+"NSPhotoLibraryUsageDescription" = "CarryChat seçtiğin fotoğrafları gönderir.";

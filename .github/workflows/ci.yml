@@ -43,3 +43,26 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: cargo clippy -p carrychat-app -- -D warnings
+
+  ios:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim
+      - run: npm ci
+      # The Rust side, for an iPhone.
+      - run: cargo build -p carrychat-app --lib --target aarch64-apple-ios
+        working-directory: app/src-tauri
+      # The whole app, for the simulator, which needs no signing.
+      - run: npx tauri ios build --target aarch64-sim --debug
+

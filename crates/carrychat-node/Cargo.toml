@@ -50,7 +50,8 @@ futures-util = { version = "0.3", default-features = false, features = ["sink", 
 tempfile = "3"
 
 # USB serial for LoRa devices, without libudev, which only lists ports.
-[target.'cfg(not(target_os = "android"))'.dependencies]
+# Phones have no serial ports an app may open.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 serialport = { version = "4", default-features = false }
 
 # Android has no system OpenSSL for native-tls (relays, Tor): build it in.

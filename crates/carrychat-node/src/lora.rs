@@ -593,7 +593,7 @@ pub struct LoraPort {
 
 /// The USB serial ports on this computer. On macOS each port shows up twice;
 /// only the `cu.` one, which does not wait for a carrier, is listed.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn ports() -> Vec<LoraPort> {
     let Ok(ports) = serialport::available_ports() else {
         return Vec::new();
@@ -611,7 +611,7 @@ pub fn ports() -> Vec<LoraPort> {
         .collect()
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn open_serial(path: &std::path::Path) -> io::Result<Stream> {
     use std::io::{Read, Write};
 
@@ -659,11 +659,9 @@ fn open_serial(path: &std::path::Path) -> io::Result<Stream> {
     Ok(Stream { incoming, outgoing })
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 fn open_serial(_path: &std::path::Path) -> io::Result<Stream> {
-    Err(io::Error::other(
-        "serial ports are not supported on Android",
-    ))
+    Err(io::Error::other("phones have no serial ports to open"))
 }
 
 /// One connection: finds out what the device runs, unless platform code

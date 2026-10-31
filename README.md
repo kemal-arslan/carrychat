@@ -106,7 +106,8 @@ carrychat erase --yes                           # delete identity, contacts and 
 2. **Local network link, message store, desktop app, command line, USB export and import** (done)
 3. **LoRa link through a Meshtastic or MeshCore radio, and the Reticulum link** (written: the command line and the macOS app use a device over USB or TCP, the Android app over Bluetooth; it shows the region or radio settings and the devices heard. Field tests come next)
 4. **Internet link over Nostr** (done). Computers with internet also pass on what they carry for computers without it. Fetching for those computers is still open.
-5. **Android app, Bluetooth, Wi-Fi Aware and Wi-Fi Direct links, people nearby, cards over sound and NFC** (done; Wi-Fi Aware, Wi-Fi Direct and NFC wait for a test between two phones). iOS app, HF radio
+5. **Android app, Bluetooth, Wi-Fi Aware and Wi-Fi Direct links, people nearby, cards over sound and NFC** (done; Wi-Fi Aware, Wi-Fi Direct and NFC wait for a test between two phones)
+6. **iOS app** (written: it builds for the simulator in CI, and waits for a test on an iPhone). HF radio
 
 ## Build
 
@@ -124,6 +125,16 @@ export RANLIB_aarch64_linux_android=$NDK_HOME/toolchains/llvm/prebuilt/darwin-x8
 cd app && npx tauri android build --target aarch64 --apk
 ```
 
+The iOS app builds on a Mac with Xcode, XcodeGen, CocoaPods and the Rust iOS targets, as the [Tauri iOS prerequisites](https://tauri.app/start/prerequisites/#ios) describe. Putting it on an iPhone needs an Apple development team, chosen in Xcode or set as `bundle.iOS.developmentTeam` in `app/src-tauri/tauri.conf.json`:
+
+```bash
+rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+cd app && npx tauri ios dev       # on a simulator or a connected iPhone
+cd app && npx tauri ios build     # an app to install
+```
+
+iOS keeps CarryChat to less than Android does. It runs only while open: iOS suspends apps out of sight, so what arrives meanwhile waits on the internet relays and on other devices until it opens again. It reaches others over the internet, over the local network by address (**Connect to an address**), since iOS lets an app find devices by multicast only with a permission Apple grants, and over Bluetooth to Android phones, which an iPhone can connect to but not be found by. Wi-Fi Aware, Wi-Fi Direct, cards over NFC, and LoRa devices over Bluetooth are Android only; sound, the app lock with Face ID or Touch ID, and the data key in the iOS Keychain work as elsewhere.
+
 On a phone CarryChat keeps running after its screen is closed, with an ongoing notification, so messages still arrive, and are passed on for others, while the app is out of sight. It also starts by itself when the phone starts or the app is updated, without being opened. Messages that arrive then are announced as notifications. **Turn off** in that notification stops CarryChat, also across restarts, until it is opened again.
 
 | Crate | What it is |
@@ -131,7 +142,7 @@ On a phone CarryChat keeps running after its screen is closed, with an ongoing n
 | [`carrychat-proto`](crates/carrychat-proto) | Wire format and cryptography, no I/O |
 | [`carrychat-node`](crates/carrychat-node) | Message store, forwarding, local network and file links |
 | [`carrychat-cli`](crates/carrychat-cli) | The `carrychat` command |
-| [`app`](app) | The desktop and Android app (Tauri and React); its look follows [DESIGN.md](DESIGN.md) ([Türkçe](DESIGN.tr.md)) |
+| [`app`](app) | The desktop, Android and iOS app (Tauri and React); its look follows [DESIGN.md](DESIGN.md) ([Türkçe](DESIGN.tr.md)) |
 
 ## Security
 

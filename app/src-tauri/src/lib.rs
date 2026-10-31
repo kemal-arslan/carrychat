@@ -427,9 +427,9 @@ fn set_lora(state: State<'_, AppState>, device: Option<String>) -> CommandResult
 /// Bluetooth instead.
 #[tauri::command]
 fn lora_ports() -> Vec<LoraPort> {
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     return carrychat_node::lora::ports();
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     Vec::new()
 }
 

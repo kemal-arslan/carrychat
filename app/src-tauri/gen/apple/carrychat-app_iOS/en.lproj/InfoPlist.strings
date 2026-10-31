@@ -1,0 +1,7 @@
+"CFBundleDisplayName" = "CarryChat";
+"NSBluetoothAlwaysUsageDescription" = "CarryChat passes messages to phones nearby over Bluetooth, with no network at all.";
+"NSLocalNetworkUsageDescription" = "CarryChat passes messages to other CarryChat devices on your network.";
+"NSMicrophoneUsageDescription" = "CarryChat records voice messages, and listens for cards and messages played as sound.";
+"NSFaceIDUsageDescription" = "With the app lock on, CarryChat asks for your face before it opens.";
+"NSCameraUsageDescription" = "CarryChat takes the photos you choose to send.";
+"NSPhotoLibraryUsageDescription" = "CarryChat sends the photos you choose.";
