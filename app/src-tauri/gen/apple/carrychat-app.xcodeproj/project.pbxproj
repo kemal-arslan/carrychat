@@ -9,8 +9,10 @@
 /* Begin PBXBuildFile section */
 		0057DF4E06976CA9E0A54184 /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = 5D9478E4BFFED6A223DE2BA7 /* main.mm */; };
 		026144109F421E0BAA5E6BF3 /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 80ED3B83A2987575BE05F9AA /* libapp.a */; };
+		2178183C59C11A4970CD708C /* CoreBluetooth.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9CF5B4ADBAD76F2117417AE0 /* CoreBluetooth.framework */; };
 		22F254FC7B5BF004028310CF /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8B455603C360C17E485F0FFB /* MetalKit.framework */; };
 		3B4B041A77E51A326E823555 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4BD56ED02F63912486490B0D /* QuartzCore.framework */; };
+		757FB9114598E723E7FBCA9D /* LocalAuthentication.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7D6EC5007B6BBBD979B8C50E /* LocalAuthentication.framework */; };
 		79313EEB302534E314C1E0E3 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3EAA3F4EF3DC3B4F26F392F8 /* WebKit.framework */; };
 		8B1024C8CFC1323629339B81 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B2C8099CA60368D62A62C59A /* Assets.xcassets */; };
 		905926495D2996058DD2F482 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4AA0B6092598FC1B88987FE5 /* Security.framework */; };
@@ -30,11 +32,13 @@
 		4AA0B6092598FC1B88987FE5 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		4BD56ED02F63912486490B0D /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
 		5D9478E4BFFED6A223DE2BA7 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
+		7D6EC5007B6BBBD979B8C50E /* LocalAuthentication.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = LocalAuthentication.framework; path = System/Library/Frameworks/LocalAuthentication.framework; sourceTree = SDKROOT; };
 		80ED3B83A2987575BE05F9AA /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		85FA6E1DD82CA031C32BEB9F /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		8AF7F62496A57D696F23BFFE /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
 		8B455603C360C17E485F0FFB /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 		8FC0AFEA3257D60BE2D4A938 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = assets; sourceTree = SOURCE_ROOT; };
+		9CF5B4ADBAD76F2117417AE0 /* CoreBluetooth.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreBluetooth.framework; path = System/Library/Frameworks/CoreBluetooth.framework; sourceTree = SDKROOT; };
 		A886C2723B2FBA750C1137C2 /* carrychat-app_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "carrychat-app_iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		B2C8099CA60368D62A62C59A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C46D2B0272D1C15A88DD4889 /* tr */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = tr; path = tr.lproj/InfoPlist.strings; sourceTree = "<group>"; };
@@ -53,7 +57,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				026144109F421E0BAA5E6BF3 /* libapp.a in Frameworks */,
+				2178183C59C11A4970CD708C /* CoreBluetooth.framework in Frameworks */,
 				DD9C44F241F943A6AAEC37E7 /* CoreGraphics.framework in Frameworks */,
+				757FB9114598E723E7FBCA9D /* LocalAuthentication.framework in Frameworks */,
 				D77D237E27A723C9DEF03E66 /* Metal.framework in Frameworks */,
 				22F254FC7B5BF004028310CF /* MetalKit.framework in Frameworks */,
 				3B4B041A77E51A326E823555 /* QuartzCore.framework in Frameworks */,
@@ -125,8 +131,10 @@
 		4AE72207EEBA94FD2A3CC88D /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				9CF5B4ADBAD76F2117417AE0 /* CoreBluetooth.framework */,
 				E3DE13C38B81A22A0EE7E69E /* CoreGraphics.framework */,
 				80ED3B83A2987575BE05F9AA /* libapp.a */,
+				7D6EC5007B6BBBD979B8C50E /* LocalAuthentication.framework */,
 				EB4DA5C088DDCD3A88D6FA77 /* Metal.framework */,
 				8B455603C360C17E485F0FFB /* MetalKit.framework */,
 				4BD56ED02F63912486490B0D /* QuartzCore.framework */,

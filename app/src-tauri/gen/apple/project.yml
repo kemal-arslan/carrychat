@@ -80,7 +80,9 @@ targets:
     dependencies:
       - framework: libapp.a
         embed: false
+      - sdk: CoreBluetooth.framework
       - sdk: CoreGraphics.framework
+      - sdk: LocalAuthentication.framework
       - sdk: Metal.framework
       - sdk: MetalKit.framework
       - sdk: QuartzCore.framework
