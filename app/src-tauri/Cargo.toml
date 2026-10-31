@@ -31,6 +31,14 @@ tauri-plugin-notification = "2"
 [target.'cfg(not(target_os = "android"))'.dependencies]
 carrychat-node = { path = "../../crates/carrychat-node", features = ["bluetooth", "keychain"] }
 
+# Apple's systems: the app lock asks for the owner through LocalAuthentication,
+# by Touch ID, Face ID or the device's password.
+[target.'cfg(target_vendor = "apple")'.dependencies]
+block2 = "0.6"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSError", "NSString"] }
+objc2-local-authentication = { version = "0.3", features = ["LAContext", "LAPublicDefines", "block2"] }
+
 # Android: posting notifications through the service while no screen is open,
 # and moving the bytes of Bluetooth connections, which Kotlin makes.
 [target.'cfg(target_os = "android")'.dependencies]

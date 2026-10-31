@@ -4,7 +4,8 @@ import { api, type Profile } from "./api";
 import { Avatar } from "./Avatar";
 import { MAX_NAME_BYTES, utf8Length } from "./format";
 import { useI18n, type LanguageChoice } from "./i18n";
-import { notificationsEnabled, setNotificationsEnabled } from "./prefs";
+import { lockAvailable, setAppLock } from "./lock";
+import { appLockOn, notificationsEnabled, setNotificationsEnabled } from "./prefs";
 import { setThemeChoice, themeChoice, type ThemeChoice } from "./theme";
 
 type Props = {
@@ -19,6 +20,8 @@ export function Me({ profile, onRenamed, onCard }: Props) {
   const [name, setName] = useState(profile.name);
   const [readReceipts, setReadReceipts] = useState<boolean | null>(null);
   const [notifications, setNotifications] = useState(notificationsEnabled);
+  const [appLock, setAppLockState] = useState(appLockOn);
+  const [canLock, setCanLock] = useState<boolean | null>(null);
   const [theme, setTheme] = useState(themeChoice);
   const [confirmErase, setConfirmErase] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,6 +30,7 @@ export function Me({ profile, onRenamed, onCard }: Props) {
 
   useEffect(() => {
     api.settings().then((settings) => setReadReceipts(settings.readReceipts));
+    lockAvailable().then(setCanLock);
   }, []);
 
   async function rename(event: FormEvent) {
@@ -42,6 +46,17 @@ export function Me({ profile, onRenamed, onCard }: Props) {
   async function toggleReadReceipts(on: boolean) {
     setReadReceipts(on);
     await api.setReadReceipts(on).catch((failure) => setError(String(failure).replace(/^Error: /, "")));
+  }
+
+  // Turning the lock on or off asks for the owner first.
+  async function toggleAppLock(on: boolean) {
+    setError(null);
+    try {
+      await setAppLock(on, t.appLockSetting, t.appLockChangeReason);
+      setAppLockState(on);
+    } catch (failure) {
+      setError(String(failure).replace(/^Error: /, "") || t.appLockFailed);
+    }
   }
 
   function toggleNotifications(on: boolean) {
@@ -114,6 +129,18 @@ export function Me({ profile, onRenamed, onCard }: Props) {
             <b>{t.notifications}</b>
           </span>
           <input type="checkbox" checked={notifications} onChange={(event) => toggleNotifications(event.target.checked)} />
+        </label>
+        <label className="row-item toggle">
+          <span className="row-text">
+            <b>{t.appLockSetting}</b>
+            <span>{canLock === false && !appLock ? t.appLockUnavailable : t.appLockHint}</span>
+          </span>
+          <input
+            type="checkbox"
+            checked={appLock}
+            disabled={canLock !== true}
+            onChange={(event) => toggleAppLock(event.target.checked)}
+          />
         </label>
       </div>
 

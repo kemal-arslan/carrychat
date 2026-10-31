@@ -16,6 +16,15 @@ const en = {
   lockedIntro:
     "CarryChat keeps your data on this device encrypted, with its key in the system's key store, which could not give it. Your data is still here. Allow CarryChat to use the key if you are asked, then try again.",
   lockedRetry: "Try again",
+  appLockSetting: "App lock",
+  appLockHint: "Asks for your fingerprint, face or device password when CarryChat opens, and after a minute away",
+  appLockUnavailable: "Not available on this device",
+  appLockTitle: "CarryChat is locked",
+  appLockIntro: "Use your fingerprint, face or device password to open it.",
+  appLockOpen: "Open",
+  appLockReason: "Unlock your messages",
+  appLockChangeReason: "Confirm it's you to change the app lock",
+  appLockFailed: "It did not unlock.",
 
   requests: "Requests",
   contacts: "Contacts",
@@ -426,6 +435,15 @@ const tr: Strings = {
   lockedIntro:
     "CarryChat bu cihazdaki verilerini şifreli tutar; anahtarı sistemin anahtar deposundadır ve depo onu veremedi. Verilerin yerinde duruyor. Sorulursa CarryChat'in anahtarı kullanmasına izin ver, sonra yeniden dene.",
   lockedRetry: "Yeniden dene",
+  appLockSetting: "Uygulama kilidi",
+  appLockHint: "CarryChat açılırken ve bir dakikadan uzun ayrıldıktan sonra parmak izi, yüz ya da cihaz şifresi ister",
+  appLockUnavailable: "Bu cihazda kullanılamıyor",
+  appLockTitle: "CarryChat kilitli",
+  appLockIntro: "Açmak için parmak izini, yüzünü ya da cihaz şifreni kullan.",
+  appLockOpen: "Aç",
+  appLockReason: "Mesajlarının kilidini aç",
+  appLockChangeReason: "Uygulama kilidini değiştirmek için kimliğini doğrula",
+  appLockFailed: "Kilit açılmadı.",
 
   requests: "İstekler",
   contacts: "Kişiler",

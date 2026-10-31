@@ -279,6 +279,10 @@ export interface Api {
   profile(): Promise<Profile | null>;
   /** Tries again to open this device's data, which did not open: gives the profile, or why it still does not. */
   unlock(): Promise<Profile | null>;
+  /** Whether this computer can ask for its owner, by Touch ID or its password, for the app lock. */
+  lockAvailable(): Promise<boolean>;
+  /** Asks for the computer's owner, saying `reason`; fails if they are not there. */
+  authenticate(reason: string): Promise<void>;
   createProfile(name: string): Promise<Profile>;
   rename(name: string): Promise<Profile>;
   contacts(): Promise<Contact[]>;
@@ -456,6 +460,8 @@ function desktopApi(): Api {
     preview: false,
     profile: () => call("profile"),
     unlock: () => call("unlock"),
+    lockAvailable: () => call("lock_available"),
+    authenticate: (reason) => call("authenticate", { reason }),
     createProfile: (name) => call("create_profile", { name }),
     rename: (name) => call("rename", { name }),
     contacts: () => call("contacts"),
@@ -736,6 +742,12 @@ function previewApi(): Api {
     },
     async unlock() {
       return profile;
+    },
+    async lockAvailable() {
+      return true;
+    },
+    async authenticate() {
+      await new Promise((resolve) => setTimeout(resolve, 400));
     },
     async createProfile(name) {
       profile = {

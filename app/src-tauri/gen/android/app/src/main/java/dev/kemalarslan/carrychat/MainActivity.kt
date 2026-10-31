@@ -11,6 +11,9 @@ import android.view.View
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -29,6 +32,7 @@ class MainActivity : TauriActivity() {
     // The theme the page last chose, until the page loads and says again.
     val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
     if (prefs.contains(DARK)) paintBars(prefs.getBoolean(DARK, false))
+    hideFromRecents(prefs.getBoolean(APP_LOCK, false))
     keepClearOfSystemBars(findViewById(android.R.id.content))
     attachScreen()
     askForPermissions()
@@ -79,6 +83,24 @@ class MainActivity : TauriActivity() {
       CardService.offer(card)
     }
 
+    /** Whether this phone can ask for its owner for the app lock (§10): it has a fingerprint, face or screen lock. */
+    @JavascriptInterface
+    fun lockAvailable(): Boolean =
+      BiometricManager.from(this@MainActivity).canAuthenticate(OWNER) == BiometricManager.BIOMETRIC_SUCCESS
+
+    /** Asks for the phone's owner; the answer goes to the page as a `carrychat-owner` event. */
+    @JavascriptInterface
+    fun authenticate(title: String, subtitle: String) {
+      runOnUiThread { askForOwner(title, subtitle) }
+    }
+
+    /** Keeps the app's screens out of the recent apps while the app lock is on. */
+    @JavascriptInterface
+    fun setAppLock(on: Boolean) {
+      getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(APP_LOCK, on).apply()
+      runOnUiThread { hideFromRecents(on) }
+    }
+
     /** Reads cards over NFC while `on`; each is sent to the page as a `carrychat-nfc` event. */
     @JavascriptInterface
     fun nfcRead(on: Boolean) {
@@ -102,6 +124,43 @@ class MainActivity : TauriActivity() {
       val detail = JSONObject.quote(card)
       webView?.evaluateJavascript("window.dispatchEvent(new CustomEvent('carrychat-nfc', { detail: $detail }))", null)
     }
+  }
+
+  /** Asks for the owner by fingerprint, face, or the phone's PIN, pattern or password. */
+  private fun askForOwner(title: String, subtitle: String) {
+    val prompt = BiometricPrompt(
+      this,
+      ContextCompat.getMainExecutor(this),
+      object : BiometricPrompt.AuthenticationCallback() {
+        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+          answerOwner(true, null)
+        }
+
+        override fun onAuthenticationError(code: Int, message: CharSequence) {
+          answerOwner(false, message.toString())
+        }
+      },
+    )
+    val info = BiometricPrompt.PromptInfo.Builder()
+      .setTitle(title)
+      .setSubtitle(subtitle)
+      .setAllowedAuthenticators(OWNER)
+      .build()
+    try {
+      prompt.authenticate(info)
+    } catch (error: Exception) {
+      answerOwner(false, error.message)
+    }
+  }
+
+  private fun answerOwner(ok: Boolean, error: String?) {
+    val detail = JSONObject().put("ok", ok).put("error", error ?: JSONObject.NULL)
+    webView?.evaluateJavascript("window.dispatchEvent(new CustomEvent('carrychat-owner', { detail: $detail }))", null)
+  }
+
+  /** The recent apps show no picture of a locked app's last screen. */
+  private fun hideFromRecents(hide: Boolean) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) setRecentsScreenshotEnabled(!hide)
   }
 
   private fun paintBars(dark: Boolean) {
@@ -161,5 +220,8 @@ class MainActivity : TauriActivity() {
   private companion object {
     const val PREFS = "carrychat"
     const val DARK = "dark_bars"
+    const val APP_LOCK = "app_lock"
+    /** The owner, by any fingerprint or face the phone knows, or by its screen lock. */
+    const val OWNER = BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.DEVICE_CREDENTIAL
   }
 }

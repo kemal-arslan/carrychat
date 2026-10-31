@@ -17,6 +17,12 @@ declare global {
       nfcAvailable(): boolean;
       nfcOffer(card: string | null): void;
       nfcRead(on: boolean): void;
+      /** Whether the phone can ask for its owner, for the app lock. */
+      lockAvailable(): boolean;
+      /** Asks for the phone's owner; the answer comes as a `carrychat-owner` event. */
+      authenticate(title: string, subtitle: string): void;
+      /** Keeps the app out of the recent apps' pictures while the app lock is on. */
+      setAppLock(on: boolean): void;
     };
   }
 }

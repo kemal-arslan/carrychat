@@ -46,7 +46,8 @@ import { Me } from "./Me";
 import { Network } from "./Network";
 import { People } from "./People";
 import { notificationsEnabled } from "./prefs";
-import { Locked, Setup } from "./Setup";
+import { looking, useAppLocked } from "./lock";
+import { AppLock, Locked, Setup } from "./Setup";
 
 export default function App() {
   const [profile, setProfile] = useState<Profile | null | undefined>(undefined);
@@ -73,7 +74,22 @@ export default function App() {
   }
   if (profile === undefined) return null;
   if (profile === null) return <Setup onCreated={setProfile} />;
-  return <Main profile={profile} onProfile={setProfile} />;
+  return <Unlocked profile={profile} onProfile={setProfile} />;
+}
+
+/** The app behind its lock (§10): it opens only once the owner is there, and keeps its place while locked again. */
+function Unlocked({ profile, onProfile }: { profile: Profile; onProfile: (profile: Profile) => void }) {
+  const locked = useAppLocked();
+  const [opened, setOpened] = useState(!locked);
+  useEffect(() => {
+    if (!locked) setOpened(true);
+  }, [locked]);
+  return (
+    <>
+      {locked && <AppLock />}
+      {opened && <Main profile={profile} onProfile={onProfile} hidden={locked} />}
+    </>
+  );
 }
 
 type Notice = { text: string; action?: { label: string; run: () => void } };
@@ -93,7 +109,15 @@ type DialogName =
 
 type Tab = "chats" | "people" | "network" | "me";
 
-function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: Profile) => void }) {
+function Main({
+  profile,
+  onProfile,
+  hidden,
+}: {
+  profile: Profile;
+  onProfile: (profile: Profile) => void;
+  hidden: boolean;
+}) {
   const { t, language } = useI18n();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
@@ -164,7 +188,7 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
 
   // Messages count as read only while someone is looking at them.
   const markSelectedRead = useCallback(() => {
-    if (!document.hasFocus()) return;
+    if (!looking()) return;
     const contactId = selectedRef.current;
     const groupId = selectedGroupRef.current;
     if (contactId !== null) api.markRead(contactId).then(refreshContacts);
@@ -172,6 +196,11 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
     const channelId = selectedChannelRef.current;
     if (channelId !== null) api.markChannelRead(channelId).then(refreshChannels);
   }, [refreshContacts, refreshGroups, refreshChannels]);
+
+  // Unlocked, the open conversation is in sight again.
+  useEffect(() => {
+    if (!hidden) markSelectedRead();
+  }, [hidden, markSelectedRead]);
 
   // On a phone the list and the conversation are pages of their own, and
   // opening a conversation is a step that the back button takes back.
@@ -274,11 +303,11 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
         const t = tRef.current;
         if (event.type === "messageReceived") {
           const { message } = event;
-          const looking = message.contactId === selectedRef.current && document.hasFocus();
+          const inSight = message.contactId === selectedRef.current && looking();
           if (message.contactId === selectedRef.current) {
             setMessages((current) => [...current, message]);
           }
-          if (looking) {
+          if (inSight) {
             markSelectedRead();
           } else {
             const sender = contactsRef.current.find((contact) => contact.id === message.contactId);
@@ -288,7 +317,7 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
           }
         } else if (event.type === "contactRequest") {
           show(t.wantsToMessage(event.contact.name));
-          if (!document.hasFocus() && notificationsEnabled()) api.notify(t.wantsToMessage(event.contact.name), "");
+          if (!looking() && notificationsEnabled()) api.notify(t.wantsToMessage(event.contact.name), "");
           refreshContacts();
         } else if (event.type === "messageDelivered") {
           setMessages((current) =>
@@ -313,7 +342,7 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
           const { message } = event;
           const open = message.groupId === selectedGroupRef.current;
           if (open) setGroupMessages((current) => [...current, message]);
-          if (open && document.hasFocus()) {
+          if (open && looking()) {
             markSelectedRead();
           } else {
             const group = groupsRef.current.find((candidate) => candidate.id === message.groupId);
@@ -334,7 +363,7 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
           const { post } = event;
           const open = post.channelId === selectedChannelRef.current;
           if (open) setPosts((current) => [...current, post]);
-          if (open && document.hasFocus()) {
+          if (open && looking()) {
             markSelectedRead();
           } else {
             refreshChannels();
@@ -539,7 +568,7 @@ function Main({ profile, onProfile }: { profile: Profile; onProfile: (profile: P
   ];
 
   return (
-    <div className={["shell", narrow && "narrow", active && "open"].filter(Boolean).join(" ")}>
+    <div className={["shell", narrow && "narrow", active && "open"].filter(Boolean).join(" ")} hidden={hidden}>
       <aside className="side">
         <div className="side-body">
           {tab === "chats" && (

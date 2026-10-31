@@ -2,6 +2,7 @@
 
 const NOTIFICATIONS_KEY = "carrychat.notifications";
 const INAUDIBLE_KEY = "carrychat.soundInaudible";
+const APP_LOCK_KEY = "carrychat.appLock";
 
 export function notificationsEnabled(): boolean {
   try {
@@ -36,6 +37,24 @@ export function setSoundInaudible(on: boolean): void {
   try {
     if (on) localStorage.removeItem(INAUDIBLE_KEY);
     else localStorage.setItem(INAUDIBLE_KEY, "off");
+  } catch {
+    // Without storage the setting lasts until the window closes.
+  }
+}
+
+/** Whether the app asks for the device's owner when it opens and comes back (§10). */
+export function appLockOn(): boolean {
+  try {
+    return localStorage.getItem(APP_LOCK_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+
+export function setAppLockOn(on: boolean): void {
+  try {
+    if (on) localStorage.setItem(APP_LOCK_KEY, "on");
+    else localStorage.removeItem(APP_LOCK_KEY);
   } catch {
     // Without storage the setting lasts until the window closes.
   }

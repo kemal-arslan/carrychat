@@ -316,6 +316,11 @@ input[type="checkbox"] {
   overflow: hidden;
 }
 
+/* Behind the app lock: kept, so its place is there once unlocked, but out of sight. */
+.shell[hidden] {
+  display: none;
+}
+
 .side {
   position: relative;
   display: flex;

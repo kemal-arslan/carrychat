@@ -161,7 +161,8 @@ Vurgu rengi üzerindeki beyaz 5.2:1, surface üzerindeki text-muted 5.0:1 kontra
 - **Sohbetler:** Ara ve "Kartım" düğmeleriyle büyük başlık, Ağ'ı açan tek satırlık bağlantı özeti, filtre düğmeleri (Tümü, Okunmamış, Gruplar, Kanallar), ardından ayırıcısız satırlar: 50px avatar, ad, saat, son mesaj ve okunmamış sayısı.
 - **Konuşma:** geri düğmesi, avatar, ad ve tek satırlık bağlam içeren bir üst bilgi, ardından balonlar, ardından tek satırlık bir yazma alanı.
 - **Ağ:** yakında kaç cihaz olduğunun özeti, ardından her bağlantı için durumu ve anahtarıyla gruplanmış satırlar, ardından elden ele taşıma seçenekleri (Dosyaya aktar, Dosya al, Adrese bağlan).
-- **Ben:** kimlik (ad, parmak izi, kart), ardından gruplanmış satırlarda ayarlar.
+- **Ben:** kimlik (ad, parmak izi, kart), ardından gruplanmış satırlarda ayarlar. Gizlilik grubunda okundu bilgisi, bildirimler ve **Uygulama kilidi** vardır; kilidin anahtarı değişmeden önce sahibini ister, sormanın yolu olmayan cihazlarda "Bu cihazda kullanılamıyor" yazar.
+- **Uygulama kilidi:** gizlenmiş uygulamanın üstünde yine ilk açılış kartı: "CarryChat kilitli", parmak izi, yüz ya da cihaz şifresinin kullanılmasını söyleyen bir satır ve "Aç". Hemen sorar; uygulama kaldığı yerden döner.
 - **Kilitli:** cihazdaki veri açılmadığında, örneğin anahtar deposu anahtarı vermediğinde, ilk açılış kartı yeni bir kimlik önermek yerine bunu söyler: "Verilerin açılamadı", verilerin yerinde durduğunu ve sorulursa CarryChat'e anahtar için izin verilmesini söyleyen bir satır, hata renginde neden ve "Yeniden dene".
 - Kenar boşlukları telefonlarda 20px; satırlar en az 44px yüksekliğinde; boşluklar 4px adımlarla artar.
 

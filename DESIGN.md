@@ -159,7 +159,8 @@ White on the accent is 5.2:1. Text-muted on surface is 5.0:1; text-faint is for 
 - **Chats:** large title with search and "my card" buttons, a one-line link summary that opens Network, filter chips (All, Unread, Groups, Channels), then rows with no separators: a 50px avatar, name, time, last message and unread count.
 - **Conversation:** a header with back, avatar, name and one line of context, then bubbles, then a single-row composer.
 - **Network:** a summary of how many devices are nearby, then grouped rows for each link with its state and switch, then the hand-carried options (export, import, connect by address).
-- **Me:** the identity (name, fingerprint, card), then settings in grouped rows.
+- **Me:** the identity (name, fingerprint, card), then settings in grouped rows. Privacy holds read receipts, notifications and **App lock**, whose switch asks for the owner before it changes, and reads "Not available on this device" where there is no way to ask.
+- **App lock:** the first-run card again, over the hidden app: "CarryChat is locked", a line to use the fingerprint, face or device password, and "Open". It asks at once, and the app comes back where it was.
 - **Locked:** when the data on the device does not open, as when the key store refuses its key, the first-run card says so instead of offering a new identity: "Your data did not open", a line that the data is still there and to allow CarryChat the key if asked, the reason in the error colour, and "Try again".
 - Gutters are 20px on phones; rows are at least 44px tall; spacing steps in 4px.
 

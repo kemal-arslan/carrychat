@@ -1,8 +1,49 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { api, type Profile } from "./api";
 import { MAX_NAME_BYTES, utf8Length } from "./format";
 import { useI18n } from "./i18n";
+import { unlock } from "./lock";
 import { Logo } from "./Logo";
+
+/** The locked app (§10): asks for the device's owner at once, and again on a tap. */
+export function AppLock() {
+  const { t } = useI18n();
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const asked = useRef(false);
+
+  async function ask(event?: FormEvent) {
+    event?.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await unlock(t.appLockTitle, t.appLockReason);
+    } catch (failure) {
+      setError(String(failure).replace(/^Error: /, "") || t.appLockFailed);
+      setBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (asked.current) return;
+    asked.current = true;
+    void ask();
+  }, []);
+
+  return (
+    <div className="setup">
+      <form className="setup-card" onSubmit={ask}>
+        <Logo size={64} />
+        <h1>{t.appLockTitle}</h1>
+        <p className="lede">{t.appLockIntro}</p>
+        {error && <p className="hint error">{error}</p>}
+        <button className="primary" disabled={busy}>
+          {t.appLockOpen}
+        </button>
+      </form>
+    </div>
+  );
+}
 
 /**
  * Shown when the data on this device does not open, as when the key store holding its key refused or could not be

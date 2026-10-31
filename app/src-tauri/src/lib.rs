@@ -19,6 +19,7 @@ use tauri_plugin_fs::{FilePath, FsExt, OpenOptions};
 
 #[cfg(target_os = "android")]
 mod android;
+mod owner;
 
 struct AppState {
     dir: PathBuf,
@@ -190,6 +191,20 @@ fn profile(state: State<'_, AppState>) -> CommandResult<Option<Profile>> {
         return Err(reason);
     }
     Ok(state.node().ok().map(|node| node.profile()))
+}
+
+/// Whether this device can ask for its owner for the app lock (§10). Android
+/// asks through the activity instead.
+#[tauri::command]
+fn lock_available() -> bool {
+    owner::available()
+}
+
+/// Asks for the device's owner, by Touch ID, Face ID or its password,
+/// saying `reason`, to open the locked app.
+#[tauri::command]
+async fn authenticate(reason: String) -> CommandResult<()> {
+    owner::authenticate(reason).await
 }
 
 /// Tries again to open the data on this device, which did not open before,
@@ -837,6 +852,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             profile,
             unlock,
+            lock_available,
+            authenticate,
             create_profile,
             contacts,
             add_contact,
