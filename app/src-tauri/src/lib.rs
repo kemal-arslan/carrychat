@@ -9,8 +9,9 @@ use std::sync::Mutex;
 
 use carrychat_node::{
     ChannelView, ContactView, GroupMessageView, GroupView, HeardCard, ImportReport, InternetConfig,
-    Journey, LanConfig, LoraDevice, LoraPort, LoraStatus, MessageView, MutedView, NearbyPerson,
-    Node, PostView, Profile, ReticulumStatus, Settings, SoundBand, SoundListener, Status,
+    Journey, KeyStore, LanConfig, LoraDevice, LoraPort, LoraStatus, MessageView, MutedView,
+    NearbyPerson, Node, PostView, Profile, ReticulumStatus, Settings, SoundBand, SoundListener,
+    Status,
 };
 use data_encoding::BASE64;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -22,6 +23,9 @@ mod android;
 struct AppState {
     dir: PathBuf,
     node: Mutex<Option<Node>>,
+    /// Why the data on this device did not open, if it did not: it stays as
+    /// it is, and the page asks to try again.
+    locked: Mutex<Option<String>>,
     /// What the page listens to the microphone for: a card played as sound,
     /// or messages.
     listenings: Mutex<Listenings>,
@@ -73,6 +77,40 @@ impl AppState {
 
 fn text(error: impl ToString) -> String {
     error.to_string()
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Where this device keeps the key its data is encrypted with (§10): the
+/// operating system's key store, or a file next to the data where there is
+/// none.
+#[cfg(not(target_os = "android"))]
+fn keys() -> impl KeyStore {
+    carrychat_node::Fallback(carrychat_node::Keychain, carrychat_node::KeyFile)
+}
+
+/// Where this phone keeps the key its data is encrypted with (§10): Android
+/// Keystore, through the app's Kotlin.
+#[cfg(target_os = "android")]
+fn keys() -> impl KeyStore {
+    android::Keys
+}
+
+/// Opens the node in `dir`, if there is one, unless the service on Android
+/// opened it already.
+fn open_node(dir: &Path) -> carrychat_node::Result<Option<Node>> {
+    #[cfg(target_os = "android")]
+    {
+        android::open(dir)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        Node::open_with(dir, &keys())
+    }
 }
 
 /// Starts the local network, internet and Bluetooth links. `report` hears
@@ -144,9 +182,32 @@ fn launch(app: &AppHandle, node: &Node, dir: &Path) {
     });
 }
 
+/// This device's profile, `None` before there is an identity, or an error
+/// if the data on the device does not open.
 #[tauri::command]
-fn profile(state: State<'_, AppState>) -> Option<Profile> {
-    state.node().ok().map(|node| node.profile())
+fn profile(state: State<'_, AppState>) -> CommandResult<Option<Profile>> {
+    if let Some(reason) = lock(&state.locked).clone() {
+        return Err(reason);
+    }
+    Ok(state.node().ok().map(|node| node.profile()))
+}
+
+/// Tries again to open the data on this device, which did not open before,
+/// as when its key store refused or could not be reached.
+#[tauri::command]
+fn unlock(app: AppHandle, state: State<'_, AppState>) -> CommandResult<Option<Profile>> {
+    let node = open_node(&state.dir).map_err(|error| {
+        let reason = error.to_string();
+        *lock(&state.locked) = Some(reason.clone());
+        reason
+    })?;
+    *lock(&state.locked) = None;
+    if let Some(node) = &node {
+        launch(&app, node, &state.dir);
+    }
+    let profile = node.as_ref().map(Node::profile);
+    *lock(&state.node) = node;
+    Ok(profile)
 }
 
 #[tauri::command]
@@ -159,7 +220,10 @@ fn create_profile(
     if name.is_empty() {
         return Err("Choose a name".to_owned());
     }
-    let node = Node::create(&state.dir, name).map_err(text)?;
+    if let Some(reason) = lock(&state.locked).clone() {
+        return Err(reason);
+    }
+    let node = Node::create_with(&state.dir, name, &keys()).map_err(text)?;
     #[cfg(target_os = "android")]
     android::adopt(&state.dir, &node);
     launch(&app, &node, &state.dir);
@@ -406,7 +470,7 @@ fn erase_everything(app: AppHandle, state: State<'_, AppState>) -> CommandResult
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .take();
-    carrychat_node::erase(&state.dir).map_err(text)?;
+    carrychat_node::erase_with(&state.dir, &keys()).map_err(text)?;
     app.restart()
 }
 
@@ -754,23 +818,25 @@ pub fn run() {
             };
             #[cfg(target_os = "android")]
             android::keep(app.handle());
-            // On Android the service may have opened it already, at boot.
-            #[cfg(target_os = "android")]
-            let node = android::open(&dir)?;
-            #[cfg(not(target_os = "android"))]
-            let node = Node::open(&dir)?;
+            // Data that does not open stays as it is, and the page says why.
+            let (node, locked) = match open_node(&dir) {
+                Ok(node) => (node, None),
+                Err(error) => (None, Some(error.to_string())),
+            };
             if let Some(node) = &node {
                 launch(app.handle(), node, &dir);
             }
             app.manage(AppState {
                 dir,
                 node: Mutex::new(node),
+                locked: Mutex::new(locked),
                 listenings: Mutex::default(),
             });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             profile,
+            unlock,
             create_profile,
             contacts,
             add_contact,

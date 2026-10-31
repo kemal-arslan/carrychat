@@ -518,7 +518,8 @@ Implemented in `crates/carrychat-node/src/sound.rs` and the app. Two devices sid
 - delivery receipts that cannot be forged,
 - a closed inbox: only someone holding your card can write to you, and their first message is a request you accept or decline,
 - group messages that only current members can read and that no member can forge in another member's name (§5.7),
-- public channels whose posts cannot be linked to their authors' cards or across channels, and that nobody can forge in another author's name (§5.8).
+- public channels whose posts cannot be linked to their authors' cards or across channels, and that nobody can forge in another author's name (§5.8),
+- a device's data encrypted at rest: identity, sessions, contacts, messages and carried bundles are one SQLCipher database (AES-256 with HMAC-SHA512 per page), keyed with a random 256-bit key the system's key store keeps apart from it. Android wraps it with an AES-GCM key in Android Keystore, which never leaves it, and keeps the data out of backups and moves to a new phone; desktops keep it in the macOS Keychain, Windows Credential Manager or the Linux Secret Service. A device with no key store keeps it in a file next to the data, readable by its owner only. A database from before encryption is encrypted on first opening, through an encrypted copy that replaces it only once it opens with the key; data whose key cannot be read is left as it is.
 
 **v0 does not provide:**
 
@@ -530,6 +531,7 @@ Implemented in `crates/carrychat-node/src/sound.rs` and the app. Two devices sid
 - **Privacy in public channels.** Anyone who knows a channel's name, and its password if it has one, reads its posts, including posts they recorded before. A password is only as strong as it is hard to guess, since the keys come from it directly. Channel posts have no forward secrecy and no delivery receipts.
 - **Immediate removal from a group.** Members that have not yet seen a removal keep writing on chains the removed member holds. Group bundles also have no delivery receipts, and a group's admin and member list are visible to every member.
 - **Reliable time.** Devices without internet access may have wrong clocks. The tag window absorbs a day of drift, and expiry checks use local time.
+- **Protection on an unlocked device.** The key store gives the data key to the app running as its user, so anyone using the unlocked device, or malware running as its user, reads everything. Nor is the data encrypted with a passphrase of its own; on a computer with no key store its key lies beside it. Data replaced by encryption may remain on the disk's free space until overwritten.
 
 ## 11. Open questions
 

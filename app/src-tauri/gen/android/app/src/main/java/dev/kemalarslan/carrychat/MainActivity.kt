@@ -23,6 +23,8 @@ class MainActivity : TauriActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
+    // The node opens as the screen is made: its data key goes first.
+    KeyVault.provide(this)
     super.onCreate(savedInstanceState)
     // The theme the page last chose, until the page loads and says again.
     val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)

@@ -3,7 +3,7 @@
 
 use carrychat_node::engine::{Engine, Outcome};
 use carrychat_node::store::Store;
-use carrychat_node::Event;
+use carrychat_node::{DataKey, Event};
 use carrychat_proto::frame::Frame;
 use carrychat_proto::identity::ContactCard;
 use rusqlite::Connection;
@@ -22,8 +22,8 @@ fn dh_key(engine: &Engine) -> [u8; 32] {
 fn a_failed_write_keeps_no_receipt_and_the_message_still_opens() {
     let dir = TempDir::new().unwrap();
     let paths = [dir.path().join("a.db"), dir.path().join("b.db")];
-    let mut a = Engine::create(Store::open(&paths[0]).unwrap(), "a").unwrap();
-    let mut b = Engine::create(Store::open(&paths[1]).unwrap(), "b").unwrap();
+    let mut a = Engine::create(Store::open(&paths[0], &key()).unwrap(), "a").unwrap();
+    let mut b = Engine::create(Store::open(&paths[1], &key()).unwrap(), "b").unwrap();
     let b_at_a = a.add_contact(&b.profile().card, NOW).unwrap().0.id;
     let a_at_b = b.add_contact(&a.profile().card, NOW).unwrap().0.id;
     let (_, intro) = a.send_text(b_at_a, "selam", NOW).unwrap();
@@ -45,6 +45,8 @@ fn a_failed_write_keeps_no_receipt_and_the_message_still_opens() {
 
     // The receiver's disk refuses to store messages.
     let sql = Connection::open(path).unwrap();
+    sql.execute_batch(&format!("PRAGMA key = \"x'{}'\";", "07".repeat(32)))
+        .unwrap();
     sql.execute_batch(
         "CREATE TRIGGER fail BEFORE INSERT ON messages BEGIN SELECT RAISE(ABORT, 'disk full'); END;",
     )
@@ -74,4 +76,10 @@ fn a_failed_write_keeps_no_receipt_and_the_message_still_opens() {
             message_id: sent.id
         }]
     );
+}
+
+/// The key these tests' databases are encrypted with, the same on every
+/// opening.
+fn key() -> DataKey {
+    DataKey::from_bytes(&[7; 32]).unwrap()
 }

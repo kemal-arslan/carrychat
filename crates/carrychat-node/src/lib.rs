@@ -9,6 +9,7 @@ mod error;
 pub mod file;
 pub mod internet;
 mod journey;
+pub mod keys;
 pub mod lan;
 pub mod lora;
 mod nearby;
@@ -29,12 +30,15 @@ use crate::engine::{Engine, Handled, Outcome};
 pub use crate::error::{Error, Result};
 pub use crate::internet::{InternetConfig, TorState};
 pub use crate::journey::{Journey, Step, Via};
+#[cfg(feature = "keychain")]
+pub use crate::keys::Keychain;
+pub use crate::keys::{DataKey, Fallback, KeyFile, KeyStore};
 pub use crate::lan::{LanConfig, LanProblem};
 pub use crate::lora::{LoraDevice, LoraFirmware, LoraNode, LoraPort, LoraStatus};
 pub use crate::nearby::NearbyPerson;
 pub use crate::reticulum::{ReticulumPeer, ReticulumStatus};
 pub use crate::sound::{HeardCard, SoundListener};
-use crate::store::Store;
+use crate::store::{Found, Store};
 pub use crate::sync::Link;
 pub use carrychat_proto::sound::Band as SoundBand;
 
@@ -340,20 +344,35 @@ pub(crate) struct Shared {
 }
 
 impl Node {
-    /// Creates a node with a new identity in `dir`.
+    /// Creates a node with a new identity in `dir`, with its data key in a
+    /// file next to the data, as [`KeyFile`] keeps it.
     pub fn create(dir: &Path, name: &str) -> Result<Self> {
-        if Self::open(dir)?.is_some() {
-            return Err(Error::Invalid("a CarryChat identity already exists here"));
-        }
-        Ok(Self::new(Engine::create(open_store(dir)?, name)?))
+        Self::create_with(dir, name, &KeyFile)
     }
 
-    /// Opens the node in `dir`, or returns `None` if there is none yet.
+    /// Creates a node with a new identity in `dir`, its data encrypted with
+    /// a key that `keys` keeps (§10).
+    pub fn create_with(dir: &Path, name: &str, keys: &dyn KeyStore) -> Result<Self> {
+        if Self::open_with(dir, keys)?.is_some() {
+            return Err(Error::Invalid("a CarryChat identity already exists here"));
+        }
+        Ok(Self::new(Engine::create(open_store(dir, keys)?, name)?))
+    }
+
+    /// Opens the node in `dir`, with its data key in a file next to the
+    /// data, or returns `None` if there is none yet.
     pub fn open(dir: &Path) -> Result<Option<Self>> {
-        if !dir.join(DATABASE_FILE).exists() {
+        Self::open_with(dir, &KeyFile)
+    }
+
+    /// Opens the node in `dir`, its data encrypted with a key that `keys`
+    /// keeps (§10), or returns `None` if there is none yet. Data from before
+    /// encryption is encrypted first, with a new key kept in `keys`.
+    pub fn open_with(dir: &Path, keys: &dyn KeyStore) -> Result<Option<Self>> {
+        if Store::found(&dir.join(DATABASE_FILE))? == Found::Nothing {
             return Ok(None);
         }
-        Ok(Engine::load(open_store(dir)?)?.map(Self::new))
+        Ok(Engine::load(open_store(dir, keys)?)?.map(Self::new))
     }
 
     fn new(engine: Engine) -> Self {
@@ -1051,28 +1070,59 @@ impl Shared {
     }
 }
 
-/// Deletes everything a node keeps in `dir`: identity, contacts, messages
-/// and carried bundles. Stop using every [`Node`] opened from `dir` first; a
-/// running one keeps what it has in memory until it ends.
+/// Deletes everything a node keeps in `dir`, with its data key in a file
+/// next to the data: see [`erase_with`].
 pub fn erase(dir: &Path) -> Result<()> {
-    for name in [DATABASE_FILE, "carrychat.db-wal", "carrychat.db-shm"] {
+    erase_with(dir, &KeyFile)
+}
+
+/// Deletes everything a node keeps in `dir`: identity, contacts, messages
+/// and carried bundles, and the data key `keys` keeps for it. Stop using
+/// every [`Node`] opened from `dir` first; a running one keeps what it has
+/// in memory until it ends.
+pub fn erase_with(dir: &Path, keys: &dyn KeyStore) -> Result<()> {
+    for name in [
+        DATABASE_FILE,
+        "carrychat.db-wal",
+        "carrychat.db-shm",
+        "carrychat.db.encrypting",
+        "carrychat.db.encrypting-wal",
+        "carrychat.db.encrypting-shm",
+    ] {
         match std::fs::remove_file(dir.join(name)) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
         }
     }
-    Ok(())
+    keys.delete(dir)
 }
 
-fn open_store(dir: &Path) -> Result<Store> {
+/// The database in `dir`, unlocked with its key from `keys`. A new one gets
+/// a new key; one from before encryption is encrypted with it first.
+fn open_store(dir: &Path, keys: &dyn KeyStore) -> Result<Store> {
     std::fs::create_dir_all(dir)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
     }
-    Store::open(&dir.join(DATABASE_FILE))
+    let path = dir.join(DATABASE_FILE);
+    let key = match Store::found(&path)? {
+        // Without its key the data stays as it is: a new key would open
+        // nothing, and the data must not be lost.
+        Found::Encrypted => keys
+            .load(dir)?
+            .ok_or(Error::Invalid("the key to this device's data is missing"))?,
+        found => {
+            let key = keys::load_or_create(keys, dir)?;
+            if found == Found::Plain {
+                Store::encrypt(&path, &key)?;
+            }
+            key
+        }
+    };
+    Store::open(&path, &key)
 }
 
 pub(crate) fn now() -> u32 {

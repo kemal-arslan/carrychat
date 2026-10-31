@@ -21,7 +21,6 @@ k256 = { version = "0.13", features = ["schnorr"] }
 carrychat-proto = { path = "../carrychat-proto" }
 prost = "0.13"
 rand_core = { version = "0.6", features = ["getrandom"] }
-rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
@@ -31,6 +30,8 @@ tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-threa
 tokio-tungstenite = { version = "0.30", features = ["native-tls"] }
 tor-rtcompat = { version = "0.34", default-features = false, features = ["tokio", "native-tls"] }
 x25519-dalek = { version = "2", features = ["static_secrets"] }
+zeroize = "1"
+keyring = { version = "3", optional = true, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 
 uuid = { version = "1", optional = true }
 
@@ -38,6 +39,10 @@ uuid = { version = "1", optional = true }
 # Bluetooth LE (§9.5) through the operating system's stack, where btleplug
 # supports it. Android has its own, in the app.
 bluetooth = ["dep:btleplug", "dep:uuid"]
+# The data key in the operating system's key store (§10): macOS Keychain,
+# Windows Credential Manager or the Secret Service on Linux. Android has its
+# own, in the app.
+keychain = ["dep:keyring"]
 
 [dev-dependencies]
 prost = "0.13"
@@ -51,3 +56,15 @@ serialport = { version = "4", default-features = false }
 # Android has no system OpenSSL for native-tls (relays, Tor): build it in.
 [target.'cfg(target_os = "android")'.dependencies]
 openssl = { version = "0.10", features = ["vendored"] }
+
+# The database is SQLCipher (§10). It encrypts with CommonCrypto on Apple's
+# systems and with OpenSSL elsewhere: the system's on Linux, built in on
+# Android and Windows, which have none to link.
+[target.'cfg(target_vendor = "apple")'.dependencies]
+rusqlite = { version = "0.37", features = ["bundled-sqlcipher"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rusqlite = { version = "0.37", features = ["bundled-sqlcipher"] }
+
+[target.'cfg(not(any(target_vendor = "apple", target_os = "linux")))'.dependencies]
+rusqlite = { version = "0.37", features = ["bundled-sqlcipher-vendored-openssl"] }

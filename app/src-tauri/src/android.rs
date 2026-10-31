@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
 use carrychat_node::lora::{meshcore, meshtastic};
-use carrychat_node::{Event, FileView, Link, LoraDevice, LoraFirmware, Node};
+use carrychat_node::{DataKey, Event, FileView, KeyStore, Link, LoraDevice, LoraFirmware, Node};
 use jni::objects::{GlobalRef, JByteArray, JClass, JObject, JString, JValue};
 use jni::sys::{jboolean, jbyteArray, jint, jstring, JNI_FALSE, JNI_TRUE};
 use jni::{JNIEnv, JavaVM};
@@ -62,9 +62,55 @@ pub fn open(dir: &Path) -> carrychat_node::Result<Option<Node>> {
     let _ = DIR.set(dir.to_owned());
     let mut slot = lock(&NODE);
     if slot.is_none() {
-        *slot = Node::open(dir)?;
+        *slot = Node::open_with(dir, &Keys)?;
     }
     Ok(slot.clone())
+}
+
+/// The key this phone's data is encrypted with (§10), as `KeyVault` gave it.
+static DATA_KEY: Mutex<Option<DataKey>> = Mutex::new(None);
+
+/// The data key Android Keystore keeps for this phone. `KeyVault` makes it,
+/// wraps it with a key Keystore never lets out, and hands it over through
+/// `Core.setDataKey` before anything opens the node.
+pub struct Keys;
+
+impl KeyStore for Keys {
+    fn load(&self, _dir: &Path) -> carrychat_node::Result<Option<DataKey>> {
+        Ok(lock(&DATA_KEY).clone())
+    }
+
+    fn save(&self, _dir: &Path, key: &DataKey) -> carrychat_node::Result<()> {
+        if lock(&DATA_KEY).as_ref() == Some(key) {
+            Ok(())
+        } else {
+            Err(carrychat_node::Error::Invalid(
+                "Android Keystore did not give the data key",
+            ))
+        }
+    }
+
+    // The same key serves a new identity after everything is erased.
+    fn delete(&self, _dir: &Path) -> carrychat_node::Result<()> {
+        Ok(())
+    }
+}
+
+/// `Core.setDataKey(key)`, which the app calls with the key `KeyVault` gave
+/// before the screen or the service opens the node.
+#[no_mangle]
+pub extern "system" fn Java_dev_kemalarslan_carrychat_Core_setDataKey(
+    env: JNIEnv,
+    _class: JClass,
+    key: JByteArray,
+) {
+    let Ok(bytes) = env.convert_byte_array(&key) else {
+        return;
+    };
+    let bytes = zeroize::Zeroizing::new(bytes);
+    if let Some(key) = DataKey::from_bytes(&bytes) {
+        *lock(&DATA_KEY) = Some(key);
+    }
 }
 
 /// A node made on the first run, for the service to find.

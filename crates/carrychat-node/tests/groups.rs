@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 
 use carrychat_node::engine::Engine;
 use carrychat_node::store::Store;
-use carrychat_node::{Event, GroupView};
+use carrychat_node::{DataKey, Event, GroupView};
 use carrychat_proto::frame::Frame;
 use tempfile::TempDir;
 
@@ -358,7 +358,7 @@ fn groups_survive_a_restart() {
     let nodes = ["alice", "bob", "carol"]
         .iter()
         .zip(&paths)
-        .map(|(name, path)| Engine::create(Store::open(path).unwrap(), name).unwrap())
+        .map(|(name, path)| Engine::create(Store::open(path, &key()).unwrap(), name).unwrap())
         .collect();
     let mut mesh = Mesh::with(nodes);
     mesh.create_group();
@@ -367,7 +367,11 @@ fn groups_survive_a_restart() {
 
     let nodes = paths
         .iter()
-        .map(|path| Engine::load(Store::open(path).unwrap()).unwrap().unwrap())
+        .map(|path| {
+            Engine::load(Store::open(path, &key()).unwrap())
+                .unwrap()
+                .unwrap()
+        })
         .collect();
     let mut mesh = Mesh {
         events: vec![Vec::new(); 3],
@@ -375,4 +379,10 @@ fn groups_survive_a_restart() {
     };
     assert_eq!(mesh.say(CAROL, "iki"), vec![ALICE, BOB]);
     assert_eq!(mesh.say(BOB, "üç"), vec![ALICE, CAROL]);
+}
+
+/// The key these tests' databases are encrypted with, the same on every
+/// opening.
+fn key() -> DataKey {
+    DataKey::from_bytes(&[7; 32]).unwrap()
 }

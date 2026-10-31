@@ -277,6 +277,8 @@ export interface Api {
   /** Whether this is the browser preview with sample data. */
   preview: boolean;
   profile(): Promise<Profile | null>;
+  /** Tries again to open this device's data, which did not open: gives the profile, or why it still does not. */
+  unlock(): Promise<Profile | null>;
   createProfile(name: string): Promise<Profile>;
   rename(name: string): Promise<Profile>;
   contacts(): Promise<Contact[]>;
@@ -453,6 +455,7 @@ function desktopApi(): Api {
   return {
     preview: false,
     profile: () => call("profile"),
+    unlock: () => call("unlock"),
     createProfile: (name) => call("create_profile", { name }),
     rename: (name) => call("rename", { name }),
     contacts: () => call("contacts"),
@@ -729,6 +732,9 @@ function previewApi(): Api {
   return {
     preview: true,
     async profile() {
+      return profile;
+    },
+    async unlock() {
       return profile;
     },
     async createProfile(name) {

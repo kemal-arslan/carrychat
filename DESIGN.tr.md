@@ -162,6 +162,7 @@ Vurgu rengi üzerindeki beyaz 5.2:1, surface üzerindeki text-muted 5.0:1 kontra
 - **Konuşma:** geri düğmesi, avatar, ad ve tek satırlık bağlam içeren bir üst bilgi, ardından balonlar, ardından tek satırlık bir yazma alanı.
 - **Ağ:** yakında kaç cihaz olduğunun özeti, ardından her bağlantı için durumu ve anahtarıyla gruplanmış satırlar, ardından elden ele taşıma seçenekleri (Dosyaya aktar, Dosya al, Adrese bağlan).
 - **Ben:** kimlik (ad, parmak izi, kart), ardından gruplanmış satırlarda ayarlar.
+- **Kilitli:** cihazdaki veri açılmadığında, örneğin anahtar deposu anahtarı vermediğinde, ilk açılış kartı yeni bir kimlik önermek yerine bunu söyler: "Verilerin açılamadı", verilerin yerinde durduğunu ve sorulursa CarryChat'e anahtar için izin verilmesini söyleyen bir satır, hata renginde neden ve "Yeniden dene".
 - Kenar boşlukları telefonlarda 20px; satırlar en az 44px yüksekliğinde; boşluklar 4px adımlarla artar.
 
 ## Yükselti ve Derinlik

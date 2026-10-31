@@ -518,7 +518,8 @@ Android uygulamasında (`WifiDirectLink.kt`) gerçeklenmiştir; uygulama, Wi-Fi 
 - sahtelenemeyen teslim alındıları,
 - kapalı bir gelen kutusu: sana yalnızca kartına sahip olan biri yazabilir ve ilk mesajı, kabul ettiğin ya da reddettiğin bir istektir,
 - yalnızca güncel üyelerin okuyabildiği ve hiçbir üyenin başka bir üye adına sahteleyemediği grup mesajları (§5.7),
-- gönderileri yazarlarının kartlarına ya da kanallar arasında birbirine bağlanamayan ve hiç kimsenin başka bir yazar adına sahteleyemediği herkese açık kanallar (§5.8).
+- gönderileri yazarlarının kartlarına ya da kanallar arasında birbirine bağlanamayan ve hiç kimsenin başka bir yazar adına sahteleyemediği herkese açık kanallar (§5.8),
+- bir cihazın verisinin diskte şifreli durması: kimlik, oturumlar, kişiler, mesajlar ve taşınan zarflar tek bir SQLCipher veritabanıdır (sayfa başına AES-256 ve HMAC-SHA512); anahtarı, sistemin anahtar deposunun veriden ayrı tuttuğu rastgele 256 bitlik bir anahtardır. Android onu Android Keystore'daki, oradan hiç çıkmayan bir AES-GCM anahtarıyla sarar ve veriyi yedeklerin ve yeni telefona taşımanın dışında tutar; masaüstüler onu macOS Anahtar Zinciri'nde, Windows Kimlik Bilgisi Yöneticisi'nde ya da Linux Secret Service'te tutar. Anahtar deposu olmayan bir cihaz onu verinin yanında, yalnızca sahibinin okuyabildiği bir dosyada tutar. Şifrelemeden önceki bir veritabanı ilk açılışta şifrelenir: şifreli bir kopyası yazılır ve ancak anahtarla açıldıktan sonra eskisinin yerine geçer. Anahtarı okunamayan veri olduğu gibi bırakılır.
 
 **v0 şunları sağlamaz:**
 
@@ -530,6 +531,7 @@ Android uygulamasında (`WifiDirectLink.kt`) gerçeklenmiştir; uygulama, Wi-Fi 
 - **Herkese açık kanallarda gizlilik.** Bir kanalın adını ve varsa parolasını bilen herkes, daha önce kaydettiği gönderiler dahil kanalın gönderilerini okur. Anahtarlar doğrudan paroladan türetildiği için parola ancak tahmin edilmesi zor olduğu ölçüde güçlüdür. Kanal gönderilerinde ileri gizlilik ve teslim alındısı yoktur.
 - **Gruptan anında çıkarma.** Bir çıkarmayı henüz görmemiş üyeler, çıkarılan üyenin elindeki zincirlerle yazmayı sürdürür. Grup zarflarında ayrıca teslim alındısı yoktur ve bir grubun yöneticisi ile üye listesi her üyeye görünür.
 - **Güvenilir zaman.** İnternet erişimi olmayan cihazların saatleri yanlış olabilir. Etiket penceresi bir günlük kaymayı karşılar; süre dolumu denetimleri yerel saati kullanır.
+- **Kilidi açık bir cihazda koruma.** Anahtar deposu veri anahtarını, kullanıcı olarak çalışan uygulamaya verir; bu yüzden kilidi açık cihazı kullanan ya da kullanıcı olarak çalışan kötü amaçlı bir yazılım her şeyi okur. Veri ayrıca kendi parolasıyla da şifrelenmez; anahtar deposu olmayan bir bilgisayarda anahtarı verinin yanında durur. Şifrelemeyle yerine başkası konan veri, üzerine yazılana kadar diskin boş alanında kalabilir.
 
 ## 11. Açık sorular
 

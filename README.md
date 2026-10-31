@@ -135,7 +135,7 @@ On a phone CarryChat keeps running after its screen is closed, with an ongoing n
 
 ## Security
 
-Your secret keys are stored unencrypted in the app's data folder, which only your user account can read. Anyone with access to your account, or a copy of that folder, can read your messages and send as you.
+Everything CarryChat keeps on a device, your secret keys, contacts and messages, is one database encrypted with SQLCipher. Its key is kept apart, by the system's key store: Android Keystore, which never lets out the key it wraps it with, the macOS Keychain, Windows Credential Manager, or the Secret Service on Linux. A copy of the data folder alone, from a backup or another account, opens nothing; Android leaves the data out of backups and moves to a new phone. A computer with no key store, such as a relay with no screen, keeps the key in a file next to the data, which protects nothing against whoever can read that folder. Data from an earlier version is encrypted the first time it opens. On macOS, an update may ask once to let CarryChat use its key: an app signed ad hoc, as CarryChat's is, counts as a new app after each update. Anyone using your unlocked device, or a program running as your user, can still read your messages and send as you.
 
 Messages have forward secrecy once both contacts have written to each other. The first messages, sent before that, do not: anyone who obtains a device's secret key can decrypt those they have recorded. LoRa transmissions also reveal that a radio is transmitting and from roughly where. [docs/PROTOCOL.md §10](docs/PROTOCOL.md#10-security) lists every known limitation. Until v1, do not rely on CarryChat where being found out is dangerous.
 

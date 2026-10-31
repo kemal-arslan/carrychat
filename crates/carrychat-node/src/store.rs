@@ -8,7 +8,8 @@ use carrychat_proto::ratchet::SkippedKey;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::journey::{Journey, Step, Via};
-use crate::{MessageView, Result};
+use crate::keys::DataKey;
+use crate::{Error, MessageView, Result};
 
 mod channels;
 mod files;
@@ -208,11 +209,91 @@ pub struct Store {
     conn: Connection,
 }
 
+/// What a database file holds, by its first bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Found {
+    Nothing,
+    /// A database from before encryption (§10).
+    Plain,
+    Encrypted,
+}
+
 impl Store {
-    pub fn open(path: &Path) -> Result<Self> {
+    /// Opens the database at `path`, encrypted with `key`, or makes it.
+    pub fn open(path: &Path, key: &DataKey) -> Result<Self> {
         let conn = Connection::open(path)?;
+        unlock(&conn, key)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         Self::init(conn)
+    }
+
+    /// What the file at `path` holds. A database whose pages are all still
+    /// in its write-ahead log has an empty file, and counts as plain.
+    pub fn found(path: &Path) -> Result<Found> {
+        let mut header = [0; 16];
+        let read = match std::fs::File::open(path) {
+            Ok(mut file) => read_up_to(&mut file, &mut header)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(error) => return Err(error.into()),
+        };
+        Ok(match read {
+            0 if file_len(&journal(path, "-wal"))? > 0 => Found::Plain,
+            0 => Found::Nothing,
+            16 if &header == b"SQLite format 3\0" => Found::Plain,
+            _ => Found::Encrypted,
+        })
+    }
+
+    /// Encrypts the plain database at `path` with `key`, in place. An
+    /// encrypted copy is written beside it, opened with the key to check it,
+    /// and only then put in its place: an interruption leaves the plain one
+    /// as it was, to be encrypted on the next try.
+    pub fn encrypt(path: &Path, key: &DataKey) -> Result<()> {
+        let copy = journal(path, ".encrypting");
+        for leftover in [copy.clone(), journal(&copy, "-wal"), journal(&copy, "-shm")] {
+            remove_if_there(&leftover)?;
+        }
+        let version: i64;
+        {
+            let plain = Connection::open(path)?;
+            cipher_version(&plain)?;
+            version = plain.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+            let target = copy.to_string_lossy().replace('\'', "''");
+            plain.execute_batch(&format!(
+                "ATTACH DATABASE '{target}' AS encrypted KEY \"{}\";",
+                key.sql().as_str()
+            ))?;
+            plain.query_row("SELECT sqlcipher_export('encrypted')", [], |_| Ok(()))?;
+            plain.execute_batch(&format!(
+                "PRAGMA encrypted.user_version = {version}; DETACH DATABASE encrypted;"
+            ))?;
+            plain.pragma_update(None, "wal_checkpoint", "TRUNCATE")?;
+        }
+        {
+            let encrypted = Connection::open(&copy)?;
+            unlock(&encrypted, key)?;
+            let copied: i64 = encrypted.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+            if copied != version {
+                return Err(Error::Invalid(
+                    "the encrypted copy of the data is incomplete",
+                ));
+            }
+        }
+        std::fs::File::open(&copy)?.sync_all()?;
+        // The plain database's log would be applied to the encrypted one.
+        // Closed after a checkpoint it holds nothing; if it does, another
+        // program has the database open.
+        if file_len(&journal(path, "-wal"))? > 0 {
+            return Err(Error::Invalid("the data is open in another program"));
+        }
+        remove_if_there(&journal(path, "-wal"))?;
+        remove_if_there(&journal(path, "-shm"))?;
+        std::fs::rename(&copy, path)?;
+        #[cfg(unix)]
+        if let Some(dir) = path.parent() {
+            std::fs::File::open(dir)?.sync_all()?;
+        }
+        Ok(())
     }
 
     pub fn open_in_memory() -> Result<Self> {
@@ -957,6 +1038,65 @@ impl Store {
     }
 }
 
+/// Gives SQLCipher the key, and checks that it opens the database.
+fn unlock(conn: &Connection, key: &DataKey) -> Result<()> {
+    cipher_version(conn)?;
+    conn.execute_batch(&format!("PRAGMA key = \"{}\";", key.sql().as_str()))?;
+    match conn.query_row("SELECT count(*) FROM sqlite_master", [], |row| {
+        row.get::<_, i64>(0)
+    }) {
+        Ok(_) => Ok(()),
+        Err(rusqlite::Error::SqliteFailure(failure, _))
+            if failure.code == rusqlite::ErrorCode::NotADatabase =>
+        {
+            Err(Error::Invalid("the data key does not open this data"))
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// Makes sure this build's SQLite is SQLCipher: plain SQLite would take the
+/// key without a word and keep the data unencrypted.
+fn cipher_version(conn: &Connection) -> Result<String> {
+    conn.query_row("PRAGMA cipher_version", [], |row| row.get(0))
+        .optional()?
+        .ok_or(Error::Invalid("this build cannot encrypt its data"))
+}
+
+/// `path` with `suffix` added, as SQLite names a database's journal files.
+fn journal(path: &Path, suffix: &str) -> std::path::PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(suffix);
+    name.into()
+}
+
+fn file_len(path: &Path) -> Result<u64> {
+    match std::fs::metadata(path) {
+        Ok(metadata) => Ok(metadata.len()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn remove_if_there(path: &Path) -> Result<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn read_up_to(file: &mut std::fs::File, buffer: &mut [u8]) -> Result<usize> {
+    let mut read = 0;
+    while read < buffer.len() {
+        match std::io::Read::read(file, &mut buffer[read..])? {
+            0 => break,
+            count => read += count,
+        }
+    }
+    Ok(read)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -979,7 +1119,13 @@ mod tests {
             .unwrap();
         }
 
-        let store = Store::open(&path).unwrap();
+        // It was plain, and is encrypted before anything else.
+        assert_eq!(Store::found(&path).unwrap(), Found::Plain);
+        let key = DataKey::random();
+        Store::encrypt(&path, &key).unwrap();
+        assert_eq!(Store::found(&path).unwrap(), Found::Encrypted);
+
+        let store = Store::open(&path, &key).unwrap();
         let contacts = store.contacts().unwrap();
         assert_eq!(contacts.len(), 1);
         assert!(!contacts[0].request);
@@ -988,7 +1134,7 @@ mod tests {
         drop(store);
 
         // Opening again applies nothing twice.
-        Store::open(&path).unwrap();
+        Store::open(&path, &key).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

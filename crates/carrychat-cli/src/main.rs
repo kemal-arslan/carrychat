@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use carrychat_node::{
-    ChannelView, ContactView, Event, FileView, GroupView, InternetConfig, LanConfig, LanProblem,
-    LoraDevice, Node, TorState,
+    ChannelView, ContactView, Event, Fallback, FileView, GroupView, InternetConfig, KeyFile,
+    Keychain, LanConfig, LanProblem, LoraDevice, Node, TorState,
 };
 use clap::{Parser, Subcommand};
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -194,6 +194,11 @@ async fn main() -> ExitCode {
 
 type AnyResult = Result<(), Box<dyn std::error::Error>>;
 
+/// Where the data key is kept (§10): the operating system's key store, or a
+/// file next to the data on a computer with none, such as a relay with no
+/// screen.
+const KEYS: Fallback<Keychain, KeyFile> = Fallback(Keychain, KeyFile);
+
 async fn run(cli: Cli) -> AnyResult {
     let dir = cli.dir.unwrap_or_else(default_dir);
     if let Command::Erase { yes } = &cli.command {
@@ -202,17 +207,17 @@ async fn run(cli: Cli) -> AnyResult {
                 "this deletes your identity, contacts and messages for good; add --yes".into(),
             );
         }
-        carrychat_node::erase(&dir)?;
+        carrychat_node::erase_with(&dir, &KEYS)?;
         println!("Erased everything in {}", dir.display());
         return Ok(());
     }
     if let Command::Init { name } = &cli.command {
-        let node = Node::create(&dir, name)?;
+        let node = Node::create_with(&dir, name, &KEYS)?;
         println!("Created {} in {}", name, dir.display());
         print_card(&node);
         return Ok(());
     }
-    let node = Node::open(&dir)?.ok_or_else(|| {
+    let node = Node::open_with(&dir, &KEYS)?.ok_or_else(|| {
         format!(
             "no identity in {}; create one with `carrychat init <name>`",
             dir.display()

@@ -46,15 +46,31 @@ import { Me } from "./Me";
 import { Network } from "./Network";
 import { People } from "./People";
 import { notificationsEnabled } from "./prefs";
-import { Setup } from "./Setup";
+import { Locked, Setup } from "./Setup";
 
 export default function App() {
   const [profile, setProfile] = useState<Profile | null | undefined>(undefined);
+  // Why the data on this device did not open, if it did not.
+  const [locked, setLocked] = useState<string | null>(null);
 
   useEffect(() => {
-    api.profile().then(setProfile);
+    api
+      .profile()
+      .then(setProfile)
+      .catch((failure) => setLocked(String(failure).replace(/^Error: /, "")));
   }, []);
 
+  if (locked !== null) {
+    return (
+      <Locked
+        reason={locked}
+        onOpened={(opened) => {
+          setLocked(null);
+          setProfile(opened);
+        }}
+      />
+    );
+  }
   if (profile === undefined) return null;
   if (profile === null) return <Setup onCreated={setProfile} />;
   return <Main profile={profile} onProfile={setProfile} />;

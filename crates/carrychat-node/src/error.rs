@@ -8,6 +8,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("{0}")]
     Invalid(&'static str),
+    #[error("key store: {0}")]
+    KeyStore(String),
     #[cfg(feature = "bluetooth")]
     #[error("Bluetooth: {0}")]
     Bluetooth(#[from] btleplug::Error),

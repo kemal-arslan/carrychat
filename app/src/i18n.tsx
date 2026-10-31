@@ -12,6 +12,10 @@ const en = {
   nameTooLong: "That name is too long for a contact card.",
   nameHint: "Your contacts see this name. There is no account: your identity is created and kept on this device.",
   createIdentity: "Create my identity",
+  lockedTitle: "Your data did not open",
+  lockedIntro:
+    "CarryChat keeps your data on this device encrypted, with its key in the system's key store, which could not give it. Your data is still here. Allow CarryChat to use the key if you are asked, then try again.",
+  lockedRetry: "Try again",
 
   requests: "Requests",
   contacts: "Contacts",
@@ -418,6 +422,10 @@ const tr: Strings = {
   nameTooLong: "Bu ad kişi kartı için fazla uzun.",
   nameHint: "Kişilerin bu adı görür. Hesap yok: kimliğin bu cihazda oluşturulur ve burada kalır.",
   createIdentity: "Kimliğimi oluştur",
+  lockedTitle: "Verilerin açılamadı",
+  lockedIntro:
+    "CarryChat bu cihazdaki verilerini şifreli tutar; anahtarı sistemin anahtar deposundadır ve depo onu veremedi. Verilerin yerinde duruyor. Sorulursa CarryChat'in anahtarı kullanmasına izin ver, sonra yeniden dene.",
+  lockedRetry: "Yeniden dene",
 
   requests: "İstekler",
   contacts: "Kişiler",

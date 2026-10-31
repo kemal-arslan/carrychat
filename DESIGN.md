@@ -160,6 +160,7 @@ White on the accent is 5.2:1. Text-muted on surface is 5.0:1; text-faint is for 
 - **Conversation:** a header with back, avatar, name and one line of context, then bubbles, then a single-row composer.
 - **Network:** a summary of how many devices are nearby, then grouped rows for each link with its state and switch, then the hand-carried options (export, import, connect by address).
 - **Me:** the identity (name, fingerprint, card), then settings in grouped rows.
+- **Locked:** when the data on the device does not open, as when the key store refuses its key, the first-run card says so instead of offering a new identity: "Your data did not open", a line that the data is still there and to allow CarryChat the key if asked, the reason in the error colour, and "Try again".
 - Gutters are 20px on phones; rows are at least 44px tall; spacing steps in 4px.
 
 ## Elevation & Depth

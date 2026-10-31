@@ -84,6 +84,7 @@ class CarryChatService : Service() {
     // The node starts here when no screen started it: after the phone
     // starts, or when Android restarts the service. Before there is an
     // identity there is nothing to run, unless a screen is open to make one.
+    KeyVault.provide(applicationContext)
     val running = Core.start(applicationContext.dataDir.absolutePath)
     if (!running && intent?.getBooleanExtra(EXTRA_FROM_SCREEN, false) != true) {
       ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -213,4 +214,7 @@ object Core {
 
   /** Opens the node in [dir] and starts its links, unless they already run. */
   @JvmStatic external fun start(dir: String): Boolean
+
+  /** The key the node's data is encrypted with, from [KeyVault]. */
+  @JvmStatic external fun setDataKey(key: ByteArray)
 }

@@ -2,7 +2,7 @@
 
 use carrychat_node::engine::{Engine, Handled, Outcome};
 use carrychat_node::store::Store;
-use carrychat_node::Event;
+use carrychat_node::{DataKey, Event};
 use carrychat_proto::frame::Frame;
 use carrychat_proto::identity::ContactCard;
 use tempfile::TempDir;
@@ -184,8 +184,8 @@ fn sessions_survive_a_restart() {
     let dir = TempDir::new().unwrap();
     let paths = [dir.path().join("alice.db"), dir.path().join("bob.db")];
     let (mut alice, mut bob) = contacts(
-        Store::open(&paths[0]).unwrap(),
-        Store::open(&paths[1]).unwrap(),
+        Store::open(&paths[0], &key()).unwrap(),
+        Store::open(&paths[1], &key()).unwrap(),
     );
     talk(&mut alice, &mut bob, "bir", NOW + 10);
     talk(&mut bob, &mut alice, "iki", NOW + 11);
@@ -196,7 +196,9 @@ fn sessions_survive_a_restart() {
         let peer = side.peer;
         drop(side);
         Side {
-            engine: Engine::load(Store::open(path).unwrap()).unwrap().unwrap(),
+            engine: Engine::load(Store::open(path, &key()).unwrap())
+                .unwrap()
+                .unwrap(),
             peer,
         }
     };
@@ -205,4 +207,10 @@ fn sessions_survive_a_restart() {
     assert!(alice.secure() && bob.secure());
     talk(&mut bob, &mut alice, "dört", NOW + 20);
     talk(&mut alice, &mut bob, "beş", NOW + 21);
+}
+
+/// The key these tests' databases are encrypted with, the same on every
+/// opening.
+fn key() -> DataKey {
+    DataKey::from_bytes(&[7; 32]).unwrap()
 }
