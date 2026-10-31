@@ -8,7 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-arti-client = { version = "0.34", default-features = false, features = ["tokio", "native-tls", "compression"] }
+arti-client = { version = "0.34", default-features = false, features = ["tokio", "native-tls", "compression"], optional = true }
 btleplug = { version = "0.11", optional = true }
 aes = "0.8"
 data-encoding = "2"
@@ -28,7 +28,7 @@ socket2 = { version = "0.6", features = ["all"] }
 thiserror = "2"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-tungstenite = { version = "0.30", features = ["native-tls"] }
-tor-rtcompat = { version = "0.34", default-features = false, features = ["tokio", "native-tls"] }
+tor-rtcompat = { version = "0.34", default-features = false, features = ["tokio", "native-tls"], optional = true }
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 zeroize = "1"
 keyring = { version = "3", optional = true, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
@@ -36,6 +36,11 @@ keyring = { version = "3", optional = true, features = ["apple-native", "windows
 uuid = { version = "1", optional = true }
 
 [features]
+default = ["tor"]
+# The internet link over Tor (§9.3), through Arti. iOS builds without it:
+# Arti's memory accounting needs a system information crate that does not
+# build for iOS yet.
+tor = ["dep:arti-client", "dep:tor-rtcompat"]
 # Bluetooth LE (§9.5) through the operating system's stack, where btleplug
 # supports it. Android has its own, in the app.
 bluetooth = ["dep:btleplug", "dep:uuid"]

@@ -245,6 +245,8 @@ export type Status = {
   internetRefusal: string | null;
   /** Tor's state, when the internet link goes over Tor. */
   internetTor: TorState | null;
+  /** Whether this build can go over Tor at all: iOS cannot yet. */
+  torAvailable: boolean;
   outbox: number;
   carried: number;
 };
@@ -1103,6 +1105,7 @@ function previewApi(): Api {
         internetRefusal: null,
         // ?tor=starting, ?tor=ready or ?tor=failed shows the Tor states.
         internetTor: torPreview(),
+        torAvailable: true,
         outbox: messages.filter((m) => m.outgoing && !m.delivered).length,
         carried: 3,
       };

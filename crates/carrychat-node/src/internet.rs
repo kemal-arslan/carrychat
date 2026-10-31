@@ -10,7 +10,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
+#[cfg(feature = "tor")]
 use arti_client::config::TorClientConfigBuilder;
+#[cfg(feature = "tor")]
 use arti_client::TorClient;
 use serde::Serialize;
 
@@ -25,6 +27,7 @@ use k256::schnorr::SigningKey;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tokio::sync::{broadcast, watch};
+#[cfg(feature = "tor")]
 use tokio_tungstenite::tungstenite::http::Uri;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -58,9 +61,16 @@ const CHUNK_GAP: Duration = Duration::from_millis(60);
 const TOR_CONNECT_TIMEOUT: Duration = Duration::from_secs(45);
 const TOR_PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long to wait before trying Tor again after it failed to start.
+#[cfg(feature = "tor")]
 const TOR_RETRY: Duration = Duration::from_secs(30);
 
+#[cfg(feature = "tor")]
 type Tor = TorClient<tor_rtcompat::PreferredRuntime>;
+
+/// A build without Tor never has a client: a link meant to go over Tor
+/// stays off rather than connect directly.
+#[cfg(not(feature = "tor"))]
+enum Tor {}
 
 #[derive(Clone, Debug)]
 pub struct InternetConfig {
@@ -254,7 +264,23 @@ pub(crate) fn start(shared: &Arc<Shared>, config: InternetConfig) -> Result<()> 
     Ok(())
 }
 
+/// Whether this build can go over Tor.
+pub(crate) const TOR_AVAILABLE: bool = cfg!(feature = "tor");
+
+#[cfg(not(feature = "tor"))]
+async fn tor_loop(shared: Weak<Shared>, _dir: PathBuf) {
+    if let Some(shared) = shared.upgrade() {
+        set_tor_state(
+            &shared,
+            TorState::Failed {
+                detail: "This build has no Tor".to_owned(),
+            },
+        );
+    }
+}
+
 /// Starts Tor, trying again until it works.
+#[cfg(feature = "tor")]
 async fn tor_loop(shared: Weak<Shared>, dir: PathBuf) {
     loop {
         let started = async {
@@ -294,16 +320,38 @@ fn set_tor_state(shared: &Shared, state: TorState) {
     });
 }
 
-/// Opens a Tor stream to the relay's host, on a circuit of its own. The
-/// host name is looked up at the exit, so it does not leak locally either.
-async fn tor_stream(tor: &Tor, url: &str) -> Option<arti_client::DataStream> {
-    tor.isolated_client()
+/// Connects to the relay over Tor, on a circuit of its own. The host name
+/// is looked up at the exit, so it does not leak locally either.
+#[cfg(feature = "tor")]
+async fn connect_over_tor(
+    tor: &Tor,
+    url: &str,
+) -> Option<
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<arti_client::DataStream>>,
+> {
+    let stream = tor
+        .isolated_client()
         .connect(host_and_port(url)?)
         .await
+        .ok()?;
+    tokio_tungstenite::client_async_tls(url, stream)
+        .await
         .ok()
+        .map(|(socket, _)| socket)
+}
+
+#[cfg(not(feature = "tor"))]
+async fn connect_over_tor(
+    tor: &Tor,
+    _url: &str,
+) -> Option<
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+> {
+    match *tor {}
 }
 
 /// The host and port a relay URL points at.
+#[cfg(feature = "tor")]
 fn host_and_port(url: &str) -> Option<(String, u16)> {
     let uri: Uri = url.parse().ok()?;
     let host = uri.host()?.to_owned();
@@ -407,15 +455,10 @@ async fn relay_loop(shared: Weak<Shared>, url: String, keepalive: Duration, over
                 return;
             };
             let client = client.expect("waited for a client");
-            let connected = tokio::time::timeout(TOR_CONNECT_TIMEOUT, async {
-                let stream = tor_stream(&client, &url).await?;
-                tokio_tungstenite::client_async_tls(url.as_str(), stream)
-                    .await
-                    .ok()
-            })
-            .await;
+            let connected =
+                tokio::time::timeout(TOR_CONNECT_TIMEOUT, connect_over_tor(&client, &url)).await;
             match connected {
-                Ok(Some((socket, _))) => {
+                Ok(Some(socket)) => {
                     run_relay(
                         &shared,
                         relay,
@@ -690,6 +733,7 @@ fn with<T>(shared: &Weak<Shared>, f: impl FnOnce(&Shared) -> T) -> Option<T> {
 #[cfg(test)]
 mod tests {
 
+    #[cfg(feature = "tor")]
     #[test]
     fn relay_urls_name_a_host_and_port() {
         assert_eq!(

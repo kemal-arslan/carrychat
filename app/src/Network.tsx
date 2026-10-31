@@ -245,22 +245,24 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
             </span>
           </span>
         </div>
-        <label className="row-item toggle" title={t.torHint}>
-          <span className="tile">
-            <ShieldCheckIcon size={20} />
-          </span>
-          <span className="row-text">
-            <b>{t.torName}</b>
-            <span>{t.torShort}</span>
-          </span>
-          <input
-            type="checkbox"
-            checked={tor ?? false}
-            disabled={!loaded}
-            onChange={(event) => toggleTor(event.target.checked)}
-            aria-label={t.torSetting}
-          />
-        </label>
+        {status?.torAvailable !== false && (
+          <label className="row-item toggle" title={t.torHint}>
+            <span className="tile">
+              <ShieldCheckIcon size={20} />
+            </span>
+            <span className="row-text">
+              <b>{t.torName}</b>
+              <span>{t.torShort}</span>
+            </span>
+            <input
+              type="checkbox"
+              checked={tor ?? false}
+              disabled={!loaded}
+              onChange={(event) => toggleTor(event.target.checked)}
+              aria-label={t.torSetting}
+            />
+          </label>
+        )}
         {needsRestart && (
           <div className="row-item">
             <span className="row-text">

@@ -18,7 +18,7 @@ tauri-build = { version = "2", features = [] }
 # keep the @tauri-apps packages in package.json on the same minor versions.
 [dependencies]
 data-encoding = "2"
-carrychat-node = { path = "../../crates/carrychat-node" }
+carrychat-node = { path = "../../crates/carrychat-node", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = [] }
@@ -26,9 +26,14 @@ tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-notification = "2"
 
-# Desktops connect to phones over Bluetooth through btleplug; Android has its
-# own Bluetooth code in the app.
-[target.'cfg(not(target_os = "android"))'.dependencies]
+# Desktops connect to phones over Bluetooth through btleplug, and keep the
+# data key in the system's key store. Android has its own Bluetooth and key
+# code in the app; iOS goes the desktops' way, without Tor, which does not
+# build for it yet.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+carrychat-node = { path = "../../crates/carrychat-node", features = ["tor", "bluetooth", "keychain"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
 carrychat-node = { path = "../../crates/carrychat-node", features = ["bluetooth", "keychain"] }
 
 # Apple's systems: the app lock asks for the owner through LocalAuthentication,
@@ -42,6 +47,7 @@ objc2-local-authentication = { version = "0.3", features = ["LAContext", "LAPubl
 # Android: posting notifications through the service while no screen is open,
 # and moving the bytes of Bluetooth connections, which Kotlin makes.
 [target.'cfg(target_os = "android")'.dependencies]
+carrychat-node = { path = "../../crates/carrychat-node", features = ["tor"] }
 jni = "0.21"
 zeroize = "1"
 tokio = { version = "1", features = ["io-util", "rt", "sync"] }

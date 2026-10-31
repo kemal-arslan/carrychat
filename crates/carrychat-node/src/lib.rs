@@ -255,6 +255,8 @@ pub struct Status {
     pub internet_refusal: Option<String>,
     /// Tor's state, when the internet link goes over Tor.
     pub internet_tor: Option<TorState>,
+    /// Whether this build can go over Tor at all.
+    pub tor_available: bool,
     /// Own messages not delivered yet.
     pub outbox: usize,
     /// Bundles carried for other people.
@@ -740,6 +742,7 @@ impl Node {
                 .load(std::sync::atomic::Ordering::Relaxed),
             internet_refusal: self.shared.internet.refusal(),
             internet_tor: self.shared.internet.tor_state(),
+            tor_available: internet::TOR_AVAILABLE,
             outbox,
             carried,
         })
