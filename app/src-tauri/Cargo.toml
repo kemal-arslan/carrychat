@@ -31,10 +31,10 @@ tauri-plugin-notification = "2"
 # code in the app; iOS goes the desktops' way, without Tor, which does not
 # build for it yet.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-carrychat-node = { path = "../../crates/carrychat-node", features = ["tor", "bluetooth", "keychain"] }
+carrychat-node = { path = "../../crates/carrychat-node", default-features = false, features = ["tor", "bluetooth", "keychain"] }
 
 [target.'cfg(target_os = "ios")'.dependencies]
-carrychat-node = { path = "../../crates/carrychat-node", features = ["bluetooth", "keychain"] }
+carrychat-node = { path = "../../crates/carrychat-node", default-features = false, features = ["bluetooth", "keychain"] }
 
 # Apple's systems: the app lock asks for the owner through LocalAuthentication,
 # by Touch ID, Face ID or the device's password.
@@ -47,7 +47,7 @@ objc2-local-authentication = { version = "0.3", features = ["LAContext", "LAPubl
 # Android: posting notifications through the service while no screen is open,
 # and moving the bytes of Bluetooth connections, which Kotlin makes.
 [target.'cfg(target_os = "android")'.dependencies]
-carrychat-node = { path = "../../crates/carrychat-node", features = ["tor"] }
+carrychat-node = { path = "../../crates/carrychat-node", default-features = false, features = ["tor"] }
 jni = "0.21"
 zeroize = "1"
 tokio = { version = "1", features = ["io-util", "rt", "sync"] }
