@@ -8,6 +8,13 @@ CarryChat is a store-and-forward messenger. Each message is sealed into a bundle
 
 [![CI](https://github.com/kemal-arslan/carrychat/actions/workflows/ci.yml/badge.svg)](https://github.com/kemal-arslan/carrychat/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/kemalarslan)
 
+<p align="center">
+  <img src="docs/images/en/chats.png" width="190" alt="The chat list">
+  <img src="docs/images/en/chat.png" width="190" alt="A chat, with the links each message went over">
+  <img src="docs/images/en/network.png" width="190" alt="The Network tab, with every link">
+  <img src="docs/images/en/card.png" width="190" alt="My card, as a QR code, text or sound">
+</p>
+
 > **Status: early.** CarryChat works today over the local network, Bluetooth, the internet (Nostr relays) and by file, from a desktop app, an Android app or the command line. The LoRa radio (Meshtastic and MeshCore) and Reticulum links are written and wait for their first field test on real devices, as do Wi-Fi Direct and passing cards over NFC, which need two phones. The latest release, [0.2.0](https://github.com/kemal-arslan/carrychat/releases/tag/v0.2.0), has the Android app and the macOS app for Apple silicon. See the [roadmap](#roadmap).
 
 ## How it works
@@ -148,7 +155,7 @@ On a phone CarryChat keeps running after its screen is closed, with an ongoing n
 
 Everything CarryChat keeps on a device, your secret keys, contacts and messages, is one database encrypted with SQLCipher. Its key is kept apart, by the system's key store: Android Keystore, which never lets out the key it wraps it with, the macOS Keychain, Windows Credential Manager, or the Secret Service on Linux. A copy of the data folder alone, from a backup or another account, opens nothing; Android leaves the data out of backups and moves to a new phone. A computer with no key store, such as a relay with no screen, keeps the key in a file next to the data, which protects nothing against whoever can read that folder. Data from an earlier version is encrypted the first time it opens. On macOS, an update may ask once to let CarryChat use its key: an app signed ad hoc, as CarryChat's is, counts as a new app after each update. **App lock**, under **Me**, asks for your fingerprint, face or the device's own PIN or password when CarryChat opens and when it comes back after a minute away, on Android, macOS and iOS; while locked, nothing of the app shows, not even in the list of recent apps on Android 13 and later. It keeps the app from whoever picks up your unlocked device, but not from a program running as your user, which can still read your messages and send as you.
 
-Messages have forward secrecy once both contacts have written to each other. The first messages, sent before that, do not: anyone who obtains a device's secret key can decrypt those they have recorded. LoRa transmissions also reveal that a radio is transmitting and from roughly where. [docs/PROTOCOL.md §10](docs/PROTOCOL.md#10-security) lists every known limitation. Until v1, do not rely on CarryChat where being found out is dangerous.
+Messages have forward secrecy once both contacts have written to each other. The first messages, sent before that, do not: anyone who obtains a device's secret key can decrypt those they have recorded. LoRa transmissions also reveal that a radio is transmitting and from roughly where. [docs/PROTOCOL.md §10](docs/PROTOCOL.md#10-security) lists every known limitation. Neither the protocol nor the code has had an independent security review yet. Until v1, do not rely on CarryChat where being found out is dangerous.
 
 ## License
 

@@ -10,6 +10,13 @@ CarryChat sakla ve ilet (store-and-forward) mantığıyla çalışan bir mesajla
 
 [![CI](https://github.com/kemal-arslan/carrychat/actions/workflows/ci.yml/badge.svg)](https://github.com/kemal-arslan/carrychat/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/kemalarslan)
 
+<p align="center">
+  <img src="docs/images/tr/chats.png" width="190" alt="Sohbet listesi">
+  <img src="docs/images/tr/chat.png" width="190" alt="Her mesajın geçtiği bağlantılarla bir sohbet">
+  <img src="docs/images/tr/network.png" width="190" alt="Bütün bağlantılarıyla Ağ sekmesi">
+  <img src="docs/images/tr/card.png" width="190" alt="QR kod, metin ya da ses olarak Kartım">
+</p>
+
 > **Durum: erken.** CarryChat bugün yerel ağ, Bluetooth, internet (Nostr aktarıcıları) ve dosya üzerinden; masaüstü uygulamasından, Android uygulamasından ya da komut satırından çalışıyor. LoRa telsizi (Meshtastic ve MeshCore) ve Reticulum bağlantıları yazıldı, gerçek cihazlarda ilk saha denemesini bekliyor. İki telefon gerektiren Wi-Fi Direct ve NFC ile kart alışverişi de öyle. Son sürüm olan [0.2.0](https://github.com/kemal-arslan/carrychat/releases/tag/v0.2.0), Android uygulamasını ve Apple silikonlu Mac'ler için macOS uygulamasını içeriyor. [Yol haritasına](#yol-haritası) bak.
 
 ## Nasıl çalışır
@@ -150,7 +157,7 @@ Telefonda CarryChat ekranı kapatıldıktan sonra da, kalıcı bir bildirimle ç
 
 CarryChat'in bir cihazda tuttuğu her şey, yani gizli anahtarların, kişilerin ve mesajların, SQLCipher ile şifrelenmiş tek bir veritabanıdır. Anahtarı ayrı tutulur, sistemin anahtar deposunda: Android'de onu sardığı anahtarı hiç dışarı vermeyen Android Keystore, macOS'ta Anahtar Zinciri, Windows'ta Kimlik Bilgisi Yöneticisi, Linux'ta Secret Service. Veri klasörünün tek başına bir kopyası, bir yedekten ya da başka bir hesaptan alınmış olsun, hiçbir şey açmaz; Android veriyi yedeklere ve yeni telefona taşımaya da katmaz. Anahtar deposu olmayan bir bilgisayar, örneğin ekransız bir aktarıcı, anahtarı verinin yanındaki bir dosyada tutar; bu, o klasörü okuyabilen birine karşı hiçbir şeyi korumaz. Önceki bir sürümden kalan veri ilk açılışta şifrelenir. macOS'ta bir güncellemeden sonra, CarryChat'in anahtarını kullanmasına izin vermen bir kez istenebilir: CarryChat gibi ad hoc imzalanmış bir uygulama her güncellemede yeni bir uygulama sayılır. **Ben** altındaki **Uygulama kilidi**, CarryChat açılırken ve bir dakikadan uzun ayrıldıktan sonra döndüğünde Android'de, macOS'ta ve iOS'ta parmak izi, yüz ya da cihazın kendi PIN'i veya şifresini ister; kilitliyken uygulamadan hiçbir şey görünmez, Android 13 ve sonrasında son uygulamalar listesinde bile. Kilidi açık cihazını eline alan birine karşı uygulamayı korur, ama senin kullanıcın olarak çalışan bir programa karşı korumaz: o mesajlarını yine okuyabilir ve senin adına gönderebilir.
 
-Mesajlar, iki kişi de birbirine yazdıktan sonra ileri gizliliğe sahip olur. Ondan önce gönderilen ilk mesajlarda yoktur: bir cihazın gizli anahtarını ele geçiren, kaydettiği o mesajları çözebilir. LoRa yayınları da bir telsizin yayın yaptığını ve kabaca nereden yaptığını ele verir. [docs/PROTOCOL.tr.md §10](docs/PROTOCOL.tr.md) bilinen her sınırlamayı sıralar. v1'e kadar, bulunmanın tehlikeli olduğu yerlerde CarryChat'e güvenme.
+Mesajlar, iki kişi de birbirine yazdıktan sonra ileri gizliliğe sahip olur. Ondan önce gönderilen ilk mesajlarda yoktur: bir cihazın gizli anahtarını ele geçiren, kaydettiği o mesajları çözebilir. LoRa yayınları da bir telsizin yayın yaptığını ve kabaca nereden yaptığını ele verir. [docs/PROTOCOL.tr.md §10](docs/PROTOCOL.tr.md) bilinen her sınırlamayı sıralar. Ne protokol ne de kod henüz bağımsız bir güvenlik denetiminden geçti. v1'e kadar, bulunmanın tehlikeli olduğu yerlerde CarryChat'e güvenme.
 
 ## Lisans
 
