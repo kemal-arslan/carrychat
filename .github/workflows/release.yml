@@ -1,0 +1,90 @@
+name: Release
+
+# A tag such as v0.3.0 builds the desktop apps and adds them to a draft
+# release of that tag. The Android app, signed with the release key, is added
+# by hand before the release is published. Run by hand, it only builds them.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  draft:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - run: |
+          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "CarryChat ${GITHUB_REF_NAME#v}" --notes ""
+
+  desktop:
+    needs: draft
+    if: ${{ !cancelled() && needs.draft.result != 'failure' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            # The oldest supported Ubuntu, so the AppImage runs on older systems too.
+            os: ubuntu-22.04
+            bundles: appimage,deb
+          - name: windows
+            os: windows-latest
+            bundles: nsis
+          - name: macos
+            os: macos-15
+            bundles: app
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: app
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install WebKitGTK
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libdbus-1-dev libudev-dev patchelf
+      - run: npm ci
+      - run: npx tauri build --bundles ${{ matrix.bundles }}
+      - name: Name the files
+        run: |
+          version=$(node -p "require('./package.json').version")
+          bundle=../target/release/bundle
+          mkdir -p ../out
+          case ${{ matrix.name }} in
+            linux)
+              cp $bundle/appimage/*.AppImage ../out/CarryChat-$version-linux-x86_64.AppImage
+              cp $bundle/deb/*.deb ../out/CarryChat-$version-linux-amd64.deb
+              ;;
+            windows)
+              cp $bundle/nsis/*-setup.exe ../out/CarryChat-$version-windows-x64-setup.exe
+              ;;
+            macos)
+              ditto -c -k --keepParent $bundle/macos/CarryChat.app ../out/CarryChat-$version-macos-arm64.zip
+              ;;
+          esac
+          ls -l ../out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: carrychat-${{ matrix.name }}
+          path: out/
+      - name: Add them to the draft release
+        if: startsWith(github.ref, 'refs/tags/')
+        run: gh release upload "$GITHUB_REF_NAME" ../out/* --clobber
