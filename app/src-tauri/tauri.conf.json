@@ -29,7 +29,8 @@
     "category": "SocialNetworking",
     "shortDescription": "Messages that get through without the internet",
     "macOS": {
-      "signingIdentity": "-"
+      "signingIdentity": "-",
+      "entitlements": "Entitlements.plist"
     },
     "icon": [
       "icons/32x32.png",
