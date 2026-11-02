@@ -845,6 +845,12 @@ function storedChoice(): LanguageChoice {
   }
 }
 
+/** The language the interface opens in. */
+export function openingLanguage(): Language {
+  const choice = storedChoice();
+  return choice === "system" ? systemLanguage() : choice;
+}
+
 type I18n = {
   t: Strings;
   language: Language;

@@ -6,6 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
+import { openingLanguage } from "./i18n";
 
 export type Profile = { name: string; fingerprint: string; card: string };
 
@@ -578,6 +579,8 @@ function previewApi(): Api {
     reticulum: null,
   };
   const minutesAgo = (minutes: number) => Math.floor(Date.now() / 1000) - minutes * 60;
+  // The sample conversations are in the language the preview opens in.
+  const say = (english: string, turkish: string) => (openingLanguage() === "tr" ? turkish : english);
   // Who the preview shows nearby once it is visible.
   const nearbyPeople: NearbyPerson[] = [
     { session: "a1", name: "Elif", fingerprint: "q3rd 7kpa mx2c vuhe 4tzn 6wyb fo", card: "carrychat:elif", link: "bluetooth", contactId: null },
@@ -613,13 +616,13 @@ function previewApi(): Api {
     via: outgoing ? (done ? ["bluetooth", "lan"] : ["bluetooth"]) : [],
   });
   const messages: Message[] = [
-    message(1, 1, false, "Elektrik geldi mi sizde?", 5400),
-    message(2, 1, true, "Geldi, ama internet hâlâ yok. Su var mı?", 5100),
-    message(3, 1, false, "Var, yarın sabah okulun önünde dağıtım olacak.", 4900),
-    message(4, 1, true, "Tamam, oraya gelirim. Annem de yanımda.", 600, false),
-    message(5, 2, true, "İyiyim, Kadıköy'deyim.", 86400),
-    message(7, 2, false, "Çok sevindim. Akşam ararım.", 80000, false),
-    message(6, 3, false, "Merhaba, ben Mehmet. Kartını Deniz'den aldım.", 300, false),
+    message(1, 1, false, say("Is the power back on where you are?", "Elektrik geldi mi sizde?"), 5400),
+    message(2, 1, true, say("It is, but still no internet. Do you have water?", "Geldi, ama internet hâlâ yok. Su var mı?"), 5100),
+    message(3, 1, false, say("We do. They hand it out in front of the school tomorrow morning.", "Var, yarın sabah okulun önünde dağıtım olacak."), 4900),
+    message(4, 1, true, say("OK, I'll be there. My mother is with me.", "Tamam, oraya gelirim. Annem de yanımda."), 600, false),
+    message(5, 2, true, say("I'm fine, I'm in Kadıköy.", "İyiyim, Kadıköy'deyim."), 86400),
+    message(7, 2, false, say("So glad to hear it. I'll call you tonight.", "Çok sevindim. Akşam ararım."), 80000, false),
+    message(6, 3, false, say("Hi, I'm Mehmet. I got your card from Deniz.", "Merhaba, ben Mehmet. Kartını Deniz'den aldım."), 300, false),
   ];
   const member = (name: string, fingerprint: string, contactId: number | null, admin = false): Member => ({
     name,
@@ -632,11 +635,11 @@ function previewApi(): Api {
   const groups: Group[] = [
     {
       id: 1,
-      name: "Mahalle",
+      name: say("Neighbours", "Mahalle"),
       admin: true,
       member: true,
       members: [
-        { ...member("Sen", "b3oi uvmj hsk3 wflg ofyx lmwu ci", null, true), me: true },
+        { ...member(say("You", "Sen"), "b3oi uvmj hsk3 wflg ofyx lmwu ci", null, true), me: true },
         member("Deniz", "7jgi 54zm 2zkd yent vzen s3pg lq", 1),
         member("Ayşe", "gp6m vxkt dnvv lqmw ewpx qfox be", 2),
         member("Kerem", "u2ab 5ycq oxwf 7mnt l3dk hz6a qe", null),
@@ -657,9 +660,9 @@ function previewApi(): Api {
     file: null,
   });
   const groupMessages: GroupMessage[] = [
-    groupMessage(101, "Kerem", "Okulun önünde su dağıtımı var, saat 10'da.", 7200),
-    groupMessage(102, null, "Teşekkürler, Deniz'le birlikte geliriz.", 7000),
-    { ...groupMessage(103, "Ayşe", "Bizim sokakta elektrik geldi.", 900), read: false },
+    groupMessage(101, "Kerem", say("Water is handed out in front of the school at 10.", "Okulun önünde su dağıtımı var, saat 10'da."), 7200),
+    groupMessage(102, null, say("Thanks, Deniz and I will come together.", "Teşekkürler, Deniz'le birlikte geliriz."), 7000),
+    { ...groupMessage(103, "Ayşe", say("The power is back on our street.", "Bizim sokakta elektrik geldi."), 900), read: false },
     { ...groupMessage(104, "Kerem", "", 700), file: sampleFile(901, 40, 40) },
     { ...groupMessage(105, "Deniz", "", 120), read: false, file: sampleFile(902, 40, 12) },
   ];
@@ -705,13 +708,13 @@ function previewApi(): Api {
     file: null,
   });
   const posts: Post[] = [
-    post(201, "gönüllü", "q4m27hxa", "Moda'da çadır alanı kuruldu, battaniye lazım.", 5400),
-    post(202, null, "b3oiuvmj", "Ne kadar lazım? İki tane getirebilirim.", 5000),
+    post(201, say("volunteer", "gönüllü"), "q4m27hxa", say("A tent area is up in Moda, they need blankets.", "Moda'da çadır alanı kuruldu, battaniye lazım."), 5400),
+    post(202, null, "b3oiuvmj", say("How many? I can bring two.", "Ne kadar lazım? İki tane getirebilirim."), 5000),
     {
       ...post(203, "Selin", "x7tk2pdu", "", 3600),
       sharedCard: { name: "Selin Kaya", fingerprint: "n5df 2kqa 7mvx oe3c wl4t zyrb ka", card: "carrychat:selin" },
     },
-    { ...post(204, "gönüllü", "q4m27hxa", "Ne kadar çok o kadar iyi. Teşekkürler!", 600), read: false },
+    { ...post(204, say("volunteer", "gönüllü"), "q4m27hxa", say("The more the better. Thanks!", "Ne kadar çok o kadar iyi. Teşekkürler!"), 600), read: false },
   ];
   const muted: (Muted & { channelId: number })[] = [];
   const summarizeChannels = () =>
@@ -1034,9 +1037,9 @@ function previewApi(): Api {
           device === null
             ? []
             : meshcore
-              ? [{ name: "Kale tekrarlayıcı", at: minutesAgo(95), snr: null, hops: 1 }]
+              ? [{ name: say("Castle repeater", "Kale tekrarlayıcı"), at: minutesAgo(95), snr: null, hops: 1 }]
               : [
-                  { name: "Tepe röle", at: minutesAgo(4), snr: 6.25, hops: 0 },
+                  { name: say("Hilltop relay", "Tepe röle"), at: minutesAgo(4), snr: 6.25, hops: 0 },
                   { name: "Liman", at: minutesAgo(38), snr: -7.5, hops: 2 },
                 ],
         heardWithin: meshcore ? 48 * 60 * 60 : 3 * 60 * 60,
