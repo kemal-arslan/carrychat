@@ -62,6 +62,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libdbus-1-dev libudev-dev patchelf
       - run: npm ci
+      # OpenSSL, built into the app on Windows, needs Perl modules that Git
+      # Bash's own Perl lacks; the runner's Strawberry Perl has them.
+      - name: Use Strawberry Perl
+        if: runner.os == 'Windows'
+        run: echo 'OPENSSL_SRC_PERL=C:\Strawberry\perl\bin\perl.exe' >> "$GITHUB_ENV"
       - run: npx tauri build --bundles ${{ matrix.bundles }}
       - name: Name the files
         run: |
