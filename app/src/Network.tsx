@@ -6,6 +6,7 @@ import {
   DownloadSimpleIcon,
   EarSlashIcon,
   ExportIcon,
+  FlashlightIcon,
   GlobeSimpleIcon,
   GraphIcon,
   LinkSimpleIcon,
@@ -17,6 +18,8 @@ import {
 import { useEffect, useState } from "react";
 import { api, type LoraStatus, type ReticulumStatus, type Status, type WifiAware } from "./api";
 import { useI18n } from "./i18n";
+import { canWatchLight } from "./light";
+import { LightWatchSheet } from "./LightSheets";
 import { bluetoothLabel, internetLabel, lanLabel, linkStates, loraLabel, reticulumLabel, wifiAwareLabel } from "./links";
 import { LoraSheet } from "./LoraSheet";
 import { setSoundInaudible, soundInaudible } from "./prefs";
@@ -53,6 +56,9 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
   const [reticulumOpen, setReticulumOpen] = useState(false);
   const soundListening = useMessageListening();
   const [inaudible, setInaudible] = useState(soundInaudible);
+  const [lightOpen, setLightOpen] = useState(false);
+  // Whether this phone's Bluetooth also reaches far on the coded PHY.
+  const [longRange] = useState(() => window.CarryChatAndroid?.bluetoothLongRange?.() ?? false);
 
   useEffect(() => {
     api.wifiAware().then(setWifiAware);
@@ -132,7 +138,10 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
           </span>
           <span className="row-text">
             <b>{t.bluetoothName}</b>
-            <span className={bluetooth === "up" ? "live" : undefined}>{bluetoothLabel(bluetooth, status, t)}</span>
+            <span className={bluetooth === "up" ? "live" : undefined}>
+              {bluetoothLabel(bluetooth, status, t)}
+              {longRange && bluetoothOn && ` · ${t.bluetoothLongRange}`}
+            </span>
           </span>
           <input
             type="checkbox"
@@ -221,6 +230,18 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
             aria-label={t.soundInaudibleSetting}
           />
         </label>
+        {canWatchLight() && (
+          <button className="row-item" title={t.lightHint} onClick={() => setLightOpen(true)}>
+            <span className="tile">
+              <FlashlightIcon size={20} />
+            </span>
+            <span className="row-text">
+              <b>{t.lightName}</b>
+              <span>{t.lightWatchRow}</span>
+            </span>
+            <CaretRightIcon className="go" size={16} weight="bold" />
+          </button>
+        )}
         <button className="row-item" title={t.reticulumHint} onClick={() => setReticulumOpen(true)}>
           <span className="tile">
             <GraphIcon size={20} />
@@ -321,6 +342,7 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
       {preview && <p className="page-note preview-tag">{t.preview}</p>}
       {loraOpen && <LoraSheet onClose={() => setLoraOpen(false)} />}
       {reticulumOpen && <ReticulumSheet onClose={() => setReticulumOpen(false)} />}
+      {lightOpen && <LightWatchSheet onClose={() => setLightOpen(false)} />}
     </div>
   );
 }

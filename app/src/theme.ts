@@ -23,6 +23,16 @@ declare global {
       authenticate(title: string, subtitle: string): void;
       /** Keeps the app out of the recent apps' pictures while the app lock is on. */
       setAppLock(on: boolean): void;
+      /** Whether Bluetooth reaches further here with the coded PHY. Missing in older apps. */
+      bluetoothLongRange?(): boolean;
+      /** Whether the phone has a flashlight to send messages as light. */
+      lightAvailable?(): boolean;
+      /** Blinks the flashlight over and over: `1` lit and `0` dark, each for `halfMs`. */
+      lightPlay?(pattern: string, halfMs: number): boolean;
+      lightStop?(): void;
+      /** Whether the flashlight still blinks; it stops by itself if the camera is taken. */
+      lightPlaying?(): boolean;
+      keepScreenOn?(on: boolean): void;
     };
   }
 }

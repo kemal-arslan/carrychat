@@ -1679,6 +1679,85 @@ button.row-item:hover {
   font-size: 15px;
 }
 
+/* Light: sending with the flashlight and watching with the camera */
+.light-beacon {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  margin: 8px auto 4px;
+  border-radius: 50%;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+}
+
+.light-beacon.on {
+  background: var(--accent-tint);
+  color: var(--accent-text);
+}
+
+.light-progress {
+  height: 6px;
+  margin-top: 14px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--surface-muted);
+}
+
+.light-progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 1s linear;
+}
+
+.light-view {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  margin-top: 10px;
+  overflow: hidden;
+  border-radius: 14px;
+  background: #000;
+  touch-action: none;
+}
+
+.light-view video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+}
+
+.light-box {
+  position: absolute;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
+.light-box.seen {
+  border-color: var(--success);
+}
+
+.light-zoom {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  font-size: 14px;
+}
+
+.light-zoom input {
+  flex: 1;
+}
+
+.hint.live {
+  color: var(--success);
+  font-weight: 600;
+}
+
 /* ---------- small screens ---------- */
 
 @media (max-width: 640px) {

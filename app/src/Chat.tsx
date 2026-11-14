@@ -4,6 +4,7 @@ import type { Contact, Message } from "./api";
 import { Composer } from "./Composer";
 import { FileBubble } from "./FileBubble";
 import { PAIR_OVERHEAD, clockTime, fullTime } from "./format";
+import { canSendLight } from "./light";
 import { useI18n } from "./i18n";
 import { ChatHeader, bubbleClass, useStickToBottom, useThreadLayout } from "./Thread";
 import { ViaIcon } from "./Via";
@@ -133,6 +134,7 @@ export function Chat({ contact, messages, onSend, onSendFile, onAccept, onDeclin
           onSend={onSend}
           onSendFile={onSendFile}
           sound
+          light={canSendLight()}
         />
       )}
     </section>

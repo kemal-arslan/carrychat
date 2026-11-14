@@ -11,6 +11,7 @@ pub mod internet;
 mod journey;
 pub mod keys;
 pub mod lan;
+pub mod light;
 pub mod lora;
 mod nearby;
 pub mod reticulum;
@@ -34,12 +35,14 @@ pub use crate::journey::{Journey, Step, Via};
 pub use crate::keys::Keychain;
 pub use crate::keys::{DataKey, Fallback, KeyFile, KeyStore};
 pub use crate::lan::{LanConfig, LanProblem};
+pub use crate::light::{LightListener, LightWatch};
 pub use crate::lora::{LoraDevice, LoraFirmware, LoraNode, LoraPort, LoraStatus};
 pub use crate::nearby::NearbyPerson;
 pub use crate::reticulum::{ReticulumPeer, ReticulumStatus};
 pub use crate::sound::{HeardCard, SoundListener};
 use crate::store::{Found, Store};
 pub use crate::sync::Link;
+pub use carrychat_proto::light::HALF_BIT_MS as LIGHT_HALF_MS;
 pub use carrychat_proto::sound::Band as SoundBand;
 
 const DATABASE_FILE: &str = "carrychat.db";
@@ -421,6 +424,25 @@ impl Node {
             _ => {}
         }
         Ok(sound::frames_wav(&frames, band))
+    }
+
+    /// One of our messages as light (§9.11): its frames, one round each,
+    /// as halves of a bit, true for lit, each `light::HALF_BIT_MS` long, to
+    /// blink over and over for a device in sight that watches. Its journey
+    /// shows it left as light.
+    pub fn message_light(&self, message_id: i64) -> Result<Vec<bool>> {
+        let frames = self
+            .shared
+            .engine()
+            .message_frames(message_id, light::MTU, now())?;
+        match frames.first() {
+            Some(Frame::Bundle(bundle)) => self.shared.handed_off_id(bundle.id, Via::Light, 0),
+            Some(Frame::Fragment(fragment)) => {
+                self.shared.handed_off_id(fragment.id, Via::Light, 0)
+            }
+            _ => {}
+        }
+        Ok(light::frames_pattern(&frames))
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<Event> {

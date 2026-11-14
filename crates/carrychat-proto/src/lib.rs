@@ -13,6 +13,7 @@ pub mod frame;
 pub mod group;
 pub mod identity;
 pub mod intro;
+pub mod light;
 pub mod pair;
 pub mod ratchet;
 pub mod sound;

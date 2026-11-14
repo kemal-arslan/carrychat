@@ -16,6 +16,9 @@ import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.AdvertiseCallback
 import android.bluetooth.le.AdvertiseData
 import android.bluetooth.le.AdvertiseSettings
+import android.bluetooth.le.AdvertisingSet
+import android.bluetooth.le.AdvertisingSetCallback
+import android.bluetooth.le.AdvertisingSetParameters
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
@@ -70,6 +73,12 @@ object Ble {
  * filled the stack's queue until it could not answer the other side's
  * writes, and the link dropped when those answers were 30 seconds late.
  *
+ * A phone whose Bluetooth has the long-range coded PHY also advertises on
+ * it, with its own advertising set beside the usual one, scans on it, and
+ * connects on it to a node heard only there: two to four times the range
+ * in the open, between two such phones. The usual advertisement stays, for
+ * every other device.
+ *
  * Everything runs on one thread, so the maps need no locks.
  */
 @SuppressLint("MissingPermission")
@@ -82,6 +91,10 @@ class BleLink(private val context: Context) {
   private var server: BluetoothGattServer? = null
   private var serverCharacteristic: BluetoothGattCharacteristic? = null
   private var advertising = false
+  /** The long-range advertising set runs, or is starting. */
+  private var advertisingFar = false
+  /** It could not start; tried again with the next session. */
+  private var farFailed = false
   private var scanning = false
   private var nextId = 1
 
@@ -167,6 +180,7 @@ class BleLink(private val context: Context) {
     if (adapter == null || session == null) return
     if (server == null) openServer()
     if (!advertising) advertise(adapter, session)
+    if (!advertisingFar && !farFailed && longRange(adapter)) advertiseFar(adapter, session)
     if (!scanning) scan(adapter)
   }
 
@@ -193,6 +207,8 @@ class BleLink(private val context: Context) {
       runCatching { adapter?.bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback) }
       advertising = false
     }
+    stopAdvertisingFar()
+    farFailed = false
     for (connection in connections.values) {
       Ble.closed(connection.id)
       disconnect(connection)
@@ -247,9 +263,10 @@ class BleLink(private val context: Context) {
 
   private fun advertise(adapter: BluetoothAdapter, session: ByteArray) {
     val advertiser = adapter.bluetoothLeAdvertiser ?: return
+    // High power: about 8 dB over medium, which roughly doubles the range in the open.
     val settings = AdvertiseSettings.Builder()
       .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_BALANCED)
-      .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
+      .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
       .setConnectable(true)
       .setTimeout(0)
       .build()
@@ -267,10 +284,50 @@ class BleLink(private val context: Context) {
     advertising = true
   }
 
+  /**
+   * The same service and session id in one extended advertisement on the
+   * coded PHY, for phones in long range. It is connectable, so it cannot
+   * also be scannable: everything goes in the advertisement itself.
+   */
+  private fun advertiseFar(adapter: BluetoothAdapter, session: ByteArray) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+    val advertiser = adapter.bluetoothLeAdvertiser ?: return
+    val parameters = AdvertisingSetParameters.Builder()
+      .setLegacyMode(false)
+      .setConnectable(true)
+      .setScannable(false)
+      .setPrimaryPhy(BluetoothDevice.PHY_LE_CODED)
+      .setSecondaryPhy(BluetoothDevice.PHY_LE_CODED)
+      .setInterval(AdvertisingSetParameters.INTERVAL_MEDIUM)
+      .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_HIGH)
+      .build()
+    val data = AdvertiseData.Builder()
+      .addServiceUuid(ParcelUuid(SERVICE_UUID))
+      .addServiceData(ParcelUuid(SERVICE_UUID), session)
+      .setIncludeDeviceName(false)
+      .build()
+    try {
+      advertiser.startAdvertisingSet(parameters, data, null, null, null, farCallback)
+      advertisingFar = true
+    } catch (error: RuntimeException) {
+      Log.w(TAG, "Long-range advertising refused", error)
+      farFailed = true
+    }
+  }
+
+  private fun stopAdvertisingFar() {
+    if (!advertisingFar || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+    runCatching { manager?.adapter?.bluetoothLeAdvertiser?.stopAdvertisingSet(farCallback) }
+    advertisingFar = false
+  }
+
   private fun restartAdvertising() {
-    if (!advertising) return
-    runCatching { manager?.adapter?.bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback) }
-    advertising = false
+    if (!advertising && !advertisingFar) return
+    if (advertising) {
+      runCatching { manager?.adapter?.bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback) }
+      advertising = false
+    }
+    stopAdvertisingFar()
     refresh()
   }
 
@@ -278,6 +335,19 @@ class BleLink(private val context: Context) {
     override fun onStartFailure(errorCode: Int) {
       Log.w(TAG, "Advertising failed: $errorCode")
       handler.post { advertising = errorCode == ADVERTISE_FAILED_ALREADY_STARTED }
+    }
+  }
+
+  private val farCallback: AdvertisingSetCallback by lazy {
+    object : AdvertisingSetCallback() {
+      override fun onAdvertisingSetStarted(set: AdvertisingSet?, txPower: Int, status: Int) {
+        if (status == ADVERTISE_SUCCESS) return
+        Log.w(TAG, "Long-range advertising failed: $status")
+        handler.post {
+          advertisingFar = false
+          farFailed = true
+        }
+      }
     }
   }
 
@@ -399,8 +469,12 @@ class BleLink(private val context: Context) {
   private fun scan(adapter: BluetoothAdapter) {
     val scanner = adapter.bluetoothLeScanner ?: return
     val filter = ScanFilter.Builder().setServiceUuid(ParcelUuid(SERVICE_UUID)).build()
-    val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_BALANCED).build()
-    scanner.startScan(listOf(filter), settings, scanCallback)
+    val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_BALANCED)
+    if (longRange(adapter) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      // Extended advertisements too, on the coded PHY as well as the usual one.
+      settings.setLegacy(false).setPhy(ScanSettings.PHY_LE_ALL_SUPPORTED)
+    }
+    scanner.startScan(listOf(filter), settings.build(), scanCallback)
     scanning = true
   }
 
@@ -421,7 +495,14 @@ class BleLink(private val context: Context) {
     val address = device.address
     if (dials.containsKey(address) || connections.values.any { it.device.address == address }) return
     if (!Ble.shouldConnect(peer)) return
-    val gatt = device.connectGatt(context, false, clientCallback, BluetoothDevice.TRANSPORT_LE)
+    val adapter = manager?.adapter
+    val gatt = if (adapter != null && longRange(adapter) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      // On whichever PHY the node is heard first: the coded one when it is far.
+      val phys = BluetoothDevice.PHY_LE_1M_MASK or BluetoothDevice.PHY_LE_CODED_MASK
+      device.connectGatt(context, false, clientCallback, BluetoothDevice.TRANSPORT_LE, phys)
+    } else {
+      device.connectGatt(context, false, clientCallback, BluetoothDevice.TRANSPORT_LE)
+    }
     if (gatt == null) {
       Ble.dialEnded(peer)
       return
@@ -623,6 +704,18 @@ class BleLink(private val context: Context) {
     }
 
   companion object {
+    /**
+     * Whether this phone's Bluetooth can use the long-range coded PHY and the
+     * extended advertisements it needs: Android 8 and a controller with both.
+     */
+    fun longRange(adapter: BluetoothAdapter): Boolean =
+      Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+        adapter.isLeCodedPhySupported &&
+        adapter.isLeExtendedAdvertisingSupported &&
+        adapter.leMaximumAdvertisingDataLength >= FAR_DATA_LEN
+
+    /** The long-range advertisement: the 128-bit service uuid, then it again with the 8-byte session id. */
+    private const val FAR_DATA_LEN = (2 + 16) + (2 + 16 + 8)
     private const val TAG = "CarryChatBle"
     /** The CarryChat service and the characteristic the stream crosses (§9.5). */
     val SERVICE_UUID: UUID = UUID.fromString("43524348-a0c5-4a3e-9b31-6f2d8e7c1a01")

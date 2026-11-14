@@ -458,7 +458,8 @@ Masaüstü için btleplug aracılığıyla `crates/carrychat-node/src/bluetooth.
 - **Eşitleme.** Akış üzerinde §9.1'deki eşitleme çalışır: önlerine `u16` uzunlukları eklenmiş çerçeveler, HELLO, HAVE, WANT, ardından ortaya çıktıkça gönderilenler. Yerel ağ üzerinden zaten bağlı olan bir düğüme Bluetooth üzerinden yeniden bağlanılmaz; yine de kurulan bir bağlantı HELLO'dan sonra kapanır.
 - **Kim bağlanır.** Yerel ağda olduğu gibi oturum kimliği küçük olan düğüm bağlanır; diğeri, bağlantı kurulmadan karşıyı üç kez gördükten sonra bağlanır. Yayın yapamayan düğüm her durumda bağlanır. Masaüstü bilgisayarlar btleplug ile yayın yapamaz; bu yüzden telefonlara bağlanırlar ve diğer masaüstlerine yerel ağ üzerinden ulaşırlar.
 - **Masaüstü bilgisayarlar** her seferinde 512 bayt olmak üzere yanıtlı yazar: macOS kuyruğu dolunca yanıtsız yazmaları atar ve bu, akışı bozardı. Bir tarama her cihazı bir kez bildirdiği için her 5 saniyede bir o ana kadar görülen cihazlara bakar ve aralarındaki bağlı olmayan CarryChat düğümlerine bağlanırlar.
-- **Android** bağlantıyı, düğümü canlı tutan ön plan servisinde çalıştırır; böylece uygulama kapalıyken de çalışır. Bluetooth izinlerini `neverForLocation` ile ister.
+- **Android** bağlantıyı, düğümü canlı tutan ön plan servisinde çalıştırır; böylece uygulama kapalıyken de çalışır. Bluetooth izinlerini `neverForLocation` ile ister ve Android'in sunduğu yüksek güç seviyesinde, yaklaşık 1 dBm ile yayın yapar.
+- **Uzun menzil.** Bluetooth'u LE Coded PHY'ye ve genişletilmiş yayına sahip bir Android telefon (Android 8 ve sonrası, ikisini de destekleyen bir denetleyici) ikinci bir yayın kümesi de çalıştırır: genişletilmiş, bağlanılabilir ve taranamaz, birincil ve ikincil PHY olarak coded PHY'de; servis uuid'sini ve servis verisi olarak oturum kimliğini yayının kendisinde taşır. Sahip olduğu her PHY'de genişletilmiş yayınları tarar ve karşı düğüm önce hangisinde duyulursa 1M ya da coded PHY üzerinden bağlanır. Coded PHY, 1M'ye göre 8 ila 12 dB daha fazla bağlantı bütçesi verir; açık alanda iki ila dört kat menzil, 125 kbit/s hızla ve yalnızca böyle iki telefon arasında. Olağan yayın, diğer bütün cihazlar için kalır. İki yayın farklı adreslerden gelebilir; oturum kimliği bunların tek bir düğüm olduğunu gösterir. Henüz iki telefon arasında denenmedi.
 
 ### 9.6 Wi-Fi Aware
 
@@ -509,6 +510,17 @@ Android uygulamasında (`WifiDirectLink.kt`) gerçeklenmiştir; uygulama, Wi-Fi 
 - **Dinleme.** Uygulama açıkken ve *Ağ → Ses* açıkken mikrofonu dinler; bir kart dinlemek bunu duraklatır. Duyulan ve CRC'si tutan bir çerçeve, herhangi bir bağlantıdan gelmiş bir çerçeve gibi işlenir ve bağlantılara aktarılır. Yanındakiler, duyulmayan bantta çalınmadıkça tonları duyabilir ama mesajı okuyamaz: zarf, her bağlantıda olduğu gibi uçtan uca mühürlüdür.
 - **Mahremiyet.** Dinleme varsayılan olarak kapalıdır ve uygulama kapanınca durur. Açmak mikrofon izni ister.
 
+### 9.11 Işık
+
+`crates/carrychat-proto/src/light.rs`, `crates/carrychat-node/src/light.rs` ve uygulamada gerçeklenir. Bir telefon, bir mesajı feneriyle yanıp söndürür; başka bir cihaz onu kamerasıyla izler. Işık telsiz gerektirmez, bu yüzden bir telsiz bozucusu onu durdurmaz; bir fener de gece çok uzaktan görülür, görüş hattında belki yüzlerce metreden. Ama yavaştır, saniyede 5 bit, ve iki cihazın da sabit durması ve birbirini görmesi gerekir. Henüz iki telefon arasında denenmedi.
+
+- **Sinyal.** Manchester kodlamalı aç-kapa anahtarlama: her bit 100 ms'lik iki yarıdır; 1 için önce yanık sonra karanlık, 0 için önce karanlık sonra yanık; en anlamlı bit önce. İzleyen, her bitin iki yarısını karşılaştırır; böylece çevredeki ışık ya da pozlamasını değiştiren bir kamera bitleri belirlemez.
+- **Tur.** `kind || len || bytes`; `kind` seste olduğu gibidir (§3.2): kart için `0xCC`, ardından CRC-32'si gelen bir bağlantı çerçevesi için `0xCD`. Bir tur, türü ve uzunluğundan sonra en çok 254 bayt taşır; yani en çok 250 baytlık bir çerçeve. Tur, 16 baytlık bloklara sıfırla doldurulur, en çok 16 blok. Kimliği, dolgusuz turun CRC-32'sinin düşük baytıdır.
+- **Blok.** Önce bir eşzamanlama işareti, dört yarı yanık ve iki yarı karanlık (verideki hiçbir ışık bu kadar uzun değildir), ardından `id || (place << 4 | last) || 16 bayt || crc`; burada `place` bloğun sırası, `last` turun son sırası, `crc` de önceki 18 baytın CRC-16/CCITT-FALSE değeridir: 160 bit, eşzamanlama işaretiyle 32.6 saniye. Gönderen, turun bloklarını sırayla, durdurulana kadar tekrar tekrar yakıp söndürür.
+- **İzleme.** Kullanıcı, kameranın görüntüsünde ışığın üstüne bir kutu koyar; kutu resmin kısa kenarının beşte biridir. Kutuda uygulama en çok değişen 24 pikselin parlaklığını alır; böylece fenerin yanındaki bir sokak lambası ya da ışığı yanan bir pencere hesaba girmez. İzleyen, yanığı karanlıktan son 3 saniyenin parlaklığına göre ayırır ve 3 ile 6.5 yarı süren bir ışığı eşzamanlama işareti sayar; işaretin bitişi bloğun bitlerinin yerini belirler. Bir fener söndüğünden daha geç yanabilir; bu yüzden bitler o yerin 50 ms'ye kadar öncesinde ve sonrasında da okunur ve yarılarının en çok ayrıştığı yerde çözülür. CRC-16'sı tutmayan bir blok, en az emin olunan dört bitinden biri ya da ikisi çevrilerek yeniden denenir. İzleyen, doğru okunan her bloğu tur tamamlanana kadar saklar, turun kimliğini bloklarıyla ve çerçevenin CRC-32'siyle denetler ve çerçeveyi herhangi bir bağlantıdan gelmiş gibi düğüme verir. Blok kaçıran bir geçişi, örneğin önünden biri geçtiğinde, bir sonraki geçiş tamamlar.
+- **Gönderme.** Uygulama, feneri olan Android telefonlarda bir çift mesajını ışıkla da göndermeyi önerir. Mesajın zarfı 250 baytlık turlara göre bölünür (§7). Gönderenin kartı elinde olan bir kişiye yaklaşık 30 baytlık bir mesaj 9 blok tutar, geçiş başına yaklaşık 5 dakika; kartı taşıyan bir tanıtma (§5.5) yaklaşık 22 blok ve 12 dakika. Mesaj her zamanki gibi diğer bütün bağlantılardan da gider ve yolculuğu ışıkla yola çıktığını gösterir. Fener yanıp sönerken ekran açık kalır. Dosya dilimleri hiçbir zaman ışıkla gitmez.
+- **Mahremiyet.** Işığı gören herkes birinin işaret verdiğini ve nereden verdiğini görür, ama mesajı okuyamaz: zarf uçtan uca mühürlüdür. Kamera yalnızca izleme ekranı açıkken açıktır.
+
 ## 10. Güvenlik
 
 **v0 şunları sağlar:**
@@ -539,6 +551,7 @@ Android uygulamasında (`WifiDirectLink.kt`) gerçeklenmiştir; uygulama, Wi-Fi 
 2. LoRa çerçeveleri için dolgu: daha az boyut sızıntısına karşılık daha fazla yayın süresi.
 3. Uzaktan kişi alışverişi.
 4. HF radyo. Amatör bantlar bir mesajın anlamını gizleyen şifrelemeyi yasaklar; bu yüzden HF için, kullanıcının açıkça herkese açık olarak işaretlediği mesajlarla sınırlı, ayrı, imzalı ama şifresiz bir mesaj türü gerekir.
+5. Daha hızlı ışık. 50 ms'lik yarılar saniyede 60 resim çeken kameralara uyar ve bir mesajın süresini yarıya indirir; izleyen, hızı eşzamanlama işaretinin uzunluğundan anlayabilir.
 
 ## 12. Sabitler
 
@@ -569,3 +582,5 @@ Android uygulamasında (`WifiDirectLink.kt`) gerçeklenmiştir; uygulama, Wi-Fi 
 | Bluetooth LE akış karakteristiği | `43524348-a0c5-4a3e-9b31-6f2d8e7c1a02` |
 | Wi-Fi Aware servis adı | `carrychat` |
 | Wi-Fi Aware veri yolu geçiş parolası | `carrychat-wifi-aware` |
+| Işıkta yarım bit | 100 ms |
+| Işık bloğu | Dört yarı yanık ve iki yarı karanlık bir eşzamanlama işaretinden sonra, CRC-16 ile 16 bayt |

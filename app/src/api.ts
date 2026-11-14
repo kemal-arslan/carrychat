@@ -13,6 +13,22 @@ export type Profile = { name: string; fingerprint: string; card: string };
 /** A card heard over sound, its signature verified. */
 export type HeardCard = { card: string; name: string };
 
+/** One of our messages as light: halves of a bit, `1` lit and `0` dark, each `halfMs` long, to blink over and over. */
+export type LightPattern = { pattern: string; halfMs: number };
+
+/** How watching for light goes. */
+export type LightWatch = {
+  /** A card read whole, its signature verified. */
+  card: HeardCard | null;
+  /** Messages' frames read whole since the watch began. */
+  frames: number;
+  /** How far apart lit and dark look, 0 to 255: under about 6, no light is seen blinking. */
+  contrast: number;
+  /** Blocks read of the message being read, and how many it has; 0 of 0 before the first. */
+  blocks: number;
+  of: number;
+};
+
 export type Contact = {
   id: number;
   name: string;
@@ -137,6 +153,7 @@ export type Via =
   | "lora"
   | "reticulum"
   | "sound"
+  | "light"
   | "file";
 
 /** A link a nearby node is connected over. */
@@ -302,6 +319,13 @@ export interface Api {
   /** The microphone's next samples, 16-bit; gives the card once it has been heard whole. */
   listenHeard(listening: number, samples: Int16Array): Promise<HeardCard | null>;
   listenStop(listening: number): Promise<void>;
+  /** One of our messages as light, for the flashlight to blink to a device in sight that watches. */
+  messageLight(messageId: number): Promise<LightPattern>;
+  /** Starts watching a camera for light; gives the watching's number, which the calls for it name. */
+  lightStart(): Promise<number>;
+  /** The camera's next pictures: when each was taken, in milliseconds, and how bright the light looks, 0 to 255. Gives how the watch goes, or null once it has ended. */
+  lightSeen(watching: number, pictures: [number, number][]): Promise<LightWatch | null>;
+  lightStop(watching: number): Promise<void>;
   /** A card read over NFC, in its text form, once its signature verifies. */
   readCard(card: string): Promise<HeardCard>;
   acceptContact(contactId: number): Promise<Contact>;
@@ -433,6 +457,8 @@ async function call<T>(command: string, args?: Record<string, unknown> | Uint8Ar
 
 /** When the preview started listening for a card. */
 let listeningSince = 0;
+/** When the preview started watching for light. */
+let watchingSince = 0;
 
 /** Half a second of `hz`, as a WAV file, for the preview's card sound. */
 function beep(hz: number): ArrayBuffer {
@@ -483,6 +509,10 @@ function desktopApi(): Api {
       return call("listen_heard", body);
     },
     listenStop: (listening) => call("listen_stop", { listening }),
+    messageLight: (messageId) => call("message_light", { messageId }),
+    lightStart: () => call("light_start"),
+    lightSeen: (watching, pictures) => call("light_seen", { watching, pictures }),
+    lightStop: (watching) => call("light_stop", { watching }),
     readCard: (card) => call("read_card", { card }),
     acceptContact: (contactId) => call("accept_contact", { contactId }),
     declineContact: (contactId) => call("decline_contact", { contactId }),
@@ -784,6 +814,21 @@ function previewApi(): Api {
       return Date.now() - listeningSince > 3000 ? { card: "carrychat:elif", name: "Elif" } : null;
     },
     async listenStop() {},
+    async messageLight() {
+      // Two blocks' worth of a sync mark and alternating bits.
+      const block = "111100" + "10".repeat(160);
+      return { pattern: block + block, halfMs: 100 };
+    },
+    async lightStart() {
+      watchingSince = Date.now();
+      return 1;
+    },
+    async lightSeen() {
+      // The preview sees a light at once and reads a block of ten every four seconds.
+      const blocks = Math.min(10, Math.floor((Date.now() - watchingSince) / 4000));
+      return { card: null, frames: blocks === 10 ? 1 : 0, contrast: 48, blocks, of: 10 };
+    },
+    async lightStop() {},
     async readCard(card) {
       return { card, name: "Elif" };
     },

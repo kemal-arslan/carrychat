@@ -26,7 +26,7 @@ impl HeardCard {
         Self::verified(ContactCard::from_text(text).ok()?)
     }
 
-    fn verified(card: ContactCard) -> Option<Self> {
+    pub(crate) fn verified(card: ContactCard) -> Option<Self> {
         Some(Self {
             card: card.to_text(),
             name: card.name().to_owned(),
@@ -60,9 +60,10 @@ impl SoundListener {
     }
 }
 
-/// Takes in a frame heard over sound, handled like a frame from any link
-/// and passed on to the links. File chunks never come by sound.
-fn take_frame(shared: &Shared, bytes: &[u8]) {
+/// Takes in a frame heard over sound or read from light, handled like a
+/// frame from any link and passed on to the links. File chunks never come
+/// this way.
+pub(crate) fn take_frame(shared: &Shared, bytes: &[u8]) {
     let frame = match Frame::from_bytes(bytes) {
         Ok(Frame::Chunk(_)) | Err(_) => return,
         Ok(frame) => frame,

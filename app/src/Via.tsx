@@ -2,6 +2,7 @@ import {
   BluetoothIcon,
   CellTowerIcon,
   DevicesIcon,
+  FlashlightIcon,
   GlobeSimpleIcon,
   GraphIcon,
   ShareNetworkIcon,
@@ -21,6 +22,7 @@ const ICONS: Record<Via, Icon> = {
   lora: CellTowerIcon,
   reticulum: GraphIcon,
   sound: SpeakerHighIcon,
+  light: FlashlightIcon,
   file: UsbIcon,
 };
 

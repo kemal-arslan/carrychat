@@ -129,6 +129,27 @@ const en = {
   soundInaudibleSetting: "Play sound above hearing",
   soundInaudibleRow: "Plays at 18–20 kHz; turn off if the other device does not hear it",
   soundAudibleRow: "Off: plays tones you can hear",
+  lightName: "Light",
+  lightHint:
+    "Messages that a phone in sight blinks with its flashlight, read with this device's camera. No radio, so a jammer does not stop it; it is slow, minutes a message.",
+  lightWatchRow: "Read another phone's flashlight with the camera",
+  lightByLight: "Also send by light",
+  lightModeNote: "Messages also go out as light: the flashlight blinks them for a phone in sight that watches, under Network → Light.",
+  lightSendingTitle: "Sending by light",
+  lightSendingHelp: (pass: string) =>
+    `Point the flashlight at the other phone and keep this one still, propped against something. On theirs, Network → Light, with the box on this light. A pass takes about ${pass}; let it run at least twice.`,
+  lightPass: (pass: number) => `Pass ${pass}`,
+  lightPassLeft: (left: string) => `${left} left`,
+  lightStopped: "The flashlight stopped: something else is using the camera.",
+  lightFailed: "The message could not be sent as light.",
+  lightNoCamera: "The camera could not be used.",
+  lightAim: "Put the box on the other phone's flashlight; tap the picture to move it. Keep this phone still too.",
+  lightNone: "No blinking light in the box",
+  lightSeen: "Light seen, waiting for the start of a block",
+  lightReading: (blocks: number, of: number) => `Reading: ${blocks} of ${of} blocks`,
+  lightParts: (count: number) => (count === 1 ? "1 part read" : `${count} parts read`),
+  lightWhere: "A message shows in Chats once all its parts are read. At night the light reads from much further away.",
+  lightZoom: "Zoom",
   nfcOffer: "Or hold this phone back to back with theirs, while Add contact is open on it.",
   nfcRead: "Or hold this phone back to back with theirs, while My card is open on it.",
   copied: "Copied",
@@ -311,6 +332,7 @@ const en = {
   wifiDirectName: "Wi-Fi Direct",
   wifiDirectHint: "Phones without Wi-Fi Aware connect over Wi-Fi directly, with no router and no internet.",
   bluetoothRadioOff: "Turn on Bluetooth to use it",
+  bluetoothLongRange: "long range",
   onTheWay: "On the way",
   loraName: "LoRa radio",
   loraHint: "Kilometres without internet, through a Meshtastic or MeshCore device",
@@ -386,6 +408,7 @@ const en = {
       lora: "Sent by LoRa radio",
       reticulum: "Sent over Reticulum",
       sound: "Played as sound",
+      light: "Blinked as light",
       file: "Written to a file",
     })[via] ?? via,
   journeyStepHint: (via: string, count: number) =>
@@ -395,7 +418,9 @@ const en = {
         : `Left on ${count} relays`
       : via === "lora"
         ? "Handed to the radio"
-        : via === "file"
+        : via === "light"
+          ? "For a device in sight"
+          : via === "file"
           ? "Someone can carry it on"
           : count === 1
             ? "Handed to 1 device nearby"
@@ -544,6 +569,27 @@ const tr: Strings = {
   soundInaudibleSetting: "Sesi duyulmayan tonlarla çal",
   soundInaudibleRow: "18–20 kHz'de çalar; karşı cihaz duymazsa kapat",
   soundAudibleRow: "Kapalı: duyulan tonlarla çalar",
+  lightName: "Işık",
+  lightHint:
+    "Görüşteki bir telefonun feneriyle yanıp söndürdüğü mesajlar, bu cihazın kamerasıyla okunur. Telsiz kullanmaz, bu yüzden sinyal bozucu onu durdurmaz; yavaştır, bir mesaj dakikalar sürer.",
+  lightWatchRow: "Başka bir telefonun fenerini kamerayla oku",
+  lightByLight: "Işıkla da gönder",
+  lightModeNote: "Mesajlar ışıkla da gider: fener onları görüşteki ve Ağ → Işık ile izleyen bir telefona yanıp söndürür.",
+  lightSendingTitle: "Işıkla gönderiliyor",
+  lightSendingHelp: (pass) =>
+    `Feneri karşıdaki telefona çevir ve bu telefonu bir yere dayayıp sabit tut. Karşıdakinde Ağ → Işık açılsın, kutu bu ışığın üstünde olsun. Bir tur yaklaşık ${pass} sürer; en az iki tur bırak.`,
+  lightPass: (pass) => `${pass}. tur`,
+  lightPassLeft: (left) => `${left} kaldı`,
+  lightStopped: "Fener durdu: kamerayı başka bir şey kullanıyor.",
+  lightFailed: "Mesaj ışıkla gönderilemedi.",
+  lightNoCamera: "Kamera kullanılamadı.",
+  lightAim: "Kutuyu karşıdaki telefonun fenerine getir; taşımak için resme dokun. Bu telefonu da sabit tut.",
+  lightNone: "Kutuda yanıp sönen ışık yok",
+  lightSeen: "Işık görüldü, bir bloğun başı bekleniyor",
+  lightReading: (blocks, of) => `Okunuyor: ${of} bloktan ${blocks}`,
+  lightParts: (count) => `${count} parça okundu`,
+  lightWhere: "Bir mesaj, bütün parçaları okununca Sohbetler'de görünür. Gece ışık çok daha uzaktan okunur.",
+  lightZoom: "Yakınlaştır",
   nfcOffer: "Ya da bu telefonu karşıdakinin telefonuyla sırt sırta tut; onda Kişi ekle açık olsun.",
   nfcRead: "Ya da bu telefonu karşıdakinin telefonuyla sırt sırta tut; onda Kartım açık olsun.",
   copied: "Kopyalandı",
@@ -724,6 +770,7 @@ const tr: Strings = {
   wifiDirectName: "Wi-Fi Direct",
   wifiDirectHint: "Wi-Fi Aware'i olmayan telefonlar da modem ve internet olmadan doğrudan Wi-Fi ile bağlanır.",
   bluetoothRadioOff: "Kullanmak için Bluetooth'u aç",
+  bluetoothLongRange: "uzun menzil",
   onTheWay: "Yolda",
   loraName: "LoRa telsizi",
   loraHint: "İnternet olmadan kilometrelerce, bir Meshtastic ya da MeshCore cihazıyla",
@@ -796,6 +843,7 @@ const tr: Strings = {
       lora: "LoRa telsiziyle gönderildi",
       reticulum: "Reticulum ile gönderildi",
       sound: "Sesle çalındı",
+      light: "Işıkla gönderildi",
       file: "Dosyaya yazıldı",
     })[via] ?? via,
   journeyStepHint: (via, count) =>
@@ -803,7 +851,9 @@ const tr: Strings = {
       ? `${count} sunucuya bırakıldı`
       : via === "lora"
         ? "Telsize verildi"
-        : via === "file"
+        : via === "light"
+          ? "Görüşteki bir cihaz için"
+          : via === "file"
           ? "Biri onu taşıyabilir"
           : `Yakındaki ${count} cihaza verildi`,
   journeyArrived: (name) => `${name} kişisine ulaştı`,

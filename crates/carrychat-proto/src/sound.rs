@@ -34,14 +34,15 @@ pub enum Kind {
 }
 
 impl Kind {
-    fn magic(self) -> u8 {
+    /// The byte that names it, over sound and over light (§9.11).
+    pub(crate) fn magic(self) -> u8 {
         match self {
             Self::Card => 0xCC,
             Self::Frame => 0xCD,
         }
     }
 
-    fn of(magic: u8) -> Option<Self> {
+    pub(crate) fn of(magic: u8) -> Option<Self> {
         [Self::Card, Self::Frame]
             .into_iter()
             .find(|kind| kind.magic() == magic)

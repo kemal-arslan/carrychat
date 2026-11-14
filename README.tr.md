@@ -26,13 +26,14 @@ CarryChat her mesajı elindeki en iyi bağlantıdan gönderir; bağlantı yoksa 
 | Bağlantı | Menzil | Ne zaman işe yarar |
 | --- | --- | --- |
 | Yerel ağ | bir bina ya da bir kampüs | modem çalışıyor ama internet yok |
-| Bluetooth LE | birkaç düzine metre, telefondan telefona daha uzak | hiç ağ yok |
+| Bluetooth LE | birkaç düzine metre, telefondan telefona daha uzak, uzun menzilli Bluetooth'u olan telefonlar arasında bunun iki ila dört katı | hiç ağ yok |
 | Wi-Fi Aware | yüz metre kadar, telefondan telefona, fotoğraf için yeterince hızlı | modem de internet de yok (destekleyen Android telefonlarda) |
 | Wi-Fi Direct | yüz metre kadar, telefondan telefona, fotoğraf için yeterince hızlı | aynısı, Wi-Fi Aware'i olmayan Android telefonlarda |
 | LoRa telsizi ([Meshtastic](https://meshtastic.org) ya da [MeshCore](https://meshcore.io)) | atlama başına kilometrelerce, topluluk aktarıcılarıyla daha uzak | hiç internet yok |
 | [Reticulum](https://reticulum.network) | Reticulum ağının telsizleri, seri hatları ve internet bağlantıları nereye ulaşıyorsa | elde bir Reticulum ağı var |
 | İnternet ([Nostr](https://nostr.com) aktarıcıları) | her yer | olağan günler ya da yoldaki bilgisayarlardan biri internete bağlandığında |
 | Ses | birkaç metre, yan yana | başka hiçbir şey ulaşmıyor ve karşı cihaz dinliyor |
+| Işık (bir fener, kamerayla okunur) | görüş mesafesi, gece daha uzak | telsiz bozuluyor ya da hiç yok, birbirini gören Android telefonlar |
 | USB bellekte dosya | biri onu nereye taşırsa | başka hiçbir şey ulaşmıyor |
 
 - **Bir mesaj, bir telsiz paketi.** Zarf bir mesaja 104 bayt ekler (oturum başlamadan önce 67), bu yüzden 128 bayta kadar metin tek bir 233 baytlık Meshtastic paketine sığar. Daha uzun mesajlar bölünür.
@@ -77,6 +78,10 @@ Kimliğini oluştur ve kartını (**Kartım**, QR kod olarak da; **Ben** sekmesi
 
 **Ağ**'daki **Ses**, uygulama açıkken hemen yanındaki bir cihazın sesle çaldığı mesajları dinler. Sohbette, mesaj alanının yanındaki hoparlör düğmesi yazdığını sesle de gönderir; mesaj üç kez çalınır. Yavaştır (saniyede yaklaşık 30 bayt) ama başka hiçbir şey gerektirmez: mesaj uçtan uca mühürlü olduğu için tonları duyanlar onu okuyamaz. Kartlar ve mesajlar çoğu yetişkinin duymadığı 18–20 kHz'de, saniyede yaklaşık 23 baytla çalınır. Her hoparlör bu kadar yüksek çalamaz: karşı cihaz duymazsa **Ses**'in hemen altındaki **Duyulmayan ses**'i kapatınca duyulan tonlarla çalınır. Dinleme ikisini de duyar.
 
+Android'de **Ağ**'daki **Işık**, görüşteki bir telefonun feneriyle yanıp söndürdüğü mesajları kamerayla izler: kutuyu karşıdaki telefonun ışığının üstüne getir ve bu telefonu sabit tut. Sohbette, mesaj alanının yanındaki fener düğmesi yazdığını ışıkla da gönderir; sen durdurana kadar tur tur yanıp söner. Feneri karşıdaki telefona çevir ve telefonunu bir yere dayayıp sabit tut. Işık telsiz gerektirmez, bu yüzden bir telsiz bozucusu onu durdurmaz; bir fener de gece çok uzaktan görülür. Çok yavaştır: bir kişiye kısa bir mesajın bir turu yaklaşık 5 dakika, kartını taşıyan ilk mesajınki 12 dakika sürer. Işığı görenler birinin işaret verdiğini ve nereden verdiğini anlayabilir, ama mesajı okuyamaz.
+
+Bluetooth'u uzun menzilli coded PHY'ye sahip Android telefonlarda **Bluetooth** onun üzerinden de yayın yapar ve bağlanır; böyle iki telefon arasında açık alanda iki ila dört kat uzağa ulaşır. **Ağ**'daki satırı o zaman *uzun menzil* der. Ne uzun menzilli Bluetooth ne de ışık henüz iki telefon arasında denendi.
+
 `npm run dev`, uygulamayı derlemeden arayüzü örnek verilerle bir tarayıcıda açar.
 
 ### Komut satırı
@@ -115,7 +120,7 @@ Ekranı olmayan bir bilgisayarda `carrychat run` onu bir aktarıcıya çevirir: 
 2. **Yerel ağ bağlantısı, mesaj deposu, masaüstü uygulaması, komut satırı, USB'ye aktarma ve içe aktarma** (bitti)
 3. **Meshtastic ya da MeshCore telsiziyle LoRa bağlantısı ve Reticulum bağlantısı** (yazıldı: komut satırı ve macOS uygulaması cihazı USB ya da TCP üzerinden, Android uygulaması Bluetooth üzerinden kullanır; bölgeyi ya da telsiz ayarlarını ve duyulan cihazları gösterir. Sırada saha denemeleri var)
 4. **Nostr üzerinden internet bağlantısı** (bitti). İnterneti olan bilgisayarlar, taşıdıklarını interneti olmayan bilgisayarlar için de aktarır. O bilgisayarlar adına mesaj çekme henüz açık.
-5. **Android uygulaması; Bluetooth, Wi-Fi Aware ve Wi-Fi Direct bağlantıları; yakınımdakiler; sesle ve NFC ile kart** (bitti; Wi-Fi Aware, Wi-Fi Direct ve NFC iki telefon arasında denenmeyi bekliyor)
+5. **Android uygulaması; Bluetooth, Wi-Fi Aware ve Wi-Fi Direct bağlantıları; yakınımdakiler; sesle ve NFC ile kart; ışıkla mesaj** (bitti; Wi-Fi Aware, Wi-Fi Direct, NFC, uzun menzilli Bluetooth ve ışık iki telefon arasında denenmeyi bekliyor)
 6. **iOS uygulaması** (yazıldı: CI'da simülatör için derleniyor, bir iPhone'da denenmeyi bekliyor). HF telsiz
 
 ## Derleme
@@ -142,7 +147,7 @@ cd app && npx tauri ios dev       # bir simülatörde ya da bağlı bir iPhone'd
 cd app && npx tauri ios build     # yüklenecek bir uygulama
 ```
 
-iOS, CarryChat'e Android'den daha az izin verir. Uygulama yalnızca açıkken çalışır: iOS görünmeyen uygulamaları askıya alır, bu yüzden bu arada gelenler, uygulama yeniden açılana kadar internet aktarıcılarında ve diğer cihazlarda bekler. Diğer cihazlara internet üzerinden, yerel ağda adresle (**Adrese bağlan**) ulaşır, çünkü iOS bir uygulamanın çok noktaya yayınla (multicast) cihaz bulmasına yalnızca Apple'ın verdiği bir izinle olanak tanır; Bluetooth ile de Android telefonlara ulaşır: iPhone onlara bağlanabilir ama onlar iPhone'u bulamaz. Wi-Fi Aware, Wi-Fi Direct, NFC ile kart ve Bluetooth üzerinden LoRa cihazları yalnızca Android'dedir; Arti'nin ihtiyaç duyduğu bir kütüphane iOS için derlenmediğinden Tor da iOS uygulamasında henüz yok; ses, Face ID ya da Touch ID ile uygulama kilidi ve iOS Anahtar Zinciri'ndeki veri anahtarı diğer sistemlerdeki gibi çalışır.
+iOS, CarryChat'e Android'den daha az izin verir. Uygulama yalnızca açıkken çalışır: iOS görünmeyen uygulamaları askıya alır, bu yüzden bu arada gelenler, uygulama yeniden açılana kadar internet aktarıcılarında ve diğer cihazlarda bekler. Diğer cihazlara internet üzerinden, yerel ağda adresle (**Adrese bağlan**) ulaşır, çünkü iOS bir uygulamanın çok noktaya yayınla (multicast) cihaz bulmasına yalnızca Apple'ın verdiği bir izinle olanak tanır; Bluetooth ile de Android telefonlara ulaşır: iPhone onlara bağlanabilir ama onlar iPhone'u bulamaz. Wi-Fi Aware, Wi-Fi Direct, NFC ile kart, ışık ve Bluetooth üzerinden LoRa cihazları yalnızca Android'dedir; Arti'nin ihtiyaç duyduğu bir kütüphane iOS için derlenmediğinden Tor da iOS uygulamasında henüz yok; ses, Face ID ya da Touch ID ile uygulama kilidi ve iOS Anahtar Zinciri'ndeki veri anahtarı diğer sistemlerdeki gibi çalışır.
 
 Telefonda CarryChat ekranı kapatıldıktan sonra da, kalıcı bir bildirimle çalışmayı sürdürür; böylece uygulama görünmezken de mesajlar gelir ve başkaları için aktarılır. Telefon açıldığında ya da uygulama güncellendiğinde, açılmadan da kendiliğinden başlar. O sırada gelen mesajlar bildirim olarak duyurulur. O bildirimdeki **Turn off**, CarryChat'i yeniden açılana kadar, telefon yeniden başlasa da durdurur.
 

@@ -9,9 +9,9 @@ use std::sync::Mutex;
 
 use carrychat_node::{
     ChannelView, ContactView, GroupMessageView, GroupView, HeardCard, ImportReport, InternetConfig,
-    Journey, KeyStore, LanConfig, LoraDevice, LoraPort, LoraStatus, MessageView, MutedView,
-    NearbyPerson, Node, PostView, Profile, ReticulumStatus, Settings, SoundBand, SoundListener,
-    Status,
+    Journey, KeyStore, LanConfig, LightListener, LightWatch, LoraDevice, LoraPort, LoraStatus,
+    MessageView, MutedView, NearbyPerson, Node, PostView, Profile, ReticulumStatus, Settings,
+    SoundBand, SoundListener, Status,
 };
 use data_encoding::BASE64;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -30,6 +30,8 @@ struct AppState {
     /// What the page listens to the microphone for: a card played as sound,
     /// or messages.
     listenings: Mutex<Listenings>,
+    /// What the page watches a camera for: another device's flashlight.
+    watchings: Mutex<Watchings>,
 }
 
 /// Listenings kept at most. A page that went away without ending its
@@ -61,6 +63,25 @@ impl Listenings {
 
     fn stop(&mut self, listening: u32) {
         self.listeners.remove(&listening);
+    }
+}
+
+/// The page's watchings of a camera for light, by the number it knows each
+/// by, as with listenings.
+#[derive(Default)]
+struct Watchings {
+    last: u32,
+    watchers: BTreeMap<u32, LightListener>,
+}
+
+impl Watchings {
+    fn start(&mut self) -> u32 {
+        self.last += 1;
+        self.watchers.insert(self.last, LightListener::new());
+        while self.watchers.len() > MAX_LISTENINGS {
+            self.watchers.pop_first();
+        }
+        self.last
     }
 }
 
@@ -343,6 +364,70 @@ async fn listen_heard(
     Ok(listenings
         .get(u32::from_le_bytes(*number))
         .and_then(|listener| listener.push(&node, &samples)))
+}
+
+/// One of our messages as light (§9.11): which halves of a bit are lit,
+/// as `1` and `0`, for the flashlight to blink over and over, and how long
+/// each half lasts.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LightPattern {
+    pattern: String,
+    half_ms: u32,
+}
+
+#[tauri::command]
+async fn message_light(state: State<'_, AppState>, message_id: i64) -> CommandResult<LightPattern> {
+    let halves = state.node()?.message_light(message_id).map_err(text)?;
+    Ok(LightPattern {
+        pattern: halves
+            .iter()
+            .map(|&lit| if lit { '1' } else { '0' })
+            .collect(),
+        half_ms: carrychat_node::LIGHT_HALF_MS,
+    })
+}
+
+/// Starts watching a camera for another device's flashlight. Returns the
+/// watching's number, which the other calls name.
+#[tauri::command]
+fn light_start(state: State<'_, AppState>) -> u32 {
+    state
+        .watchings
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .start()
+}
+
+/// The camera's next pictures: when each was taken, in milliseconds, and
+/// how bright the light looks in it, 0 to 255. Frames read go to the node;
+/// returns how the watch goes, or nothing once it has ended.
+#[tauri::command]
+fn light_seen(
+    state: State<'_, AppState>,
+    watching: u32,
+    pictures: Vec<(f64, f32)>,
+) -> CommandResult<Option<LightWatch>> {
+    let node = state.node()?;
+    let mut watchings = state
+        .watchings
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    Ok(watchings
+        .watchers
+        .get_mut(&watching)
+        .map(|watcher| watcher.push(&node, &pictures)))
+}
+
+/// Ends watching `watching`, unless another started since.
+#[tauri::command]
+fn light_stop(state: State<'_, AppState>, watching: u32) {
+    state
+        .watchings
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .watchers
+        .remove(&watching);
 }
 
 /// A card read over NFC (§3.3), in its text form, once its signature
@@ -846,6 +931,7 @@ pub fn run() {
                 node: Mutex::new(node),
                 locked: Mutex::new(locked),
                 listenings: Mutex::default(),
+                watchings: Mutex::default(),
             });
             Ok(())
         })
@@ -862,6 +948,10 @@ pub fn run() {
             listen_start,
             listen_heard,
             listen_stop,
+            message_light,
+            light_start,
+            light_seen,
+            light_stop,
             read_card,
             accept_contact,
             decline_contact,

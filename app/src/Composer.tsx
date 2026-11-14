@@ -1,7 +1,8 @@
-import { ImageIcon, MicrophoneIcon, PaperPlaneRightIcon, SpeakerHighIcon, StopIcon } from "@phosphor-icons/react";
+import { FlashlightIcon, ImageIcon, MicrophoneIcon, PaperPlaneRightIcon, SpeakerHighIcon, StopIcon } from "@phosphor-icons/react";
 import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { maxMessageBytes, onePacketBytes, radioPackets, utf8Length } from "./format";
 import { useI18n } from "./i18n";
+import { LightSendSheet } from "./LightSheets";
 import { MAX_RECORDING_SECS, canRecord, shrinkPhoto, startRecording, type Recorder } from "./media";
 import { soundInaudible } from "./prefs";
 import { playMessage } from "./sound";
@@ -18,6 +19,8 @@ type Props = {
   onSendFile?: (mime: string, bytes: Uint8Array) => Promise<void>;
   /** Offers to send messages as sound too, to a device right next to this one. */
   sound?: boolean;
+  /** Offers to send messages as light too, with the flashlight, to a device in sight. */
+  light?: boolean;
 };
 
 type Recording = Recorder & { started: number };
@@ -25,7 +28,7 @@ type Recording = Recorder & { started: number };
 /** A touch keyboard's Enter starts a new line; the Send button sends. */
 const TOUCH = window.matchMedia("(pointer: coarse)").matches;
 
-export function Composer({ placeholder, overhead, conversation, onSend, onSendFile, sound = false }: Props) {
+export function Composer({ placeholder, overhead, conversation, onSend, onSendFile, sound = false, light = false }: Props) {
   const { t } = useI18n();
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -35,6 +38,9 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
   // Sending by sound too, for this conversation, and how many messages are still being played.
   const [bySound, setBySound] = useState(false);
   const [playing, setPlaying] = useState(0);
+  // Sending by light too, and the message the flashlight blinks.
+  const [byLight, setByLight] = useState(false);
+  const [blinking, setBlinking] = useState<number | null>(null);
   const photoInput = useRef<HTMLInputElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const recordingRef = useRef<Recording | null>(null);
@@ -52,6 +58,8 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
     setDraft("");
     setError(null);
     setBySound(false);
+    setByLight(false);
+    setBlinking(null);
     return () => {
       left.current += 1;
       recordingRef.current?.cancel();
@@ -147,6 +155,7 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
           .catch((failure) => setError(`${t.soundMessageFailed} ${String(failure).replace(/^Error: /, "")}`))
           .finally(() => setPlaying((count) => count - 1));
       }
+      if (byLight && typeof id === "number") setBlinking(id);
     } catch (failure) {
       setError(String(failure).replace(/^Error: /, ""));
     } finally {
@@ -180,7 +189,9 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
               ? soundInaudible()
                 ? t.soundModeNoteInaudible
                 : t.soundModeNote
-              : null);
+              : byLight
+                ? t.lightModeNote
+                : null);
   const empty = bytes === 0;
 
   return (
@@ -210,6 +221,17 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
             aria-label={t.soundBySound}
           >
             <SpeakerHighIcon size={24} weight={bySound ? "fill" : "regular"} />
+          </button>
+        )}
+        {light && (
+          <button
+            className={byLight ? "icon-button attach on" : "icon-button attach"}
+            onClick={() => setByLight((on) => !on)}
+            aria-pressed={byLight}
+            title={t.lightByLight}
+            aria-label={t.lightByLight}
+          >
+            <FlashlightIcon size={24} weight={byLight ? "fill" : "regular"} />
           </button>
         )}
         <textarea
@@ -244,6 +266,7 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
           </button>
         )}
       </div>
+      {blinking !== null && <LightSendSheet messageId={blinking} onClose={() => setBlinking(null)} />}
     </div>
   );
 }

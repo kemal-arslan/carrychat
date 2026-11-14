@@ -21,6 +21,7 @@ pub enum Via {
     Lora,
     Reticulum,
     Sound,
+    Light,
     File,
 }
 
@@ -35,6 +36,7 @@ impl Via {
             Via::Lora => "lora",
             Via::Reticulum => "reticulum",
             Via::Sound => "sound",
+            Via::Light => "light",
             Via::File => "file",
         }
     }
@@ -49,6 +51,7 @@ impl Via {
             "lora" => Via::Lora,
             "reticulum" => Via::Reticulum,
             "sound" => Via::Sound,
+            "light" => Via::Light,
             "file" => Via::File,
             _ => return None,
         })

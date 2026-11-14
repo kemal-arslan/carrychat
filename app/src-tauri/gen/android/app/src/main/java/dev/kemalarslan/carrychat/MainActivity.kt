@@ -1,6 +1,7 @@
 package dev.kemalarslan.carrychat
 
 import android.Manifest
+import android.bluetooth.BluetoothManager
 import android.content.pm.PackageManager
 import android.graphics.drawable.ColorDrawable
 import android.nfc.NfcAdapter
@@ -8,6 +9,7 @@ import android.nfc.Tag
 import android.os.Build
 import android.os.Bundle
 import android.view.View
+import android.view.WindowManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
@@ -56,6 +58,12 @@ class MainActivity : TauriActivity() {
     NfcAdapter.getDefaultAdapter(this)?.disableReaderMode(this)
   }
 
+  // The page that blinked the flashlight goes with the screen.
+  override fun onDestroy() {
+    Torch.stop()
+    super.onDestroy()
+  }
+
   /** What the page asks of the activity. */
   inner class Page {
     /** Gives the status and navigation bars the page's light or dark theme. */
@@ -99,6 +107,42 @@ class MainActivity : TauriActivity() {
     fun setAppLock(on: Boolean) {
       getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(APP_LOCK, on).apply()
       runOnUiThread { hideFromRecents(on) }
+    }
+
+    /** Whether this phone's Bluetooth reaches further with the coded PHY (§9.5). */
+    @JavascriptInterface
+    fun bluetoothLongRange(): Boolean {
+      val adapter = getSystemService(BluetoothManager::class.java)?.adapter ?: return false
+      return BleLink.longRange(adapter)
+    }
+
+    /** Whether this phone has a flashlight to send messages as light (§9.11). */
+    @JavascriptInterface
+    fun lightAvailable(): Boolean = Torch.available(this@MainActivity)
+
+    /** Blinks the flashlight over and over: `pattern` of `1` lit and `0` dark, each for `halfMs`. False with no flashlight. */
+    @JavascriptInterface
+    fun lightPlay(pattern: String, halfMs: Int): Boolean = Torch.play(applicationContext, pattern, halfMs)
+
+    @JavascriptInterface
+    fun lightStop() {
+      Torch.stop()
+    }
+
+    /** Whether the flashlight still blinks: it stops by itself if the camera is taken. */
+    @JavascriptInterface
+    fun lightPlaying(): Boolean = Torch.playing()
+
+    /** Keeps the screen on while `on`, as while sending or watching for light. */
+    @JavascriptInterface
+    fun keepScreenOn(on: Boolean) {
+      runOnUiThread {
+        if (on) {
+          window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+          window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+      }
     }
 
     /** Reads cards over NFC while `on`; each is sent to the page as a `carrychat-nfc` event. */

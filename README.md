@@ -24,13 +24,14 @@ CarryChat sends each message over the best link it has, and keeps it until one a
 | Link | Reach | Used when |
 | --- | --- | --- |
 | Local network | a building or a campus | the router works but the internet doesn't |
-| Bluetooth LE | a few dozen metres, further from phone to phone | there is no network at all |
+| Bluetooth LE | a few dozen metres, further from phone to phone, and two to four times that between phones with long-range Bluetooth | there is no network at all |
 | Wi-Fi Aware | around a hundred metres, phone to phone, fast enough for photos | there is no router and no internet (Android phones that support it) |
 | Wi-Fi Direct | around a hundred metres, phone to phone, fast enough for photos | the same, on Android phones without Wi-Fi Aware |
 | LoRa radio ([Meshtastic](https://meshtastic.org) or [MeshCore](https://meshcore.io)) | kilometres per hop, further over community relays | there is no internet at all |
 | [Reticulum](https://reticulum.network) | as far as the Reticulum network reaches, over its radios, serial lines and internet links | a Reticulum network is at hand |
 | Internet ([Nostr](https://nostr.com) relays) | anywhere | normal days, or whenever one computer on the path is online |
 | Sound | a few metres, side by side | nothing else reaches, and the other device listens |
+| Light (a flashlight, read by a camera) | in sight, further at night | radio is jammed or there is none, Android phones in sight of each other |
 | File on a USB stick | as far as someone carries it | nothing else reaches |
 
 - **One message, one radio packet.** A bundle adds 104 bytes to a message (67 before a session starts), so up to 128 bytes of text fit into a single 233-byte Meshtastic packet. Longer messages are split.
@@ -75,6 +76,10 @@ Create your identity and give your card (**My card**, also as a QR code, under *
 
 **Sound**, on **Network**, listens for messages that a device right next to this one plays as sound, while the app is open. In a chat, the speaker button next to the message field sends what you write as sound too, played three times. It is slow, about 30 bytes a second, but needs nothing else: the message is sealed end to end, so those who hear the tones cannot read it. Cards and messages play at 18 to 20 kHz, which most adults do not hear, at about 23 bytes a second. Not every speaker plays that high: if the other device does not hear them, turn off **Above hearing**, the row below **Sound**, to play tones you can hear. Listening hears both.
 
+**Light**, on **Network** on Android, watches through the camera for messages that a phone in sight blinks with its flashlight: put the box on the other phone's light and keep this one still. In a chat, the flashlight button next to the message field sends what you write as light too, pass after pass until you stop it; point the flashlight at the other phone and prop yours against something. Light needs no radio, so a radio jammer does not stop it, and a flashlight is seen from far away at night. It is very slow: about 5 minutes a pass for a short message to a contact, 12 for a first message, which carries your card. Those who see the light can tell someone is signalling, and from where, but cannot read the message.
+
+On Android phones whose Bluetooth has the long-range coded PHY, **Bluetooth** also advertises and connects on it, which reaches two to four times as far between two such phones in the open; its row on **Network** then says *long range*. Neither long-range Bluetooth nor light has been tried between two phones yet.
+
 `npm run dev` opens the interface in a browser with sample data, without building the app.
 
 ### Command line
@@ -113,7 +118,7 @@ carrychat erase --yes                           # delete identity, contacts and 
 2. **Local network link, message store, desktop app, command line, USB export and import** (done)
 3. **LoRa link through a Meshtastic or MeshCore radio, and the Reticulum link** (written: the command line and the macOS app use a device over USB or TCP, the Android app over Bluetooth; it shows the region or radio settings and the devices heard. Field tests come next)
 4. **Internet link over Nostr** (done). Computers with internet also pass on what they carry for computers without it. Fetching for those computers is still open.
-5. **Android app, Bluetooth, Wi-Fi Aware and Wi-Fi Direct links, people nearby, cards over sound and NFC** (done; Wi-Fi Aware, Wi-Fi Direct and NFC wait for a test between two phones)
+5. **Android app, Bluetooth, Wi-Fi Aware and Wi-Fi Direct links, people nearby, cards over sound and NFC, messages by light** (done; Wi-Fi Aware, Wi-Fi Direct, NFC, long-range Bluetooth and light wait for a test between two phones)
 6. **iOS app** (written: it builds for the simulator in CI, and waits for a test on an iPhone). HF radio
 
 ## Build
@@ -140,7 +145,7 @@ cd app && npx tauri ios dev       # on a simulator or a connected iPhone
 cd app && npx tauri ios build     # an app to install
 ```
 
-iOS keeps CarryChat to less than Android does. It runs only while open: iOS suspends apps out of sight, so what arrives meanwhile waits on the internet relays and on other devices until it opens again. It reaches others over the internet, over the local network by address (**Connect to an address**), since iOS lets an app find devices by multicast only with a permission Apple grants, and over Bluetooth to Android phones, which an iPhone can connect to but not be found by. Wi-Fi Aware, Wi-Fi Direct, cards over NFC, and LoRa devices over Bluetooth are Android only, and Tor is not in the iOS app yet, since a crate Arti needs does not build for iOS; sound, the app lock with Face ID or Touch ID, and the data key in the iOS Keychain work as elsewhere.
+iOS keeps CarryChat to less than Android does. It runs only while open: iOS suspends apps out of sight, so what arrives meanwhile waits on the internet relays and on other devices until it opens again. It reaches others over the internet, over the local network by address (**Connect to an address**), since iOS lets an app find devices by multicast only with a permission Apple grants, and over Bluetooth to Android phones, which an iPhone can connect to but not be found by. Wi-Fi Aware, Wi-Fi Direct, cards over NFC, light, and LoRa devices over Bluetooth are Android only, and Tor is not in the iOS app yet, since a crate Arti needs does not build for iOS; sound, the app lock with Face ID or Touch ID, and the data key in the iOS Keychain work as elsewhere.
 
 On a phone CarryChat keeps running after its screen is closed, with an ongoing notification, so messages still arrive, and are passed on for others, while the app is out of sight. It also starts by itself when the phone starts or the app is updated, without being opened. Messages that arrive then are announced as notifications. **Turn off** in that notification stops CarryChat, also across restarts, until it is opened again.
 

@@ -458,7 +458,8 @@ Implemented in `crates/carrychat-node/src/bluetooth.rs` for desktops, through bt
 - **Sync.** Over the stream runs the sync of §9.1: frames prefixed with their `u16` length, HELLO, HAVE, WANT, then pushes as they appear. A node already connected over the local network is not connected again over Bluetooth, and a connection to it that is made anyway closes after HELLO.
 - **Who connects.** As on the local network, the node with the smaller session id connects, and the other after three sightings without a connection. A node that cannot advertise connects regardless. Desktops cannot advertise through btleplug, so they connect to phones, and reach other desktops over the local network.
 - **Desktops** write with response, 512 bytes at a time: macOS drops writes without response when its queue is full, which would break the stream. Since a scan reports each device once, they look at the devices seen so far every 5 seconds and connect to the CarryChat nodes among them that are not connected.
-- **Android** runs the link in the foreground service that keeps the node alive, so it works while the app is closed. It asks for the Bluetooth permissions with `neverForLocation`.
+- **Android** runs the link in the foreground service that keeps the node alive, so it works while the app is closed. It asks for the Bluetooth permissions with `neverForLocation`, and advertises at the high power level Android offers, about 1 dBm.
+- **Long range.** An Android phone whose Bluetooth has the LE Coded PHY and extended advertising (Android 8 or later, and a controller with both) also runs a second advertising set: extended, connectable and not scannable, on the coded PHY as primary and secondary PHY, carrying the service uuid and, as service data, the session id in the advertisement itself. It scans for extended advertisements on every PHY it has, and connects on the 1M or the coded PHY, whichever the other node is heard on first. The coded PHY gives 8 to 12 dB more link budget than 1M, two to four times the range in the open, at 125 kbit/s, and only between two such phones; the usual advertisement stays for every other device. The two advertisements may come from different addresses; the session id tells they are one node. Not yet tried between two phones.
 
 ### 9.6 Wi-Fi Aware
 
@@ -509,6 +510,17 @@ Implemented in `crates/carrychat-node/src/sound.rs` and the app. Two devices sid
 - **Listening.** While the app is open and *Network → Sound* is on, it listens to the microphone; listening for a card pauses it. A frame heard, its CRC matching, is handled like a frame from any link and passed on to the links. Bystanders may hear the tones, unless they play above hearing, but cannot read the message: the bundle is sealed end to end, as on every link.
 - **Privacy.** Listening is off by default and stops when the app closes. Turning it on asks for the microphone.
 
+### 9.11 Light
+
+Implemented in `crates/carrychat-proto/src/light.rs`, `crates/carrychat-node/src/light.rs` and the app. A phone blinks a message with its flashlight for another device that watches it through its camera. Light needs no radio, so a radio jammer does not stop it, and a flashlight is seen from far away at night, possibly hundreds of metres in line of sight; but it is slow, 5 bits a second, and both devices must keep still and in sight of each other. Not yet tried between two phones.
+
+- **Signal.** On-off keying, Manchester coded: each bit is two halves of 100 ms, lit then dark for a 1, dark then lit for a 0, most significant bit first. A watcher compares each bit's two halves, so the light around, and a camera changing its exposure, do not decide the bits.
+- **Round.** `kind || len || bytes`, with `kind` as for sound (§3.2): `0xCC` for a card, `0xCD` for a link frame followed by its CRC-32. A round carries at most 254 bytes after its kind and length, so a frame of up to 250. It is zero-padded to blocks of 16 bytes, 16 at most. Its id is the low byte of the CRC-32 of the round without the padding.
+- **Block.** A sync mark, four halves lit and two dark, longer than any light in the data, then `id || (place << 4 | last) || 16 bytes || crc`, where `place` is the block's index, `last` the round's last index, and `crc` the CRC-16/CCITT-FALSE of the 18 bytes before it: 160 bits, 32.6 seconds with the sync mark. The sender blinks the round's blocks in order, over and over, until stopped.
+- **Watching.** The user puts a box on the light in the camera's view, a fifth of the picture's shorter side. In the box, the app takes the brightness of the 24 pixels that change most, so a street light or a lit window beside the flashlight does not count. The watcher tells lit from dark by the brightness of the last 3 seconds, and takes a light lasting 3 to 6.5 halves for a sync mark, whose end places the block's bits. A flashlight may come on later than it goes off, so the bits are also read up to 50 ms either side of that place and decoded where their halves differ most. A block whose CRC-16 does not match is tried again with one or two of its four least sure bits turned. The watcher keeps every block read right until the round is whole, checks the round's id against its blocks and the frame's CRC-32, and hands the frame to the node like a frame from any link. A pass that missed blocks, as behind someone walking past, is completed by the next.
+- **Sending.** The app offers to send a pair message by light too, on Android phones with a flashlight. Its bundle is cut for rounds of 250 bytes (§7). A message of about 30 bytes to a contact who has the sender's card takes 9 blocks, about 5 minutes a pass; an introduction (§5.5), with the card, about 22 blocks and 12 minutes. The message also goes over every other link as usual, and its journey shows it left as light. The screen stays on while the flashlight blinks. File chunks never go by light.
+- **Privacy.** Anyone who sees the light sees that someone is signalling, and from where, but cannot read the message: the bundle is sealed end to end. The camera is on only while the watch screen is open.
+
 ## 10. Security
 
 **v0 provides:**
@@ -539,6 +551,7 @@ Implemented in `crates/carrychat-node/src/sound.rs` and the app. Two devices sid
 2. Padding for LoRa frames: a smaller size leak against more airtime.
 3. Exchanging contacts at a distance.
 4. HF radio. Amateur bands forbid encryption that hides a message's meaning, so HF would need a separate signed but unencrypted message kind, limited to messages the user explicitly marks as public.
+5. Faster light. Halves of 50 ms would suit cameras that take 60 pictures a second and halve the time a message takes; a watcher could tell the speed from the sync mark's length.
 
 ## 12. Constants
 
@@ -569,3 +582,5 @@ Implemented in `crates/carrychat-node/src/sound.rs` and the app. Two devices sid
 | Bluetooth LE stream characteristic | `43524348-a0c5-4a3e-9b31-6f2d8e7c1a02` |
 | Wi-Fi Aware service name | `carrychat` |
 | Wi-Fi Aware data path passphrase | `carrychat-wifi-aware` |
+| Light half bit | 100 ms |
+| Light block | 16 bytes, after a sync mark of four halves lit and two dark, with a CRC-16 |
