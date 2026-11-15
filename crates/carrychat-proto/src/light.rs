@@ -71,7 +71,9 @@ fn round_pattern(magic: u8, bytes: &[u8]) -> Vec<bool> {
     round.extend_from_slice(bytes);
     let id = round_id(&round);
     let blocks = round.len().div_ceil(BLOCK_LEN);
-    round.resize(blocks * BLOCK_LEN, 0);
+    // Padding that blinks: a short round's last block could otherwise be
+    // dark for seconds, and a watcher would take the light for gone.
+    round.resize(blocks * BLOCK_LEN, PADDING);
     let last = (blocks - 1) as u8;
     let mut out = Vec::with_capacity(blocks * BLOCK_SYMBOLS);
     for (place, chunk) in round.chunks(BLOCK_LEN).enumerate() {
@@ -85,6 +87,9 @@ fn round_pattern(magic: u8, bytes: &[u8]) -> Vec<bool> {
     }
     out
 }
+
+/// What fills a round's last block: lit and dark by turns.
+const PADDING: u8 = 0x55;
 
 /// A round's id: the low byte of the CRC-32 of its kind, length and bytes,
 /// without the padding.
@@ -111,16 +116,18 @@ pub fn crc16(bytes: &[u8]) -> u16 {
 const SYMBOL: f64 = SYMBOL_MS as f64;
 /// Pictures kept: a block with its sync mark, and a little more.
 const KEEP_MS: f64 = (BLOCK_SYMBOLS + 16) as f64 * SYMBOL;
-/// What tells lit from dark: the brightness of the last few seconds.
-const LEVEL_MS: f64 = 3_000.0;
+/// What tells lit from dark: the brightness of the last few seconds, longer
+/// than any dark in a round.
+const LEVEL_MS: f64 = 6_000.0;
 /// The least difference between lit and dark worth watching, in the 0 to
 /// 255 of a picture's brightness.
 pub const MIN_CONTRAST: f32 = 6.0;
 /// The shortest and longest light that is a sync mark: twelve symbols, give
-/// or take a flashlight's and a camera's delays, or more after a block that
-/// ends lit.
+/// or take a flashlight's and a camera's delays, or up to sixteen more
+/// after a block whose CRC-16 ends lit. Its end places the bits however
+/// long it lasted.
 const SYNC_MIN: f64 = 10.0 * SYMBOL;
-const SYNC_MAX: f64 = 24.0 * SYMBOL;
+const SYNC_MAX: f64 = 40.0 * SYMBOL;
 /// A block's bits are read `SHIFTS` steps of `SHIFT_MS` either side of
 /// where its sync mark puts them, and decoded at the `TRIED_SHIFTS` where
 /// they stand out most.
@@ -702,6 +709,33 @@ mod tests {
             watch(&mut listener, &pictures[first..]),
             vec![(Kind::Frame, frame)]
         );
+    }
+
+    #[test]
+    fn a_short_round_after_a_long_one_is_read_whatever_it_holds() {
+        // A short round's last block is mostly padding. Padded dark, it held
+        // the light off for seconds, the watcher took the light for gone,
+        // and missed the sync mark after it about one time in five.
+        let mut noise = Noise(7);
+        let mut bytes = |len: usize| -> Vec<u8> {
+            (0..len)
+                .map(|_| (noise.next() * 127.0 + 128.0) as u8)
+                .collect()
+        };
+        let scene = Scene {
+            jitter: 0.0,
+            noise: 0.0,
+            ..SHAKY
+        };
+        for seed in 0..30 {
+            let (long, short) = (bytes(MAX_FRAME_LEN), bytes(100));
+            let pattern = patterns(Kind::Frame, &[&long, &short]);
+            let pictures = film(&scene, &pattern, 2, 0.0, 2.0 * duration(&pattern), seed);
+            let read = watch(&mut Listener::new(), &pictures);
+            assert_eq!(read.len(), 2, "seed {seed}");
+            assert!(read.contains(&(Kind::Frame, long)), "seed {seed}");
+            assert!(read.contains(&(Kind::Frame, short)), "seed {seed}");
+        }
     }
 
     #[test]
