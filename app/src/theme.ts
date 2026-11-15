@@ -27,8 +27,8 @@ declare global {
       bluetoothLongRange?(): boolean;
       /** Whether the phone has a flashlight to send messages as light. */
       lightAvailable?(): boolean;
-      /** Blinks the flashlight over and over: `1` lit and `0` dark, each for `halfMs`. */
-      lightPlay?(pattern: string, halfMs: number): boolean;
+      /** Blinks the flashlight over and over: `1` lit and `0` dark, each for `symbolMs`. */
+      lightPlay?(pattern: string, symbolMs: number): boolean;
       lightStop?(): void;
       /** Whether the flashlight still blinks; it stops by itself if the camera is taken. */
       lightPlaying?(): boolean;

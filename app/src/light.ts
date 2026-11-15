@@ -40,14 +40,14 @@ export function keepScreenOn(on: boolean) {
 
 /** Starts blinking one of our messages over and over; gives how long one pass takes, in milliseconds. */
 export async function sendByLight(messageId: number): Promise<number> {
-  const { pattern, halfMs } = await api.messageLight(messageId);
+  const { pattern, symbolMs } = await api.messageLight(messageId);
   const android = window.CarryChatAndroid;
   if (android) {
-    if (!android.lightPlay?.(pattern, halfMs)) throw new Error("no flashlight");
+    if (!android.lightPlay?.(pattern, symbolMs)) throw new Error("no flashlight");
   } else {
     previewSince = Date.now();
   }
-  return pattern.length * halfMs;
+  return pattern.length * symbolMs;
 }
 
 export function stopSendingLight() {
@@ -59,6 +59,32 @@ export function stopSendingLight() {
 export function sendingLight(): boolean {
   const android = window.CarryChatAndroid;
   return android ? (android.lightPlaying?.() ?? false) : previewSince !== null;
+}
+
+/** The exposure the camera keeps while watching, in its units of 100 µs: 5 ms. */
+const EXPOSURE = 50;
+/** The sensitivity it keeps meanwhile, so a light far away still shows. */
+const ISO = 800;
+
+/**
+ * Has the camera keep a short exposure of its own, where it lets the page set one. Left to itself, a camera in the
+ * dark lengthens its exposure to 30 ms and takes 20 pictures a second, too few for the light's 50 ms bits; held at
+ * 5 ms, the phones measured took 36 to 47, and a flashlight stood far above the dark around it.
+ */
+async function fastPictures(track: MediaStreamTrack | undefined) {
+  if (!track?.getCapabilities) return;
+  const capabilities = track.getCapabilities() as {
+    exposureMode?: string[];
+    exposureTime?: { min: number; max: number };
+    iso?: { min: number; max: number };
+  };
+  if (!capabilities.exposureMode?.includes("manual") || !capabilities.exposureTime) return;
+  const exposure = Math.min(Math.max(EXPOSURE, capabilities.exposureTime.min), capabilities.exposureTime.max);
+  const iso = capabilities.iso ? Math.min(Math.max(ISO, capabilities.iso.min), capabilities.iso.max) : undefined;
+  const manual = { exposureMode: "manual", exposureTime: exposure, ...(iso ? { iso } : {}) };
+  await track
+    .applyConstraints({ frameRate: { ideal: 60 }, advanced: [manual as MediaTrackConstraintSet] })
+    .catch(() => {});
 }
 
 /** The camera's zoom, where it has one. */
@@ -132,6 +158,7 @@ export async function watchLight(
     audio: false,
     video: { facingMode: { ideal: "environment" }, frameRate: { ideal: 60 }, width: { ideal: 1280 }, height: { ideal: 720 } },
   });
+  await fastPictures(stream.getVideoTracks()[0]);
   let watching: number;
   try {
     watching = await api.lightStart();

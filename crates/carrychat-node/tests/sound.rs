@@ -17,7 +17,12 @@ fn a_card_played_as_sound_is_heard_and_verified() {
     let node = Node::create(dir.path(), "Ayşe Yılmaz").unwrap();
     let other = TempDir::new().unwrap();
     let listening = Node::create(other.path(), "Deniz").unwrap();
-    for band in [SoundBand::Audible, SoundBand::Inaudible] {
+    for band in [
+        SoundBand::Audible,
+        SoundBand::Inaudible,
+        SoundBand::Far,
+        SoundBand::FarInaudible,
+    ] {
         let samples = samples_of(&node.card_sound(band).unwrap());
         let mut listener = SoundListener::new(48_000);
         let heard = listener
@@ -52,6 +57,16 @@ async fn a_message_played_as_sound_reaches_a_node_that_listens() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_message_played_above_hearing_reaches_a_node_that_listens() {
     message_played_in(SoundBand::Inaudible).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_played_far_reaches_a_node_that_listens() {
+    message_played_in(SoundBand::Far).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_played_far_above_hearing_reaches_a_node_that_listens() {
+    message_played_in(SoundBand::FarInaudible).await;
 }
 
 async fn message_played_in(band: SoundBand) {

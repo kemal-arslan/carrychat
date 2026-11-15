@@ -120,9 +120,9 @@ class MainActivity : TauriActivity() {
     @JavascriptInterface
     fun lightAvailable(): Boolean = Torch.available(this@MainActivity)
 
-    /** Blinks the flashlight over and over: `pattern` of `1` lit and `0` dark, each for `halfMs`. False with no flashlight. */
+    /** Blinks the flashlight over and over: `pattern` of `1` lit and `0` dark, each for `symbolMs`. False with no flashlight. */
     @JavascriptInterface
-    fun lightPlay(pattern: String, halfMs: Int): Boolean = Torch.play(applicationContext, pattern, halfMs)
+    fun lightPlay(pattern: String, symbolMs: Int): Boolean = Torch.play(applicationContext, pattern, symbolMs)
 
     @JavascriptInterface
     fun lightStop() {

@@ -75,8 +75,8 @@ impl LightListener {
     }
 }
 
-/// Frames as rounds of light, one after another: halves of a bit, true for
-/// lit, each `light::HALF_BIT_MS` long, to blink over and over.
+/// Frames as rounds of light, one after another: symbols, true for lit,
+/// each `light::SYMBOL_MS` long, to blink over and over.
 pub(crate) fn frames_pattern(frames: &[Frame]) -> Vec<bool> {
     let bytes: Vec<Vec<u8>> = frames.iter().map(Frame::to_bytes).collect();
     let rounds: Vec<&[u8]> = bytes.iter().map(Vec::as_slice).collect();

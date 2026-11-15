@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type HeardCard } from "./api";
-import { soundInaudible } from "./prefs";
+import { soundBand } from "./prefs";
 
 /** How often the microphone's samples go to the listener. */
 const SEND_MS = 250;
@@ -16,9 +16,9 @@ export function canListen(): boolean {
   return Boolean(navigator.mediaDevices?.getUserMedia) && typeof AudioContext !== "undefined";
 }
 
-/** Plays this device's card over and over, above hearing if so set. Returns what stops it. */
+/** Plays this device's card over and over, in the band chosen. Returns what stops it. */
 export async function playCard(): Promise<() => void> {
-  const wav = await api.cardSound(soundInaudible());
+  const wav = await api.cardSound(soundBand());
   const context = new AudioContext();
   const source = context.createBufferSource();
   try {
@@ -42,10 +42,10 @@ export async function playCard(): Promise<() => void> {
 /** Messages played one after another, so two sent quickly do not sound over each other. */
 let messagesPlaying: Promise<void> = Promise.resolve();
 
-/** Plays one of our messages as sound a few times, above hearing if so set; resolves once it is done. */
+/** Plays one of our messages as sound a few times, in the band chosen; resolves once it is done. */
 export function playMessage(messageId: number): Promise<void> {
   const played = messagesPlaying.then(async () => {
-    const wav = await api.messageSound(messageId, soundInaudible());
+    const wav = await api.messageSound(messageId, soundBand());
     const context = new AudioContext();
     try {
       const source = context.createBufferSource();

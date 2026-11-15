@@ -1,17 +1,17 @@
 //! Light (§9.11): a contact card or a link frame blinked by a flashlight
 //! and watched by a camera, for two devices in sight of each other with no
 //! radio between them at all. A radio jammer does not reach it, and a
-//! flashlight is seen from far away at night, but it is slow: a few bits a
-//! second, minutes for a message.
+//! flashlight is seen from far away at night, but it is slow: 20 bits a
+//! second, about a minute and a half for a message.
 //!
-//! On-off keying, Manchester coded: each bit is two halves of
-//! `HALF_BIT_MS`, lit then dark for a 1, dark then lit for a 0. A watcher
-//! compares each bit's two halves, so the light around, or a camera
-//! changing its exposure, does not decide the bits. A round, its kind, its
-//! length and its bytes, is cut into blocks of `BLOCK_LEN` bytes. Each block
-//! goes after a sync mark, four halves lit and two dark, longer than any
-//! light in the data, with the round's id, the block's place, the last
-//! place and a CRC-16. The sender blinks the round over and over; the
+//! On-off keying: each bit holds the light lit for a 1 and dark for a 0, for
+//! `SYMBOL_MS`. The watching camera keeps a short exposure of its own, so it
+//! takes pictures fast and a flashlight stands far above the dark around
+//! it; a block's bits are read against the middle of its own lit and dark.
+//! A round, its kind, its length and its bytes, is cut into blocks of
+//! `BLOCK_LEN` bytes. Each block goes after a sync mark, twelve symbols lit
+//! and two dark, with the round's id, the block's place, the last place and
+//! a CRC-16. The sender blinks the round over and over; the
 //! watcher keeps every block it reads right, from any pass, until it has
 //! them all, so a person walking past or a shaking hand costs only the
 //! blocks it hid.
@@ -20,9 +20,10 @@ use std::collections::VecDeque;
 
 use crate::sound::{crc32, Kind};
 
-/// How long the light holds each half of a bit: three pictures of a camera
-/// at 30 a second.
-pub const HALF_BIT_MS: u32 = 100;
+/// How long the light holds each bit: one and a half pictures of a camera
+/// at 30 a second. Between two phones, bits this long were read with three
+/// errors in a thousand, and bits of 25 ms with six in a hundred.
+pub const SYMBOL_MS: u32 = 50;
 /// The bytes of a round in each block.
 pub const BLOCK_LEN: usize = 16;
 /// The most blocks of a round: places are four bits.
@@ -32,19 +33,22 @@ pub const MAX_LEN: usize = MAX_BLOCKS * BLOCK_LEN - 2;
 /// The longest frame a round carries, with its CRC-32.
 pub const MAX_FRAME_LEN: usize = MAX_LEN - 4;
 
-/// Before each block: four halves lit, then two dark. Data is never lit for
-/// more than two halves in a row.
-const SYNC: [bool; 6] = [true, true, true, true, false, false];
+/// Before each block: twelve symbols lit, then two dark. Data is lit that
+/// long one time in four thousand; a sync mark found in it reads as a
+/// block whose CRC-16 does not match.
+const SYNC: [bool; 14] = [
+    true, true, true, true, true, true, true, true, true, true, true, true, false, false,
+];
 /// A block as sent: the round's id, the block's place and the last place in
 /// one byte, the bytes, and a CRC-16 of all that.
 const BLOCK_SENT: usize = 2 + BLOCK_LEN + 2;
 const BLOCK_BITS: usize = BLOCK_SENT * 8;
-/// A block with its sync mark, in halves of a bit.
-pub const BLOCK_HALVES: usize = SYNC.len() + 2 * BLOCK_BITS;
+/// A block with its sync mark, in symbols.
+pub const BLOCK_SYMBOLS: usize = SYNC.len() + BLOCK_BITS;
 
-/// The light of one round of `payload`, a half bit at a time, true for lit,
-/// each half for `HALF_BIT_MS`: every block after its sync mark, to blink
-/// over and over. A frame gets its CRC-32 added.
+/// The light of one round of `payload`, a symbol at a time, true for lit,
+/// each for `SYMBOL_MS`: every block after its sync mark, to blink over and
+/// over. A frame gets its CRC-32 added.
 pub fn pattern(kind: Kind, payload: &[u8]) -> Vec<bool> {
     let mut bytes = payload.to_vec();
     if kind == Kind::Frame {
@@ -69,17 +73,14 @@ fn round_pattern(magic: u8, bytes: &[u8]) -> Vec<bool> {
     let blocks = round.len().div_ceil(BLOCK_LEN);
     round.resize(blocks * BLOCK_LEN, 0);
     let last = (blocks - 1) as u8;
-    let mut out = Vec::with_capacity(blocks * BLOCK_HALVES);
+    let mut out = Vec::with_capacity(blocks * BLOCK_SYMBOLS);
     for (place, chunk) in round.chunks(BLOCK_LEN).enumerate() {
         let mut block = vec![id, (place as u8) << 4 | last];
         block.extend_from_slice(chunk);
         block.extend_from_slice(&crc16(&block).to_be_bytes());
         out.extend_from_slice(&SYNC);
         for byte in block {
-            for shift in (0..8).rev() {
-                let one = byte >> shift & 1 == 1;
-                out.extend_from_slice(&[one, !one]);
-            }
+            out.extend((0..8).rev().map(|shift| byte >> shift & 1 == 1));
         }
     }
     out
@@ -107,30 +108,28 @@ pub fn crc16(bytes: &[u8]) -> u16 {
     crc
 }
 
-const HALF: f64 = HALF_BIT_MS as f64;
+const SYMBOL: f64 = SYMBOL_MS as f64;
 /// Pictures kept: a block with its sync mark, and a little more.
-const KEEP_MS: f64 = (BLOCK_HALVES + 8) as f64 * HALF;
+const KEEP_MS: f64 = (BLOCK_SYMBOLS + 16) as f64 * SYMBOL;
 /// What tells lit from dark: the brightness of the last few seconds.
 const LEVEL_MS: f64 = 3_000.0;
 /// The least difference between lit and dark worth watching, in the 0 to
 /// 255 of a picture's brightness.
 pub const MIN_CONTRAST: f32 = 6.0;
-/// The shortest and longest light that is a sync mark: four halves, give or
-/// take a flashlight's and a camera's delays, or five after a 0.
-const SYNC_MIN: f64 = 3.0 * HALF;
-const SYNC_MAX: f64 = 6.5 * HALF;
-/// How much of each half's ends a bit's reading leaves out, where the light
-/// may still be changing.
-const MARGIN: f64 = 0.2 * HALF;
+/// The shortest and longest light that is a sync mark: twelve symbols, give
+/// or take a flashlight's and a camera's delays, or more after a block that
+/// ends lit.
+const SYNC_MIN: f64 = 10.0 * SYMBOL;
+const SYNC_MAX: f64 = 24.0 * SYMBOL;
 /// A block's bits are read `SHIFTS` steps of `SHIFT_MS` either side of
 /// where its sync mark puts them, and decoded at the `TRIED_SHIFTS` where
 /// they stand out most.
 const SHIFTS: i32 = 5;
-const SHIFT_MS: f64 = 0.1 * HALF;
+const SHIFT_MS: f64 = 0.1 * SYMBOL;
 const TRIED_SHIFTS: usize = 3;
 /// The least sure bits tried the other way, one or two at a time, when a
 /// block's CRC-16 does not match.
-const DOUBTFUL: usize = 4;
+const DOUBTFUL: usize = 6;
 /// Rounds put together at once; the stalest goes.
 const MAX_ROUNDS: usize = 8;
 /// Rounds read whole, kept so their next passes are not read again.
@@ -268,7 +267,7 @@ impl Listener {
             (Some(true), false) => {
                 if let Some(rose) = self.rose.take() {
                     if (SYNC_MIN..=SYNC_MAX).contains(&(edge - rose)) {
-                        self.blocks.push_back(edge + 2.0 * HALF);
+                        self.blocks.push_back(edge + 2.0 * SYMBOL);
                     }
                 }
             }
@@ -281,7 +280,7 @@ impl Listener {
     fn read(&mut self, now: f64) -> Vec<(Kind, Vec<u8>)> {
         let mut out = Vec::new();
         while let Some(&start) = self.blocks.front() {
-            if now < start + (2 * BLOCK_BITS) as f64 * HALF {
+            if now < start + BLOCK_BITS as f64 * SYMBOL {
                 break;
             }
             self.blocks.pop_front();
@@ -293,19 +292,34 @@ impl Listener {
     }
 
     /// The block whose bits start about `start`, if its CRC-16 matches, with
-    /// up to two of its least sure bits turned. A flashlight that comes on
-    /// later than it goes off moves the bits from where the sync mark puts
-    /// them, so they are read a little earlier and later too, and tried
-    /// where their halves differ most.
+    /// up to two of its least sure bits turned. Each bit is how much brighter
+    /// than the middle of the block's own lit and dark it looked, its sync
+    /// mark's light included, so a block of mostly 0s still has its lit. A
+    /// flashlight that comes on later than it goes off moves the bits from
+    /// where the sync mark puts them, so they are read a little earlier and
+    /// later too, and tried where they stand furthest from the middle.
     fn block(&self, start: f64) -> Option<[u8; BLOCK_SENT]> {
+        let from = self
+            .seen
+            .partition_point(|&(at, _)| at < start - SYNC.len() as f64 * SYMBOL);
+        let mut levels: Vec<f32> = self.seen[from..]
+            .iter()
+            .take_while(|&&(at, _)| at <= start + BLOCK_BITS as f64 * SYMBOL)
+            .map(|&(_, level)| level)
+            .collect();
+        if levels.len() < 8 {
+            return None;
+        }
+        levels.sort_by(f32::total_cmp);
+        let middle = (levels[levels.len() / 10] + levels[levels.len() * 9 / 10]) / 2.0;
         let mut readings: Vec<(f32, [f32; BLOCK_BITS])> = (-SHIFTS..=SHIFTS)
             .filter_map(|shift| {
                 let start = start + f64::from(shift) * SHIFT_MS;
                 let mut soft = [0f32; BLOCK_BITS];
                 for (bit, value) in soft.iter_mut().enumerate() {
-                    let at = start + (2 * bit) as f64 * HALF;
-                    *value = self.brightness(at, at + HALF)?
-                        - self.brightness(at + HALF, at + 2.0 * HALF)?;
+                    let at = start + bit as f64 * SYMBOL;
+                    let (level, sure) = self.brightness(at, at + SYMBOL)?;
+                    *value = (level - middle) * sure;
                 }
                 Some((soft.iter().map(|value| value.abs()).sum(), soft))
             })
@@ -317,29 +331,28 @@ impl Listener {
             .find_map(|(_, soft)| decode(soft))
     }
 
-    /// How bright the light looked from `from` to `to`: the pictures inside,
-    /// leaving out the ends, or else all of it, or else between the
-    /// pictures either side.
-    fn brightness(&self, from: f64, to: f64) -> Option<f32> {
-        let mean = |from: f64, to: f64| {
-            let start = self.seen.partition_point(|&(at, _)| at < from);
-            let inside: Vec<f32> = self.seen[start..]
-                .iter()
-                .take_while(|&&(at, _)| at <= to)
-                .map(|&(_, level)| level)
-                .collect();
-            (!inside.is_empty()).then(|| inside.iter().sum::<f32>() / inside.len() as f32)
-        };
-        mean(from + MARGIN, to - MARGIN)
-            .or_else(|| mean(from, to))
-            .or_else(|| {
-                let middle = (from + to) / 2.0;
-                let after = self.seen.partition_point(|&(at, _)| at < middle);
-                let (&(t0, l0), &(t1, l1)) =
-                    (self.seen.get(after.checked_sub(1)?)?, self.seen.get(after)?);
-                let share = ((middle - t0) / (t1 - t0)) as f32;
-                Some(l0 + (l1 - l0) * share)
-            })
+    /// How bright the light looked from `from` to `to`, and how sure that
+    /// is, from 0 to 1. A picture counts the more the nearer it was taken
+    /// to the middle: one near an end may have caught the light changing.
+    /// With no picture inside, it is read between the pictures either side,
+    /// and hardly sure.
+    fn brightness(&self, from: f64, to: f64) -> Option<(f32, f32)> {
+        let middle = (from + to) / 2.0;
+        let half = (to - from) / 2.0;
+        let start = self.seen.partition_point(|&(at, _)| at < from);
+        let (mut sum, mut weights) = (0f32, 0f32);
+        for &(at, level) in self.seen[start..].iter().take_while(|&&(at, _)| at <= to) {
+            let weight = (1.0 - ((at - middle).abs() / half) as f32).max(0.05);
+            sum += level * weight;
+            weights += weight;
+        }
+        if weights > 0.0 {
+            return Some((sum / weights, weights.min(1.0)));
+        }
+        let after = self.seen.partition_point(|&(at, _)| at < middle);
+        let (&(t0, l0), &(t1, l1)) = (self.seen.get(after.checked_sub(1)?)?, self.seen.get(after)?);
+        let share = ((middle - t0) / (t1 - t0)) as f32;
+        Some((l0 + (l1 - l0) * share, 0.05))
     }
 
     /// Keeps a block read right; gives its round once it is whole.
@@ -414,8 +427,8 @@ impl Listener {
     }
 }
 
-/// A block from how much brighter each bit's first half looked than its
-/// second, if its CRC-16 matches as read or with one or two of the
+/// A block from how much brighter than the middle each bit looked, if its
+/// CRC-16 matches as read or with one or two of the
 /// `DOUBTFUL` least sure bits turned.
 fn decode(soft: &[f32; BLOCK_BITS]) -> Option<[u8; BLOCK_SENT]> {
     let bytes = |turned: &[usize]| {
@@ -479,14 +492,16 @@ mod tests {
         noise: f32,
     }
 
+    /// As two phones were measured: about 45 pictures a second, each taken
+    /// in 5 ms, a flashlight a little slower on than off.
     const SHAKY: Scene = Scene {
-        frame_ms: 1000.0 / 30.0,
-        jitter: 6.0,
-        exposure: 30.0,
-        rise: 40.0,
-        fall: 10.0,
-        lit: 120.0,
-        dark: 70.0,
+        frame_ms: 1000.0 / 45.0,
+        jitter: 5.0,
+        exposure: 5.0,
+        rise: 15.0,
+        fall: 5.0,
+        lit: 200.0,
+        dark: 12.0,
         noise: 4.0,
     };
 
@@ -496,7 +511,7 @@ mod tests {
         let mut on: Option<f64> = None;
         let halves = pattern.iter().cycle().take(pattern.len() * passes);
         for (index, &lit) in halves.chain([false].iter()).enumerate() {
-            let at = index as f64 * HALF;
+            let at = index as f64 * SYMBOL;
             match (on, lit) {
                 (None, true) => on = Some(at),
                 (Some(start), false) => {
@@ -562,7 +577,7 @@ mod tests {
     }
 
     fn duration(pattern: &[bool]) -> f64 {
-        pattern.len() as f64 * HALF
+        pattern.len() as f64 * SYMBOL
     }
 
     #[test]
@@ -570,15 +585,15 @@ mod tests {
         let frame = payload(143);
         let pattern = pattern(Kind::Frame, &frame);
         // 2 + 143 + 4 bytes: ten blocks.
-        assert_eq!(pattern.len(), 10 * BLOCK_HALVES);
-        for block in pattern.chunks(BLOCK_HALVES) {
+        assert_eq!(pattern.len(), 10 * BLOCK_SYMBOLS);
+        for (place, block) in pattern.chunks(BLOCK_SYMBOLS).enumerate() {
             assert_eq!(block[..SYNC.len()], SYNC);
-            // No light in the data as long as a sync mark's.
-            let longest = block[SYNC.len()..]
-                .split(|&lit| !lit)
-                .map(<[bool]>::len)
-                .max();
-            assert_eq!(longest, Some(2));
+            // Then the bits as they are: the place and the last place, 9.
+            let second: Vec<bool> = (0..8)
+                .rev()
+                .map(|shift| (place << 4 | 9) >> shift & 1 == 1)
+                .collect();
+            assert_eq!(block[SYNC.len() + 8..SYNC.len() + 16], second[..]);
         }
     }
 
@@ -597,13 +612,12 @@ mod tests {
     }
 
     #[test]
-    fn reads_a_card_at_sixty_pictures_a_second() {
+    fn reads_a_card_at_thirty_pictures_a_second() {
         let card = payload(200);
         let pattern = pattern(Kind::Card, &card);
         let scene = Scene {
-            frame_ms: 1000.0 / 60.0,
-            jitter: 3.0,
-            exposure: 8.0,
+            frame_ms: 1000.0 / 30.0,
+            jitter: 4.0,
             ..SHAKY
         };
         let length = duration(&pattern);
@@ -619,12 +633,13 @@ mod tests {
         let frame = payload(90);
         let pattern = pattern(Kind::Frame, &frame);
         let scene = Scene {
-            rise: 70.0,
-            fall: 5.0,
-            jitter: 10.0,
+            rise: 25.0,
+            fall: 0.0,
+            jitter: 6.0,
             ..SHAKY
         };
-        let pictures = film(&scene, &pattern, 2, 0.0, 2.0 * duration(&pattern), 29);
+        // Blocks it misreads on one pass, it reads on another.
+        let pictures = film(&scene, &pattern, 4, 0.0, 4.0 * duration(&pattern), 29);
         assert_eq!(
             watch(&mut Listener::new(), &pictures),
             vec![(Kind::Frame, frame)]
@@ -674,7 +689,7 @@ mod tests {
         for picture in &mut pictures {
             let at = picture.0 - 12_345.0;
             if at > length * 0.3 && at < length * 0.63 {
-                picture.1 = 65.0;
+                picture.1 = 12.0;
             }
         }
         let mut listener = Listener::new();

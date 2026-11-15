@@ -7,14 +7,15 @@ import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { openingLanguage } from "./i18n";
+import type { SoundBand } from "./prefs";
 
 export type Profile = { name: string; fingerprint: string; card: string };
 
 /** A card heard over sound, its signature verified. */
 export type HeardCard = { card: string; name: string };
 
-/** One of our messages as light: halves of a bit, `1` lit and `0` dark, each `halfMs` long, to blink over and over. */
-export type LightPattern = { pattern: string; halfMs: number };
+/** One of our messages as light: symbols, `1` lit and `0` dark, each `symbolMs` long, to blink over and over. */
+export type LightPattern = { pattern: string; symbolMs: number };
 
 /** How watching for light goes. */
 export type LightWatch = {
@@ -307,10 +308,10 @@ export interface Api {
   rename(name: string): Promise<Profile>;
   contacts(): Promise<Contact[]>;
   addContact(card: string): Promise<Contact>;
-  /** This device's card as sound, above hearing if `inaudible`: one round, a WAV file to play over and over. */
-  cardSound(inaudible: boolean): Promise<ArrayBuffer>;
-  /** One of our messages as sound, above hearing if `inaudible`: a WAV file to play a few times for a device nearby that listens. */
-  messageSound(messageId: number, inaudible: boolean): Promise<ArrayBuffer>;
+  /** This device's card as sound in `band`: one round, a WAV file to play over and over. */
+  cardSound(band: SoundBand): Promise<ArrayBuffer>;
+  /** One of our messages as sound in `band`: a WAV file to play a few times for a device nearby that listens. */
+  messageSound(messageId: number, band: SoundBand): Promise<ArrayBuffer>;
   /**
    * Starts listening for a card played as sound, from a microphone at `rate` samples a second. Gives the
    * listening's number, which the calls for it name, so that one ended late cannot end the next.
@@ -496,10 +497,9 @@ function desktopApi(): Api {
     contacts: () => call("contacts"),
     addContact: (card) => call("add_contact", { card }),
     // Android hands raw bytes to the page as an array of numbers, not a buffer.
-    cardSound: (inaudible) =>
-      call<ArrayBuffer | ArrayBufferView | number[]>("card_sound", { inaudible }).then(toArrayBuffer),
-    messageSound: (messageId, inaudible) =>
-      call<ArrayBuffer | ArrayBufferView | number[]>("message_sound", { messageId, inaudible }).then(toArrayBuffer),
+    cardSound: (band) => call<ArrayBuffer | ArrayBufferView | number[]>("card_sound", { band }).then(toArrayBuffer),
+    messageSound: (messageId, band) =>
+      call<ArrayBuffer | ArrayBufferView | number[]>("message_sound", { messageId, band }).then(toArrayBuffer),
     listenStart: (rate) => call("listen_start", { rate }),
     // The samples go as the request's body, not as JSON, after the listening's number.
     listenHeard(listening, samples) {
@@ -799,11 +799,11 @@ function previewApi(): Api {
     async contacts() {
       return summarize();
     },
-    async cardSound(inaudible) {
-      return beep(inaudible ? 18_000 : 2000);
+    async cardSound(band) {
+      return beep(band === "inaudible" || band === "farInaudible" ? 18_000 : 2000);
     },
-    async messageSound(_messageId, inaudible) {
-      return beep(inaudible ? 18_000 : 2000);
+    async messageSound(_messageId, band) {
+      return beep(band === "inaudible" || band === "farInaudible" ? 18_000 : 2000);
     },
     async listenStart() {
       listeningSince = Date.now();
@@ -816,8 +816,8 @@ function previewApi(): Api {
     async listenStop() {},
     async messageLight() {
       // Two blocks' worth of a sync mark and alternating bits.
-      const block = "111100" + "10".repeat(160);
-      return { pattern: block + block, halfMs: 100 };
+      const block = "1".repeat(12) + "00" + "10".repeat(80);
+      return { pattern: block + block, symbolMs: 50 };
     },
     async lightStart() {
       watchingSince = Date.now();

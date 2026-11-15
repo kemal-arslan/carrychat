@@ -4,12 +4,20 @@
 //! common.
 //!
 //! Tones 46.875 Hz apart, in channels of 16. Each symbol sounds one tone per
-//! channel, a nibble each. A round plays in one of two bands: six channels
+//! channel, a nibble each. A round plays in one of four bands: six channels
 //! from 1875 Hz up to about 6.3 kHz, where phone speakers and microphones
-//! work well, three bytes to a 100 ms symbol; or three channels from 18 kHz
-//! up to about 20.2 kHz, above what most adults hear, a byte and a half to a
-//! 64 ms symbol. A start marker of four symbols comes first, then a header
-//! with the length, then the bytes. The sender plays it over and over; the
+//! work well, three bytes to a 100 ms symbol; three channels from 18 kHz up
+//! to about 20.2 kHz, above what most adults hear, a byte and a half to a
+//! 64 ms symbol; or, to reach furthest, one channel that moves between two
+//! places, from 1500 Hz to about 2.95 kHz with half a byte to a 100 ms
+//! symbol, or unheard, from 18 kHz to about 19.45 kHz with half a byte to a
+//! 128 ms symbol. A speaker plays its loudest one tone at a time, so a far
+//! band's tone is about 16 dB louder than each of the six of the first, and
+//! 10 dB louder than each of the three of the second; and it does not
+//! distort the way several tones do at full volume. Moving between two
+//! places, a tone does not land where the room still echoes the last.
+//! A start marker of four symbols comes first, then a header with the
+//! length, then the bytes. The sender plays it over and over; the
 //! listener hears both bands and needs one clean round. A card verifies its
 //! own signature; a frame carries a CRC-32, since a corrupt one could
 //! otherwise be carried on.
@@ -58,16 +66,29 @@ pub enum Band {
     /// 18 kHz to about 20.2 kHz, above what most adults hear. Not every
     /// speaker plays it, and it carries less a second.
     Inaudible,
+    /// 1500 Hz to about 2.95 kHz, one tone at a time: the furthest reach,
+    /// at a sixth of the audible band's speed.
+    Far,
+    /// 18 kHz to about 19.45 kHz, one tone at a time, in longer symbols: as
+    /// far as sound above hearing reaches, at a quarter of the inaudible
+    /// band's speed.
+    FarInaudible,
 }
 
 impl Band {
-    const ALL: [Self; 2] = [Self::Audible, Self::Inaudible];
+    const ALL: [Self; 4] = [
+        Self::Audible,
+        Self::Inaudible,
+        Self::Far,
+        Self::FarInaudible,
+    ];
 
     /// The lowest tone.
     fn base_hz(self) -> f64 {
         match self {
             Self::Audible => 1875.0,
-            Self::Inaudible => 18_000.0,
+            Self::Inaudible | Self::FarInaudible => 18_000.0,
+            Self::Far => 1500.0,
         }
     }
 
@@ -76,40 +97,71 @@ impl Band {
         match self {
             Self::Audible => 6,
             Self::Inaudible => 3,
+            Self::Far | Self::FarInaudible => 1,
+        }
+    }
+
+    /// Places the channels move between, one symbol to the next.
+    fn hops(self) -> usize {
+        match self {
+            Self::Audible | Self::Inaudible => 1,
+            Self::Far | Self::FarInaudible => 2,
         }
     }
 
     fn tones(self) -> usize {
-        self.channels() * TONES
+        self.hops() * self.channels() * TONES
+    }
+
+    /// Tone `tone` of channel `channel` in symbol `symbol`, among the band's
+    /// tones.
+    fn tone(self, symbol: usize, channel: usize, tone: usize) -> usize {
+        ((symbol % self.hops()) * self.channels() + channel) * TONES + tone
+    }
+
+    /// The energies of the place symbol `symbol` sounds in, out of all the
+    /// band's.
+    fn place(self, energies: &[f32], symbol: usize) -> &[f32] {
+        let len = self.channels() * TONES;
+        let from = (symbol % self.hops()) * len;
+        &energies[from..from + len]
     }
 
     fn symbol_secs(self) -> f64 {
         match self {
-            Self::Audible => 0.1,
-            // Three cycles of `STEP_HZ`, so every tone runs a whole number
-            // of cycles and ends where the next symbol's begins.
+            Self::Audible | Self::Far => 0.1,
+            // Three and six cycles of `STEP_HZ`, so every tone runs a whole
+            // number of cycles and ends where the next symbol's begins.
             Self::Inaudible => 0.064,
+            Self::FarInaudible => 0.128,
         }
     }
 
     /// What the listener skips at the start of each symbol, where the room
-    /// still echoes the last one. High tones die away sooner.
+    /// still echoes the last one. High tones die away sooner; far away,
+    /// the echo is as loud as the tone.
     fn guard_secs(self) -> f64 {
         match self {
             Self::Audible => 0.03,
             Self::Inaudible => 0.02,
+            Self::Far => 0.035,
+            Self::FarInaudible => 0.025,
         }
     }
 
-    /// How long sound fades in and out over. The audible band fades every
-    /// symbol, so it does not click. The other runs on from one symbol into
+    /// How long sound fades in and out over. The audible bands fade every
+    /// symbol, so they do not click. The other runs on from one symbol into
     /// the next and fades only at the round's ends, more slowly: a click
     /// would be heard although the tones are not.
     fn ramp_secs(self) -> f64 {
         match self {
-            Self::Audible => 0.005,
-            Self::Inaudible => 0.01,
+            Self::Audible | Self::Far => 0.005,
+            Self::Inaudible | Self::FarInaudible => 0.01,
         }
+    }
+
+    fn fades_every_symbol(self) -> bool {
+        matches!(self, Self::Audible | Self::Far)
     }
 
     fn frequency(self, tone: usize) -> f64 {
@@ -143,11 +195,15 @@ const TAIL_SECS: f64 = 0.4;
 /// channel, which no data symbol has.
 const MARKER: [[usize; 2]; 2] = [[0, 8], [4, 12]];
 const MARKER_SYMBOLS: usize = 4;
-/// Share of a channel's energy in the marker's tones: 1 for a clean marker,
-/// about 1/8 for noise and well under this for data.
+/// Share of the energy in the marker's tones: 1 for a clean marker, about
+/// 1/8 for noise and well under this for most data. A far band shares its
+/// marker's energy with the noise of twice as many tones, about 1/16 alone,
+/// so less suffices there.
 const MARKER_THRESHOLD: f32 = 0.5;
-/// How much sound the listener keeps: longer than the longest round.
-const KEEP_SECS: f64 = 14.0;
+const FAR_MARKER_THRESHOLD: f32 = 0.3;
+/// How much sound the listener keeps: longer than the longest round, which
+/// takes 67 seconds in the far band above hearing.
+const KEEP_SECS: f64 = 70.0;
 
 /// One round of `payload` in `band` as samples at `SAMPLE_RATE`, between -1
 /// and 1. A frame gets its CRC-32 added.
@@ -166,7 +222,7 @@ fn round(band: Band, magic: u8, bytes: &[u8]) -> Vec<f32> {
     let symbols = symbols(band, magic, bytes);
     let last = symbols.len() - 1;
     for (index, tones) in symbols.iter().enumerate() {
-        let fades = band == Band::Audible;
+        let fades = band.fades_every_symbol();
         sound(
             &mut out,
             band,
@@ -207,13 +263,13 @@ pub fn wav(band: Band, kind: Kind, payloads: &[&[u8]]) -> Vec<u8> {
 
 /// The tones of each symbol: the marker, then the header and the bytes, a
 /// nibble to each channel, the last symbol zero-padded. The three header
-/// bytes fill whole symbols in either band.
+/// bytes fill whole symbols in every band.
 fn symbols(band: Band, magic: u8, payload: &[u8]) -> Vec<Vec<usize>> {
     let channels = band.channels();
     let mut symbols: Vec<Vec<usize>> = (0..MARKER_SYMBOLS)
         .map(|index| {
             (0..channels)
-                .flat_map(|channel| MARKER[index % 2].map(|tone| channel * TONES + tone))
+                .flat_map(|channel| MARKER[index % 2].map(|tone| band.tone(index, channel, tone)))
                 .collect()
         })
         .collect();
@@ -224,10 +280,12 @@ fn symbols(band: Band, magic: u8, payload: &[u8]) -> Vec<Vec<usize>> {
         .flat_map(|byte| [byte >> 4, byte & 0x0F])
         .collect();
     for nibbles in nibbles.chunks(channels) {
+        let index = symbols.len();
         symbols.push(
             (0..channels)
                 .map(|channel| {
-                    channel * TONES + usize::from(nibbles.get(channel).copied().unwrap_or(0))
+                    let nibble = nibbles.get(channel).copied().unwrap_or(0);
+                    band.tone(index, channel, usize::from(nibble))
                 })
                 .collect(),
         );
@@ -255,7 +313,10 @@ fn sound(out: &mut Vec<f32>, band: Band, tones: &[usize], fades: (bool, bool)) {
         let sum: f64 = tones
             .iter()
             .map(|&tone| {
-                let phase = TAU * (tone / TONES) as f64 / band.channels() as f64;
+                // Each channel from its own phase, the same in either place,
+                // so a band that does not fade runs on without a step.
+                let channel = (tone / TONES) % band.channels();
+                let phase = TAU * channel as f64 / band.channels() as f64;
                 (TAU * band.frequency(tone) * at / rate + phase).sin()
             })
             .sum();
@@ -414,17 +475,33 @@ impl Search {
         Some(sum)
     }
 
-    /// How much like marker symbol `index` a symbol sounds, from 0 to 1.
-    fn marker_score(energies: &[f32], index: usize) -> f32 {
+    /// How much like marker symbol `index` a symbol sounds, from 0 to 1: the
+    /// share of each channel's energy in the marker's tones, about 1/8 for
+    /// noise. In a far band the share is of the whole band's energy: the
+    /// place's alone would stay as high with the symbol read tens of
+    /// milliseconds late, when the next symbol sounds in the other place,
+    /// and the round would be timed wrong. Its data can sound like the
+    /// marker by chance, one tone a symbol; such a round's header does not
+    /// read right, and it is dropped.
+    fn marker_score(band: Band, energies: &[f32], index: usize) -> f32 {
         let tones = MARKER[index % 2];
+        let place = band.place(energies, index);
+        if band.hops() > 1 {
+            let total: f32 = energies.iter().sum();
+            return if total > 0.0 {
+                (place[tones[0]] + place[tones[1]]) / total
+            } else {
+                0.0
+            };
+        }
         let mut score = 0.0;
-        for channel in energies.chunks(TONES) {
+        for channel in place.chunks(TONES) {
             let total: f32 = channel.iter().sum();
             if total > 0.0 {
                 score += (channel[tones[0]] + channel[tones[1]]) / total;
             }
         }
-        score / (energies.len() / TONES) as f32
+        score / (place.len() / TONES) as f32
     }
 
     /// Looks for the start marker at every window not yet searched. Each run
@@ -434,14 +511,27 @@ impl Search {
         self.searched = self.searched.max(windows.first);
         while self.searched < windows.end() {
             let start = (self.searched * windows.hop) as f64;
-            let mut score = f32::MAX;
-            for index in 0..MARKER_SYMBOLS {
+            // Every symbol must sound like the marker, or in a far band, the
+            // four on average: one symbol in a notch of the speaker's sound
+            // does not lose the round.
+            let mut scores = [0f32; MARKER_SYMBOLS];
+            for (index, score) in scores.iter_mut().enumerate() {
                 match self.symbol(windows, start, index) {
-                    Some(energies) => score = score.min(Self::marker_score(&energies, index)),
+                    Some(energies) => *score = Self::marker_score(self.band, &energies, index),
                     None => return,
                 }
             }
-            if score >= MARKER_THRESHOLD {
+            let score = if self.band.hops() > 1 {
+                scores.iter().sum::<f32>() / MARKER_SYMBOLS as f32
+            } else {
+                scores.iter().copied().fold(f32::MAX, f32::min)
+            };
+            let threshold = if self.band.hops() > 1 {
+                FAR_MARKER_THRESHOLD
+            } else {
+                MARKER_THRESHOLD
+            };
+            if score >= threshold {
                 self.run.get_or_insert(self.searched);
             } else if let Some(run) = self.run.take() {
                 let middle = (run + self.searched - 1) as f64 / 2.0;
@@ -485,20 +575,24 @@ impl Search {
         let mut index = MARKER_SYMBOLS;
         while nibbles.len() < count * 2 {
             let energies = self.symbol(windows, start, index)?;
-            nibbles.extend(energies.chunks(TONES).map(|channel| {
-                let (loudest, _) =
-                    channel
-                        .iter()
-                        .enumerate()
-                        .fold((0, f32::MIN), |best, (tone, &energy)| {
-                            if energy > best.1 {
-                                (tone, energy)
-                            } else {
-                                best
-                            }
-                        });
-                loudest as u8
-            }));
+            nibbles.extend(
+                self.band
+                    .place(&energies, index)
+                    .chunks(TONES)
+                    .map(|channel| {
+                        let (loudest, _) = channel.iter().enumerate().fold(
+                            (0, f32::MIN),
+                            |best, (tone, &energy)| {
+                                if energy > best.1 {
+                                    (tone, energy)
+                                } else {
+                                    best
+                                }
+                            },
+                        );
+                        loudest as u8
+                    }),
+            );
             index += 1;
         }
         Some(
@@ -669,29 +763,81 @@ mod tests {
     }
 
     #[test]
-    fn the_inaudible_band_stays_out_of_hearing() {
+    fn the_bands_above_hearing_stay_out_of_hearing() {
         // A step from one symbol to the next would click, spreading sound
         // down into what people hear. Every tone ends a symbol where the
         // next begins, so the round stays near its tones.
-        let round = samples(Band::Inaudible, Kind::Card, &payload());
-        let band = Band::Inaudible;
-        let tones = (0..band.tones())
-            .map(|tone| power(&round, band.frequency(tone)))
-            .fold(0.0, f64::max);
-        let heard = (1..=30)
-            .map(|step| power(&round, f64::from(step) * 500.0))
-            .fold(0.0, f64::max);
-        assert!(heard < tones * 1e-6, "{heard} against {tones}");
+        for band in [Band::Inaudible, Band::FarInaudible] {
+            let round = samples(band, Kind::Card, &payload());
+            let tones = (0..band.tones())
+                .map(|tone| power(&round, band.frequency(tone)))
+                .fold(0.0, f64::max);
+            let heard = (1..=30)
+                .map(|step| power(&round, f64::from(step) * 500.0))
+                .fold(0.0, f64::max);
+            assert!(heard < tones * 1e-6, "{band:?}: {heard} against {tones}");
+        }
     }
 
     #[test]
-    fn a_slow_listener_hears_only_the_audible_band() {
+    fn a_slow_listener_hears_only_the_audible_bands() {
         let payload = payload();
         let round = samples(Band::Audible, Kind::Card, &payload);
         let slow: Vec<f32> = round.iter().step_by(3).copied().collect();
         let mut listener = Listener::new(16_000);
-        assert_eq!(listener.searches.len(), 1);
+        assert!(listener
+            .searches
+            .iter()
+            .all(|search| search.band != Band::Inaudible));
         assert_eq!(listen(&mut listener, &slow), Some((Kind::Card, payload)));
+    }
+
+    #[test]
+    fn the_far_band_moves_between_two_places_one_tone_at_a_time() {
+        let symbols = symbols(Band::Far, 0xCC, &[0x5A]);
+        // The marker, two tones each, then 0xCC, 1, !1 and 0x5A a nibble at a time.
+        assert_eq!(
+            symbols[..MARKER_SYMBOLS],
+            [vec![0, 8], vec![20, 28], vec![0, 8], vec![20, 28]]
+        );
+        assert_eq!(
+            symbols[MARKER_SYMBOLS..],
+            [12, 16 + 12, 0, 16 + 1, 15, 16 + 14, 5, 16 + 10].map(|tone| vec![tone])
+        );
+        assert!((Band::Far.frequency(Band::Far.tones() - 1) - 2953.125).abs() < 1e-9);
+    }
+
+    /// `round` played `gain` as loud, from halfway through it and then once
+    /// more, over noise at a tenth of full scale, as a microphone far away
+    /// would hear it.
+    fn faint(round: &[f32], gain: f32, seed: u64) -> Vec<f32> {
+        let mut noise = Noise(seed);
+        round[round.len() / 2..]
+            .iter()
+            .chain(round)
+            .map(|sample| sample * gain + noise.next() * 0.1)
+            .collect()
+    }
+
+    #[test]
+    fn the_far_band_is_heard_where_the_others_are_not() {
+        let payload = payload();
+        // About 18 dB down from where every band is heard.
+        let gain = 0.025;
+        let heard = |band: Band| {
+            let mut listener = Listener::new(SAMPLE_RATE);
+            listen(
+                &mut listener,
+                &faint(&samples(band, Kind::Card, &payload), gain, 7),
+            )
+        };
+        assert_eq!(heard(Band::Far), Some((Kind::Card, payload.clone())));
+        assert_eq!(
+            heard(Band::FarInaudible),
+            Some((Kind::Card, payload.clone()))
+        );
+        assert_eq!(heard(Band::Audible), None);
+        assert_eq!(heard(Band::Inaudible), None);
     }
 
     #[test]

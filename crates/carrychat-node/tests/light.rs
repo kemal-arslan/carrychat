@@ -1,22 +1,22 @@
 //! A message blinked as light by one node is read by another's watcher.
 
 use carrychat_node::{Event, LightListener, Node, Via};
-use carrychat_proto::light::HALF_BIT_MS;
+use carrychat_proto::light::SYMBOL_MS;
 use tempfile::TempDir;
 
-/// What a camera at 30 pictures a second sees of a flashlight blinking
-/// `pattern` twice: each picture the light over the 30 ms before it, lit
-/// at 140 and dark at 60.
+/// What a camera at 45 pictures a second sees of a flashlight blinking
+/// `pattern` twice: each picture the light over the 5 ms before it, lit at
+/// 200 and dark at 10.
 fn film(pattern: &[bool]) -> Vec<(f64, f32)> {
-    let half = f64::from(HALF_BIT_MS);
-    let lit_at = |at: f64| at >= 0.0 && pattern[(at / half) as usize % pattern.len()];
-    let length = pattern.len() as f64 * half * 2.0;
+    let symbol = f64::from(SYMBOL_MS);
+    let lit_at = |at: f64| at >= 0.0 && pattern[(at / symbol) as usize % pattern.len()];
+    let length = pattern.len() as f64 * symbol * 2.0;
     (0..)
-        .map(|index| f64::from(index) * 1000.0 / 30.0)
+        .map(|index| f64::from(index) * 1000.0 / 45.0)
         .take_while(|&at| at < length)
         .map(|at| {
-            let lit = (0..30).filter(|ms| lit_at(at - f64::from(*ms))).count();
-            (at, 60.0 + 80.0 * lit as f32 / 30.0)
+            let lit = (0..5).filter(|ms| lit_at(at - f64::from(*ms))).count();
+            (at, 10.0 + 190.0 * lit as f32 / 5.0)
         })
         .collect()
 }

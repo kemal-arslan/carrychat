@@ -1,7 +1,7 @@
 // Preferences that belong to this window rather than to the node.
 
 const NOTIFICATIONS_KEY = "carrychat.notifications";
-const INAUDIBLE_KEY = "carrychat.soundInaudible";
+const SOUND_BAND_KEY = "carrychat.soundBand";
 const APP_LOCK_KEY = "carrychat.appLock";
 
 export function notificationsEnabled(): boolean {
@@ -22,21 +22,33 @@ export function setNotificationsEnabled(on: boolean): void {
 }
 
 /**
- * Whether cards and messages play as sound above hearing, at 18 to 20 kHz: so they do, unless turned off for a
- * speaker that cannot play that high.
+ * Where cards and messages play as sound: `far`, one tone at a time, reaching furthest but slowly; `farInaudible`,
+ * the same at 18 to 19.5 kHz, unheard; `audible`, fast, for a device side by side; `inaudible`, fast at 18 to
+ * 20 kHz, side by side and unheard. Far unless chosen otherwise.
  */
-export function soundInaudible(): boolean {
+export type SoundBand = "far" | "farInaudible" | "audible" | "inaudible";
+
+const SOUND_BANDS: SoundBand[] = ["far", "farInaudible", "audible", "inaudible"];
+
+export function soundBand(): SoundBand {
   try {
-    return localStorage.getItem(INAUDIBLE_KEY) !== "off";
+    const stored = localStorage.getItem(SOUND_BAND_KEY);
+    return SOUND_BANDS.find((band) => band === stored) ?? "far";
   } catch {
-    return true;
+    return "far";
   }
 }
 
-export function setSoundInaudible(on: boolean): void {
+/** Whether the band chosen plays above hearing, so nothing is heard while it plays. */
+export function soundUnheard(): boolean {
+  const band = soundBand();
+  return band === "inaudible" || band === "farInaudible";
+}
+
+export function setSoundBand(band: SoundBand): void {
   try {
-    if (on) localStorage.removeItem(INAUDIBLE_KEY);
-    else localStorage.setItem(INAUDIBLE_KEY, "off");
+    if (band === "far") localStorage.removeItem(SOUND_BAND_KEY);
+    else localStorage.setItem(SOUND_BAND_KEY, band);
   } catch {
     // Without storage the setting lasts until the window closes.
   }

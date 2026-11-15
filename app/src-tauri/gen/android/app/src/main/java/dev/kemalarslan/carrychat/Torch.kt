@@ -7,8 +7,8 @@ import android.os.SystemClock
 import android.util.Log
 
 /**
- * The flashlight that sends a message as light (§9.11): it blinks the halves
- * of a bit the node made, `1` lit and `0` dark, over and over until stopped.
+ * The flashlight that sends a message as light (§9.11): it blinks the
+ * symbols the node made, `1` lit and `0` dark, over and over until stopped.
  * It runs on a thread of its own, timed from the start against the clock,
  * so a change the camera service makes late does not push back the ones
  * after it. Turning the flashlight on and off needs no permission.
@@ -36,14 +36,14 @@ object Torch {
   /** Whether it is blinking: it stops by itself if the camera is taken, as by a page watching for light. */
   fun playing(): Boolean = player?.isAlive == true
 
-  /** Starts blinking `pattern`, each half for `halfMs`. False with no flashlight. */
+  /** Starts blinking `pattern`, each symbol for `symbolMs`. False with no flashlight. */
   @Synchronized
-  fun play(context: Context, pattern: String, halfMs: Int): Boolean {
+  fun play(context: Context, pattern: String, symbolMs: Int): Boolean {
     stop()
     val manager = context.getSystemService(CameraManager::class.java) ?: return false
     val id = camera(manager) ?: return false
-    if (pattern.isEmpty() || pattern.any { it != '0' && it != '1' } || halfMs <= 0) return false
-    val thread = Thread({ blink(manager, id, pattern, halfMs.toLong()) }, "carrychat-torch")
+    if (pattern.isEmpty() || pattern.any { it != '0' && it != '1' } || symbolMs <= 0) return false
+    val thread = Thread({ blink(manager, id, pattern, symbolMs.toLong()) }, "carrychat-torch")
     thread.priority = Thread.MAX_PRIORITY
     player = thread
     thread.start()
@@ -57,19 +57,19 @@ object Torch {
     thread.interrupt()
   }
 
-  private fun blink(manager: CameraManager, id: String, pattern: String, halfMs: Long) {
+  private fun blink(manager: CameraManager, id: String, pattern: String, symbolMs: Long) {
     val start = SystemClock.elapsedRealtime()
     var lit: Boolean? = null
-    var half = 0L
+    var symbol = 0L
     try {
       while (player === Thread.currentThread()) {
-        val want = pattern[(half % pattern.length).toInt()] == '1'
+        val want = pattern[(symbol % pattern.length).toInt()] == '1'
         if (want != lit) {
           manager.setTorchMode(id, want)
           lit = want
         }
-        half += 1
-        val wait = start + half * halfMs - SystemClock.elapsedRealtime()
+        symbol += 1
+        val wait = start + symbol * symbolMs - SystemClock.elapsedRealtime()
         if (wait > 0) Thread.sleep(wait)
       }
     } catch (_: InterruptedException) {

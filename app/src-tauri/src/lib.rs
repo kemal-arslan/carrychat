@@ -281,12 +281,15 @@ fn add_contact(state: State<'_, AppState>, card: String) -> CommandResult<Contac
     state.node()?.add_contact(&card).map_err(text)
 }
 
-/// The band sound plays in: above hearing when `inaudible`.
-fn sound_band(inaudible: bool) -> SoundBand {
-    if inaudible {
-        SoundBand::Inaudible
-    } else {
-        SoundBand::Audible
+/// The band sound plays in, by the name the page gives it: `far`,
+/// `farInaudible`, `audible` or `inaudible`.
+fn sound_band(band: &str) -> CommandResult<SoundBand> {
+    match band {
+        "far" => Ok(SoundBand::Far),
+        "farInaudible" => Ok(SoundBand::FarInaudible),
+        "audible" => Ok(SoundBand::Audible),
+        "inaudible" => Ok(SoundBand::Inaudible),
+        _ => Err(format!("no sound band {band}")),
     }
 }
 
@@ -296,11 +299,11 @@ fn sound_band(inaudible: bool) -> SoundBand {
 async fn message_sound(
     state: State<'_, AppState>,
     message_id: i64,
-    inaudible: bool,
+    band: String,
 ) -> CommandResult<tauri::ipc::Response> {
     let wav = state
         .node()?
-        .message_sound(message_id, sound_band(inaudible))
+        .message_sound(message_id, sound_band(&band)?)
         .map_err(text)?;
     Ok(tauri::ipc::Response::new(wav))
 }
@@ -310,12 +313,9 @@ async fn message_sound(
 #[tauri::command]
 async fn card_sound(
     state: State<'_, AppState>,
-    inaudible: bool,
+    band: String,
 ) -> CommandResult<tauri::ipc::Response> {
-    let wav = state
-        .node()?
-        .card_sound(sound_band(inaudible))
-        .map_err(text)?;
+    let wav = state.node()?.card_sound(sound_band(&band)?).map_err(text)?;
     Ok(tauri::ipc::Response::new(wav))
 }
 
@@ -366,14 +366,14 @@ async fn listen_heard(
         .and_then(|listener| listener.push(&node, &samples)))
 }
 
-/// One of our messages as light (§9.11): which halves of a bit are lit,
-/// as `1` and `0`, for the flashlight to blink over and over, and how long
-/// each half lasts.
+/// One of our messages as light (§9.11): which symbols are lit, as `1`
+/// and `0`, for the flashlight to blink over and over, and how long each
+/// lasts.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct LightPattern {
     pattern: String,
-    half_ms: u32,
+    symbol_ms: u32,
 }
 
 #[tauri::command]
@@ -384,7 +384,7 @@ async fn message_light(state: State<'_, AppState>, message_id: i64) -> CommandRe
             .iter()
             .map(|&lit| if lit { '1' } else { '0' })
             .collect(),
-        half_ms: carrychat_node::LIGHT_HALF_MS,
+        symbol_ms: carrychat_node::LIGHT_SYMBOL_MS,
     })
 }
 

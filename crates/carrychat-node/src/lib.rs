@@ -42,7 +42,7 @@ pub use crate::reticulum::{ReticulumPeer, ReticulumStatus};
 pub use crate::sound::{HeardCard, SoundListener};
 use crate::store::{Found, Store};
 pub use crate::sync::Link;
-pub use carrychat_proto::light::HALF_BIT_MS as LIGHT_HALF_MS;
+pub use carrychat_proto::light::SYMBOL_MS as LIGHT_SYMBOL_MS;
 pub use carrychat_proto::sound::Band as SoundBand;
 
 const DATABASE_FILE: &str = "carrychat.db";
@@ -427,7 +427,7 @@ impl Node {
     }
 
     /// One of our messages as light (§9.11): its frames, one round each,
-    /// as halves of a bit, true for lit, each `light::HALF_BIT_MS` long, to
+    /// as symbols, true for lit, each `light::SYMBOL_MS` long, to
     /// blink over and over for a device in sight that watches. Its journey
     /// shows it left as light.
     pub fn message_light(&self, message_id: i64) -> Result<Vec<bool>> {

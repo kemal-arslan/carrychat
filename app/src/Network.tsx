@@ -13,6 +13,7 @@ import {
   ShareNetworkIcon,
   ShieldCheckIcon,
   SpeakerHighIcon,
+  WaveformIcon,
   WifiHighIcon,
 } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
@@ -22,7 +23,7 @@ import { canWatchLight } from "./light";
 import { LightWatchSheet } from "./LightSheets";
 import { bluetoothLabel, internetLabel, lanLabel, linkStates, loraLabel, reticulumLabel, wifiAwareLabel } from "./links";
 import { LoraSheet } from "./LoraSheet";
-import { setSoundInaudible, soundInaudible } from "./prefs";
+import { setSoundBand, soundBand, type SoundBand } from "./prefs";
 import { ReticulumSheet } from "./ReticulumSheet";
 import { canListen, listenForMessages, useMessageListening } from "./sound";
 
@@ -55,7 +56,7 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
   const [reticulum, setReticulum] = useState<ReticulumStatus | null>(null);
   const [reticulumOpen, setReticulumOpen] = useState(false);
   const soundListening = useMessageListening();
-  const [inaudible, setInaudible] = useState(soundInaudible);
+  const [band, setBand] = useState(soundBand);
   const [lightOpen, setLightOpen] = useState(false);
   // Whether this phone's Bluetooth also reaches far on the coded PHY.
   const [longRange] = useState(() => window.CarryChatAndroid?.bluetoothLongRange?.() ?? false);
@@ -212,23 +213,37 @@ export function Network({ status, preview, onNetworkHelp, onConnect, onImport, o
             />
           </label>
         )}
-        <label className="row-item toggle" title={t.soundInaudibleHint}>
+        <label className="row-item" title={t.soundBandHint}>
           <span className="tile">
-            <EarSlashIcon size={20} />
+            {band === "inaudible" || band === "farInaudible" ? <EarSlashIcon size={20} /> : <WaveformIcon size={20} />}
           </span>
           <span className="row-text">
-            <b>{t.soundInaudibleName}</b>
-            <span>{inaudible ? t.soundInaudibleRow : t.soundAudibleRow}</span>
+            <b>{t.soundBandName}</b>
+            <span>
+              {
+                {
+                  far: t.soundBandFarRow,
+                  farInaudible: t.soundBandFarInaudibleRow,
+                  audible: t.soundBandAudibleRow,
+                  inaudible: t.soundBandInaudibleRow,
+                }[band]
+              }
+            </span>
           </span>
-          <input
-            type="checkbox"
-            checked={inaudible}
+          <select
+            value={band}
             onChange={(event) => {
-              setInaudible(event.target.checked);
-              setSoundInaudible(event.target.checked);
+              const next = event.target.value as SoundBand;
+              setBand(next);
+              setSoundBand(next);
             }}
-            aria-label={t.soundInaudibleSetting}
-          />
+            aria-label={t.soundBandName}
+          >
+            <option value="far">{t.soundBandFar}</option>
+            <option value="farInaudible">{t.soundBandFarInaudible}</option>
+            <option value="audible">{t.soundBandAudible}</option>
+            <option value="inaudible">{t.soundBandInaudible}</option>
+          </select>
         </label>
         {canWatchLight() && (
           <button className="row-item" title={t.lightHint} onClick={() => setLightOpen(true)}>

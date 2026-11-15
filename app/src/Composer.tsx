@@ -4,7 +4,7 @@ import { maxMessageBytes, onePacketBytes, radioPackets, utf8Length } from "./for
 import { useI18n } from "./i18n";
 import { LightSendSheet } from "./LightSheets";
 import { MAX_RECORDING_SECS, canRecord, shrinkPhoto, startRecording, type Recorder } from "./media";
-import { soundInaudible } from "./prefs";
+import { soundUnheard } from "./prefs";
 import { playMessage } from "./sound";
 
 type Props = {
@@ -176,7 +176,7 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
     (recording
       ? t.recording(seconds)
       : playing > 0
-        ? soundInaudible()
+        ? soundUnheard()
           ? t.soundSendingInaudible
           : t.soundSending
         : tooLong
@@ -186,7 +186,7 @@ export function Composer({ placeholder, overhead, conversation, onSend, onSendFi
               ? t.onePacket(bytes)
               : t.packets(bytes, packets)
             : bySound
-              ? soundInaudible()
+              ? soundUnheard()
                 ? t.soundModeNoteInaudible
                 : t.soundModeNote
               : byLight
